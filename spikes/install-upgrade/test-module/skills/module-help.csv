@@ -1,0 +1,2 @@
+module,skill,display-name,menu-code,description,action,args,phase,preceded-by,followed-by,required,output-location,outputs
+Guard Test,guard-hello,Guard Hello,GH,"Print guard ok to prove the module is installed.",run,,anytime,,,false,,

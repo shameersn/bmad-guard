@@ -1,0 +1,5 @@
+code: bgtest
+name: "Guard Test"
+description: "T2 spike test module: one skill that prints guard ok"
+module_version: 0.0.1
+default_selected: false
