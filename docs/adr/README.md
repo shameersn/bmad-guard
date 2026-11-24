@@ -1,0 +1,11 @@
+# Architecture decision records
+
+Format: context, options, decision, consequences. Status goes Proposed → Accepted (after team approval by PR) → Superseded by NNNN.
+
+| No. | Title | Status | Date |
+|---|---|---|---|
+| 0001 | [Stock BMAD plus an external guard module](0001-architecture.md) | Proposed | 2026-11-24 |
+| 0002 | [Enforcement layers: local hooks now, CI later](0002-enforcement-layers.md) | Proposed | 2026-11-24 |
+| 0003 | [Event logging: OTel collector → ClickHouse → Grafana](0003-event-logging.md) | Proposed | 2026-11-24 |
+| 0004 | [Ready-for-dev gate: counted, not self-scored](0004-ready-for-dev-gate.md) | Proposed | 2026-11-24 |
+| 0005 | [Repo layout: module repo, gateway repo, plans and ADRs in the repo](0005-repo-layout.md) | Proposed | 2026-11-24 |
