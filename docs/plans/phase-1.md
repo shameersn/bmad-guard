@@ -60,9 +60,10 @@ One branch and one PR per task: `feature/GUARD-1-<short-name>`.
 
 - Layout: `module/skills/`, `module/hooks/` (empty until Phase 2), `module/overrides/` (files copied into `_bmad/custom/`), `scripts/` (setup, tools), `tests/`.
 - One command runs every test: `python3 -m unittest discover`.
-- `ruff` for lint, if the team agrees (open question 3).
+- `ruff` for lint.
+- GitHub Actions job: run `unittest` and `ruff` on every PR (decided, open question 3).
 
-**Done when:** the empty layout and the test command are in place.
+**Done when:** the empty layout, the test command and the CI job are in place, and the CI job passes on the T1 PR.
 
 ### T2. Setup script (Days 1–2)
 
@@ -157,9 +158,9 @@ Phase 2 starts only when all of these are true:
 
 ## Open questions (each with a suggested default)
 
-1. **Ledger CSV:** keep writing the CSV next to the event queue? Default: no. The queue file is the local record; the CSV goes.
-2. **Module version and delivery:** how does a project get a pinned version without a private-repo install? Default: a git tag on `bmad-guard`; the developer clones it once and runs `setup_guard.py --module <path>`; the tag is written to `VERSION`.
-3. **CI for this repo:** add a GitHub Actions job that runs `unittest` (and `ruff`) on every PR? Default: yes. This adds a CI pipeline, so it needs your OK.
+1. **Ledger CSV:** keep writing the CSV next to the event queue? **Decided (Shameer, 24 Nov): no.** The queue file is the local record; the CSV goes.
+2. **Module version and delivery:** how does a project get a pinned version without a private-repo install? **Decided (Shameer, 24 Nov):** a git tag on `bmad-guard`; the developer clones it once and runs `setup_guard.py --module <path>`; the tag is written to `VERSION`.
+3. **CI for this repo:** add a GitHub Actions job that runs `unittest` (and `ruff`) on every PR? **Decided (Shameer, 24 Nov): yes.** Added in T1.
 4. **Token optimiser:** in Phase 1? Default: no. Separate decision (ADR) after Phase 1; it must follow ADR 0001 (no stock edits).
 5. **Who owns the markup decision (T7):** default: Manesh G with one BA lead.
 
