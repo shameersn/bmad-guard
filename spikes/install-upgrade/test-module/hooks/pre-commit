@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""T2 spike: test git hook. Prints a marker and allows the commit."""
+import sys
+
+print("guard ok (pre-commit)")
+sys.exit(0)

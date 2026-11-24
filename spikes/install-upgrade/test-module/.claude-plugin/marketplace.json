@@ -1,0 +1,12 @@
+{
+  "name": "bmad-guard-test",
+  "owner": "bmad-guard spike",
+  "plugins": [
+    {
+      "name": "bgtest",
+      "version": "0.0.1",
+      "description": "T2 spike test module: one skill that prints guard ok",
+      "skills": ["./skills/guard-hello"]
+    }
+  ]
+}
