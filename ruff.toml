@@ -1,0 +1,12 @@
+# Lint and format rules for bmad-guard. Spikes are throwaway and not checked.
+target-version = "py310"
+line-length = 120
+extend-exclude = ["spikes"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+    "S101",  # assert is fine in tests
+    "S603",  # subprocess without shell: we call git and our own scripts
+    "S607",  # partial executable path: "git" is resolved from PATH on purpose
+]
