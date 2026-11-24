@@ -156,13 +156,13 @@ Phase 2 starts only when all of these are true:
 - [ ] The ready-for-dev markup is agreed with the BA team.
 - [ ] A draft Phase 2 plan exists.
 
-## Open questions (each with a suggested default)
+## Open questions (all decided)
 
 1. **Ledger CSV:** keep writing the CSV next to the event queue? **Decided (Shameer, 24 Nov): no.** The queue file is the local record; the CSV goes.
 2. **Module version and delivery:** how does a project get a pinned version without a private-repo install? **Decided (Shameer, 24 Nov):** a git tag on `bmad-guard`; the developer clones it once and runs `setup_guard.py --module <path>`; the tag is written to `VERSION`.
 3. **CI for this repo:** add a GitHub Actions job that runs `unittest` (and `ruff`) on every PR? **Decided (Shameer, 24 Nov): yes.** Added in T1.
-4. **Token optimiser:** in Phase 1? Default: no. Separate decision (ADR) after Phase 1; it must follow ADR 0001 (no stock edits).
-5. **Who owns the markup decision (T7):** default: Manesh G with one BA lead.
+4. **Token optimiser:** in Phase 1? **Decided (Shameer, 24 Nov): no.** Separate decision (ADR) after Phase 1; it must follow ADR 0001 (no stock edits).
+5. **Who owns the markup decision (T7):** **Decided (Shameer, 24 Nov):** Manesh G with one BA lead.
 
 ## Risks
 
