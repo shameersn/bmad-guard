@@ -1,0 +1,30 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.htpasswd
+*.pem
+*.key
+
+# Guard event queue (local, never committed)
+.bmad-guard/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Node (BMAD installer runs)
+node_modules/
+
+# Spike scratch output (reports are committed, raw installs are not)
+spikes/**/work/
+spikes/**/data/
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
