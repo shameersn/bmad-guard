@@ -1,0 +1,61 @@
+# T3 spike collector config.
+# - basicauth/server: one htpasswd line per developer (user = developer id, password = ingest key).
+# - attributes/who: overwrite the "user" attribute with the authenticated user. Clients cannot fake it.
+# - clickhouse: insert-only DB user; the admin creates the schema (create_schema: false).
+extensions:
+  basicauth/server:
+    htpasswd:
+      file: /etc/otelcol/devkeys.htpasswd
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        include_metadata: true
+        auth:
+          authenticator: basicauth/server
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+  attributes/who:
+    actions:
+      - key: user
+        from_context: auth.username
+        action: upsert
+  # Claude Code telemetry carries the developer's email and account ids. We already
+  # know the user from the key, so drop them (no personal data in the event store).
+  attributes/scrub:
+    actions:
+      - key: user.email
+        action: delete
+      - key: user.account_uuid
+        action: delete
+      - key: user.account_id
+        action: delete
+  batch:
+    timeout: 2s
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000
+    database: guard
+    username: otel_writer
+    password: ${env:CLICKHOUSE_WRITER_PASSWORD}
+    logs_table_name: guard_events
+    create_schema: false
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+
+service:
+  extensions: [basicauth/server, health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/who, attributes/scrub, batch]
+      exporters: [clickhouse]

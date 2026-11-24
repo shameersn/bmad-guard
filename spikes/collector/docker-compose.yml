@@ -1,0 +1,54 @@
+# T3 spike: guard event pipeline. OTel collector -> ClickHouse -> Grafana.
+# All ports bind to 127.0.0.1 only.
+# Secrets: passwords come from .env (git-ignored), developer keys from work/ (git-ignored).
+# Create both with: python3 make_keys.py
+name: bmad-guard-collector
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.45.6
+    environment:
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:?run make_keys.py}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      OTEL_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:?run make_keys.py}
+      GRAFANA_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:?run make_keys.py}
+    volumes:
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ./work/clickhouse-data:/var/lib/clickhouse
+    ports:
+      - "127.0.0.1:8123:8123"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      retries: 20
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.165.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:?run make_keys.py}
+    volumes:
+      - ./otelcol/config.yaml:/etc/otelcol/config.yaml:ro
+      - ./work/devkeys.htpasswd:/etc/otelcol/devkeys.htpasswd:ro
+    ports:
+      - "127.0.0.1:4318:4318"
+    depends_on:
+      clickhouse: { condition: service_healthy }
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?run make_keys.py}
+      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@4.23.5
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GRAFANA_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:?run make_keys.py}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      clickhouse: { condition: service_healthy }
