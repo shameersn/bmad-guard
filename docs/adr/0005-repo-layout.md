@@ -1,6 +1,6 @@
 # 0005 — Repo layout: module repo, gateway repo, plans and ADRs in the repo
 
-- **Status:** Proposed. The `bmad-guard-gateway` repo is superseded by [0006](0006-local-prompt-check.md) (no gateway server).
+- **Status:** Accepted (2026-11-25). The `bmad-guard-gateway` repo is superseded by [0006](0006-local-prompt-check.md) (no gateway server).
 - **Date:** 2026-11-24
 - **Project:** Other (Experion, Guarded BMAD pilot)
 - **Deciders:** Shameer (architect), Manesh G; team approval by PR

@@ -5,7 +5,7 @@
 | Ticket | GUARD-1 |
 | Time box | 2 weeks (10 working days) |
 | Approvers | Shameer, Manesh G (PR approval). Markup format (T7): BA team too. |
-| Status | Draft, waiting for approval |
+| Status | Done (2026-11-25) |
 | Inputs | ADRs 0001–0005; spike reports T1, T2, T3 |
 
 ## Goal
@@ -161,11 +161,11 @@ Output: `docs/reports/phase-1-install-test.md` with results.
 
 Phase 2 starts only when all of these are true:
 
-- [ ] Every harvested script has unit tests (happy path, edge, error) and they pass.
-- [ ] The T9 install and upgrade test passes: no edits to upstream skill files.
-- [ ] Every override resolves on 6.12.4.
-- [ ] The ready-for-dev markup is agreed with the BA team.
-- [ ] A draft Phase 2 plan exists.
+- [x] Every harvested script has unit tests (happy path, edge, error) and they pass.
+- [x] The T9 install and upgrade test passes: no edits to upstream skill files.
+- [x] Every override resolves on 6.12.4.
+- [x] The ready-for-dev markup is agreed with the BA team.
+- [ ] A draft Phase 2 plan exists. (Ticked when the Phase 2 plan PR merges.)
 
 ## Open items for later phases
 
