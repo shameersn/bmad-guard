@@ -21,7 +21,7 @@ The gate lets a story into development only when:
 - `confidence` is 80 or more;
 - the epic has an `epic-summary.md` with a functional and a technical part.
 
-Until this format is agreed, the gate is **advisory**: it reports a block, and the user decides.
+The format is agreed, so the gate is **enforced**: a block is a hard stop. A project can set the skill's `mode` to `advisory` for the chat flow, but the write gate hook (tool-guard) blocks source writes either way.
 
 ## The format
 

@@ -368,9 +368,7 @@ class SkillTests(unittest.TestCase):
         import tomllib
 
         agent = tomllib.loads((SKILL / "customize.toml").read_text(encoding="utf-8"))["agent"]
-        self.assertEqual(
-            (agent["code"], agent["mode"], agent["min_confidence"]), ("ready-for-dev-gate", "advisory", 80)
-        )
+        self.assertEqual((agent["code"], agent["mode"], agent["min_confidence"]), ("ready-for-dev-gate", "enforce", 80))
         self.assertTrue(agent["epics_dir"])
 
     def test_markup_doc_example_blocks_for_the_documented_reasons(self):
