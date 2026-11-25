@@ -26,6 +26,7 @@ if str(SCRIPTS) not in sys.path:
 
 import pre_tool_use as pt  # noqa: E402 - found through the sys.path line above
 
+LOAD_GUARDS = pt.load_guards  # kept here: `entry()` patches pt.load_guards
 ENV_PREFIXES = ("PG", "MYSQL", "BMAD_GUARD_", "CLAUDE_PROJECT_DIR", "GIT_CONFIG")
 
 
@@ -35,7 +36,13 @@ def queue(project: Path) -> list[dict]:
 
 
 class GuardTestCase(unittest.TestCase):
-    """self.project is the project root and the working directory; self.home is the fake home folder."""
+    """self.project is the project root and the working directory; self.home is the fake home folder.
+
+    The write gate (T4) is left out of `call()` unless a test class sets `with_write_gate = True`: it blocks every
+    source write that has no approved plan, which is not what the other guards' tests are about. It has its own tests.
+    """
+
+    with_write_gate = False
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -75,7 +82,11 @@ class GuardTestCase(unittest.TestCase):
     def call(self, tool: str, tool_input: dict, **extra):
         """(payload, verdicts) from the dispatcher with the registered guards."""
         raw = json.dumps(self.payload(tool, tool_input, **extra))
-        return pt.run(raw, pt.load_guards(), root=self.project)
+        return pt.run(raw, self.guards(), root=self.project)
+
+    def guards(self, names=None):
+        """The registered guards (or the modules in `names`), without the write gate unless the class wants it."""
+        return [g for g in LOAD_GUARDS(names) if self.with_write_gate or g.name != "write-gate"]
 
     def codes(self, tool: str, tool_input: dict, **extra) -> list[str]:
         return [v.code for v in self.call(tool, tool_input, **extra)[1]]
@@ -90,6 +101,7 @@ class GuardTestCase(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.project)})
         with (
             env,
+            mock.patch.object(pt, "load_guards", self.guards),
             mock.patch.object(sys, "stdin", stdin),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),

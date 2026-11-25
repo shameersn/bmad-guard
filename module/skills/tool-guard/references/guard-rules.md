@@ -1,11 +1,11 @@
 ---
 name: guard-rules
-description: The command, path and document rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
+description: The command, path, document and write gate rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
 ---
 
 # Guard rules
 
-`pre_tool_use.py` runs four guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer.
+`pre_tool_use.py` runs five guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer.
 
 | Guard | Tools | Rules |
 |---|---|---|
@@ -13,6 +13,7 @@ description: The command, path and document rules that tool-guard enforces, how 
 | `path-guard` | Read, Edit, MultiEdit, Write, NotebookEdit, Grep, Glob, and the paths inside Bash | sensitive files and folders |
 | `document-guard` | Write, Edit, MultiEdit, NotebookEdit | approval state, guard records, guard config, approval fields, removed questions (see "Document rules") |
 | `bash-write-guard` | Bash | the same protected files, written from the shell |
+| `write-gate` | Write, Edit, MultiEdit, NotebookEdit, and the write targets of Bash | source writes without an approved plan and a ready story (see "Write gate") |
 
 Each rule has a stable id. The id is the reason code in the message and in the event. Events carry the rule id, the guard name, the tool name and the session id. They never carry the command text, a file path or file content.
 
@@ -127,6 +128,55 @@ Reading stays allowed: `cat`, `grep`, `jq`, `git diff`, `git show`, `cp` from th
 - **Warden and Sentry stay allowed.** The agent starts them as `python3 <skill>/scripts/grant_approval.py --state-file ...`. The state file is an argument of `python3`, not a write target, so the call passes; tests run the exact commands from the Warden and Sentry guides through every guard. The script writes the file itself, after the developer confirmed twice.
 - **`find . -name x -delete`** and `rm -rf .` are not this guard's: the command guard blocks them outside the scratch folders, and a folder above the project is never counted as holding a protected place.
 
+## Write gate
+
+Written for `write_gate.py`. It stops a source write until the current plan is approved and unchanged and the story is ready for development. The same check runs from the command line before coding starts: `python3 .claude/skills/tool-guard/scripts/write_gate.py --check` prints the same reasons and exits 1 when blocked. One message lists every reason; each names the next step.
+
+| Rule id | Blocks | What to do |
+|---|---|---|
+| `GATE_NO_ACTIVE_PLAN` | no bmad-build plan with `status: in-progress` (or `in-review` when none is in progress) | run bmad-build to write a plan, have the developer approve it with Warden, then set its status to `in-progress` |
+| `GATE_MANY_ACTIVE_PLANS` | more than one plan in progress (or, with none in progress, more than one in review) | the developer finishes or sets aside all but one |
+| `GATE_PLAN_NOT_APPROVED` | no approval on record for the plan, `approval_status` is not `approved`, or the approval was reopened | the developer approves with Warden |
+| `GATE_PLAN_CHANGED` | the plan was edited after approval (the build hash no longer matches) | the developer reads the change and approves again |
+| `GATE_STATE_UNREADABLE` | `approval-state.json` cannot be read | the developer fixes or restores it |
+| `GATE_STORY_NOT_FOUND` | the plan's `story` field names no file, or more than one | the developer fixes the `story` field |
+| `GATE_READY_<CODE>` | the ready-for-dev gate blocks the story. One rule per reason: `GATE_READY_OPEN_QUESTIONS`, `GATE_READY_OPEN_ASSUMPTIONS`, `GATE_READY_LOW_CONFIDENCE`, `GATE_READY_MISSING_CONFIDENCE`, `GATE_READY_RESOLUTION_MISSING_WHO_OR_WHEN`, `GATE_READY_DELETED_ITEMS`, `GATE_READY_DUPLICATE_IDS`, `GATE_READY_MALFORMED_FRONTMATTER`, `GATE_READY_MISSING_EPIC_SUMMARY`, `GATE_READY_EPIC_SUMMARY_INCOMPLETE`, `GATE_READY_UNREADABLE_STORY`, `GATE_READY_BASELINE_UNAVAILABLE` | a person answers the questions and resolves the assumptions; the message carries the ids |
+| `GATE_RECORD_FAILED` | the build session record could not be written, or the hook input has no usable session id | the developer fixes the folder or file |
+| `GATE_ERROR` | the gate cannot run: a sibling skill is missing, its settings are unreadable, or `_bmad-output` holds more than 5000 Markdown files | the developer checks the setup |
+
+The first check is the plan (Sentry's logic, `hash_mode = build`: the plan's approval-relevant text, not its progress fields). The second is the story (`ready_for_dev.py` as a library, minimum confidence 80, baseline `HEAD`). A story with `gate: generic` skips the second check (ADR 0004); the plan check still applies.
+
+### What counts as a gated write
+
+- **File tools:** Write, Edit, MultiEdit and NotebookEdit to a path inside the project that is not allowed.
+- **Allowed (no gate):** `_bmad/`, `_bmad-output/`, `docs/`, `.claude/`, `.agents/`, `.bmad-guard/`, and the project's `write_gate_allowed_paths`. The other guards still run on them: `.claude/settings.json` is still `DOC_GUARD_SCRIPTS`, and an environment file in `docs/` is still `PATH_ENV_FILE`.
+- **Scratch folders** (`tmp`, `build`, `dist`, `node_modules`, `__pycache__`, `coverage`, `.cache`, ... the same list as `rm -r`, plus the project's `scratch_folders`) and `/dev/` are not gated.
+- **Outside the project:** not gated. A write to `/tmp`, `~/notes.md` or another repository is not a source write of this project. The path guard and the document guard still apply (secrets, the guard's own files).
+- **Bash:** the explicit write targets of a command, read by the same reader as `bash-write-guard`: `>`, `>>`, `&>`, `tee`, `cp`, `mv` (destination and sources), `install`, `ln`, `rsync`, `sed -i`, `perl -i`, `rm`, `unlink`, `truncate`, `dd of=`, `curl -o`, `wget -O`, `patch`, `git rm`, `git mv`. `git checkout` and `git restore` are not read as writes (`git checkout main` has a path-like operand); `find -exec` is not either.
+- **Links** are followed: a link in `docs/` that points into `src/` is a write to `src/`. Case is ignored.
+
+### Design choices
+
+- **The current plan.** The Markdown file under `_bmad-output/` (any folder) with `status: in-progress` and a plan marker (`route`, `approval_status`, `review_loop_iteration` or `baseline_commit`). That is where `bmad-build` keeps its spec by default (`implementation_artifacts`, `spec-<slug>.md`, or `<spec_folder>/stories/<id>-<slug>.md`); step 3 sets `in-progress` before coding. A trailing `# comment` after the status (the template has one) is ignored. A plan outside `_bmad-output/` is not found.
+- **`in-review` counts when nothing is in progress.** bmad-build patches code during review (step 4), after it set the status to `in-review`. A plan that waits for review does not hide the next story's plan: `in-progress` wins when both exist.
+- **More than one plan in progress blocks** (`GATE_MANY_ACTIVE_PLANS`). The guard cannot know which story the write belongs to, and picking one would let an approved plan cover another story's code. The message names the plans.
+- **The story** is the file in the plan's `story` field: a project path, or an id such as `2-3` that matches `<id>.md` or `<id>-*.md` under `_bmad-output/` (exactly one file). A plan without `story` is its own story: it needs `epic` or `epic_summary` in its frontmatter, or `gate: generic`. Because the plan is hashed, a `gate: generic` marker in a plan cannot be added after approval; in a separate story file it can (see the limits).
+- **Ready-for-dev always enforces.** The hook does not read `mode`; it blocks. `min_confidence`, `epics_dir` and `baseline` come from the skill's own `customize.toml`, never from a project override file (an agent could edit that file).
+- **The hook asks, it does not change.** A plan that changed after approval is reported as `GATE_PLAN_CHANGED`. Sentry's own run (in bmad-build, before each coding phase) resets it to `pending-approval`.
+- **The build session record (for the independent review, T7).** When a gated write passes, the hook adds the session id to `_bmad-output/guard/builds/<story>.json`: `{"story": ..., "sessions": [...], "first_at": ..., "last_at": ...}`. The session id is the `session_id` of the hook input, never `CLAUDE_CODE_SESSION_ID` and never anything the model typed. The file holds no path and no content. The story name is the plan's `story` value when it is a plain id (`2-3`), otherwise the file name of the story (of the plan, when it has no `story`). The write is atomic (temp file, then rename). The file is committed; only the hook writes it (`DOC_GUARD_RECORD` stops the agent).
+- **If the record cannot be written, the write is blocked** (`GATE_RECORD_FAILED`). The review needs the record; a write with no proof of who built it would break the independent review. An unreadable or malformed record also blocks and is never overwritten. The record is written when the write gate passes, even if another guard then blocks the same call: an extra session id only makes the review check stricter.
+- **A bad extension file** does not open the gate: the gate then ignores the project's additions (stricter), and the path and command guards report `EXT_BAD_FILE`.
+
+### Write gate limits
+
+- **Bash is best effort.** Only explicit targets are seen. `python3 -c`, a script file, `npm install`, `make`, `mkdir`, `touch`, `node -e`, `awk -i inplace`, an editor and a target held in a variable (`> $FILE`) are not seen. With a variable, only a literal folder in front of it counts (`src/$f`).
+- **`cd` is followed in the order of the command**, a subshell is not scoped (`(cd /tmp; ls); echo x > src/a.py` is read as if the `cd` stayed). After a `cd` into a variable, only absolute targets are checked.
+- **Paths outside the project are not gated**, and the project is the folder Claude Code started in (`CLAUDE_PROJECT_DIR`).
+- **Reviewers and subagents** run in the same project. Their session id may be the parent's; this is not checked yet (T7).
+- **`gate: generic` in a story file.** The agent can edit a separate story file, and nothing stops it from adding `gate: generic`. ADR 0004 already says to review the use of the marker in the pilot.
+- **A project with a renamed output folder** (not `_bmad-output`) finds no plan, so every source write is blocked until the folder is named `_bmad-output` again.
+- **Test and build commands** that write to a source folder through a tool option (`pytest --junitxml=reports/x.xml`) are not seen; a redirect into a source folder is gated like any write.
+
 ## Project extensions
 
 Create `_bmad/custom/project/guard/tool-rules.json`. It can only add.
@@ -142,15 +192,17 @@ Create `_bmad/custom/project/guard/tool-rules.json`. It can only add.
     {"id": "payroll", "pattern": "payroll*.csv", "reason": "Payroll data."},
     {"id": "private-data", "pattern": "data/private/**"}
   ],
-  "scratch_folders": ["_work/cache", "**/generated"]
+  "scratch_folders": ["_work/cache", "**/generated"],
+  "write_gate_allowed_paths": ["scripts/dev-tools", "README.md", "**/fixtures"]
 }
 ```
 
 - **Command rule:** `id` (lower case letters, digits, `.`, `_`, `-`), `command` (a program name, no path), and any of `words` (positional words, in order), `subcommand` (git only), `flag_sets` (match when one inner list is fully present, `"-f|--force"` means either), `arg_prefixes`, `unless_flags`, and `reason` (one line). A rule with only `command` blocks every use of that program. The reason code is `PROJECT_CMD_<ID>`.
 - **Sensitive path:** a file name pattern (`payroll*.csv`, matched at any depth) or a folder (`data/private/**`, from the project root; `~/dir/**` for the home folder). The reason code is `PROJECT_PATH_<ID>`.
 - **Scratch folder:** a project folder (`tmp`, `a/b`, or `**/name` for any depth) or an absolute folder with at least two parts (`/var/cache/build`). Not `.`, `..`, `/` or `**`.
+- **Write gate path:** a project folder or file where the write gate does not ask for a plan (`scripts/dev-tools`, `README.md`, or `**/name` for any depth). Not absolute, no `..`, no `~`, no wildcard other than the leading `**/`. A scratch folder is exempt from the gate too.
 
-What a project cannot do: remove or weaken a built-in rule, add a local host, or carve a name out of a sensitive path. The guard reads the built-in list from this skill's `customize.toml` only; `_bmad/custom/tool-guard.toml` and `tool-guard.user.toml` are not read for guard rules.
+What a project cannot do: remove or weaken a built-in rule, add a local host, carve a name out of a sensitive path, or remove an allowed path of the write gate. The guard reads the built-in list from this skill's `customize.toml` only; `_bmad/custom/tool-guard.toml` and `tool-guard.user.toml` are not read for guard rules.
 
 **A bad extension file blocks.** Invalid JSON, an unknown key, a bad id, a rule that is too broad: the guards block every Bash call and every path tool call with `EXT_BAD_FILE` and name the problem (never repeating file content). The developer fixes the file by hand. The agent must not edit it to get past a block: a scratch folder added by the agent widens what `rm -r` may delete.
 
