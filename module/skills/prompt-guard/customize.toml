@@ -32,7 +32,8 @@ persistent_facts = []
 secrets = "block"
 
 # Card, NHS, Aadhaar and US SSN numbers (checksum-validated), email, phone.
-# HIPAA projects set phi = "block" in their own _bmad/custom/prompt-guard.toml.
+# HIPAA projects set phi = "block" in their own _bmad/custom/prompt-guard.toml. That one setting also decides the
+# fail mode: a crashed prompt hook or file-write scan blocks in a HIPAA project and warns elsewhere (tool-guard).
 phi = "warn"
 
 # Prompt-injection phrasing. In a user's own prompt the user is not the attacker: record only.

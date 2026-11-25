@@ -7,7 +7,7 @@ description: Checks prompt text on this machine for secrets, personal or health 
 
 ## Overview
 
-Marshal checks text before it goes to a model. A script on this machine runs pattern rules (well-known key formats, credential assignments, high-entropy tokens, card / NHS / Aadhaar / SSN numbers with their checksums, email and phone formats, injection phrasing, a token estimate) and decides allow, warn or block per category (ADR 0006). Nothing is sent anywhere. The same check runs as a Claude Code `UserPromptSubmit` hook (`scripts/prompt_guard_hook.py`, wired in Phase 2).
+Marshal checks text before it goes to a model. A script on this machine runs pattern rules (well-known key formats, credential assignments, high-entropy tokens, card / NHS / Aadhaar / SSN numbers with their checksums, email and phone formats, injection phrasing, a token estimate) and decides allow, warn or block per category (ADR 0006). Nothing is sent anywhere. The same check runs as a Claude Code `UserPromptSubmit` hook (`scripts/prompt_guard_hook.py`, wired into `.claude/settings.json` by the setup script). The tool-guard content scan reuses these rules and this skill's settings on the text the agent writes to files. A crash of the hook or of the scan blocks in a HIPAA project (`phi = "block"`, or a setting that cannot be read) and warns elsewhere.
 
 **Your Mission:** A secret never reaches a model through a prompt, and nobody learns what was found from the guard's own output.
 

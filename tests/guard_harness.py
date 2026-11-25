@@ -40,9 +40,12 @@ class GuardTestCase(unittest.TestCase):
 
     The write gate (T4) is left out of `call()` unless a test class sets `with_write_gate = True`: it blocks every
     source write that has no approved plan, which is not what the other guards' tests are about. It has its own tests.
+    The content scan (T5) is left out unless a test class sets `with_content_scan = True`: it reads the prompt-guard
+    config and scans every written text, which the other guards' tests do not want. It has its own tests.
     """
 
     with_write_gate = False
+    with_content_scan = False
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -85,8 +88,10 @@ class GuardTestCase(unittest.TestCase):
         return pt.run(raw, self.guards(), root=self.project)
 
     def guards(self, names=None):
-        """The registered guards (or the modules in `names`), without the write gate unless the class wants it."""
-        return [g for g in LOAD_GUARDS(names) if self.with_write_gate or g.name != "write-gate"]
+        """The registered guards (or the modules in `names`), without the write gate and the content scan unless the
+        class wants them."""
+        optional = {"write-gate": self.with_write_gate, "content-scan": self.with_content_scan}
+        return [g for g in LOAD_GUARDS(names) if optional.get(g.name, True)]
 
     def codes(self, tool: str, tool_input: dict, **extra) -> list[str]:
         return [v.code for v in self.call(tool, tool_input, **extra)[1]]

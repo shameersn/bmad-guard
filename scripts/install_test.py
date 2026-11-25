@@ -62,6 +62,7 @@ NO_ARGPARSE_SMOKE = {
     "path_guard.py": None,  # library
     "document_guard.py": None,  # library
     "bash_write_guard.py": None,  # library
+    "content_scan.py": None,  # library (run through pre_tool_use.py)
     "document_text.py": None,  # library
     "pre_tool_use.py": (
         [],
@@ -488,6 +489,7 @@ def check_smokes(runner: Runner, stage: str, sandbox: Path) -> None:
 
     check_pre_tool_use(runner, stage, sandbox)
     check_write_gate(runner, stage, sandbox)
+    check_content_scan(runner, stage, sandbox)
 
 
 # (label, tool, tool input, expected exit code, expected reason code or "") for the PreToolUse hook as Claude Code
@@ -607,6 +609,54 @@ def check_write_gate(runner: Runner, stage: str, sandbox: Path) -> None:
     proc, took = runner.run([sys.executable, str(gate), "--check"], sandbox)
     ok = proc.returncode == 0 and "OK" in proc.stdout
     runner.add(stage, "write_gate --check passes for the approved plan", ok, "" if ok else tail(proc), took)
+
+
+# Fake values, built here so no key-shaped literal sits in this file (the same habit as the unit tests).
+FAKE_KEY = "gh" + "p_" + "a1" * 18
+FAKE_PHONE = "(202) 311-" + "0187"
+HIPAA_CONFIG_REL = "_bmad/custom/prompt-guard.toml"
+
+
+def check_content_scan(runner: Runner, stage: str, sandbox: Path) -> None:
+    """The content scan end to end: a fake key blocks; a fake phone number warns, or blocks in a HIPAA project."""
+    hook = sandbox / ".claude/skills/tool-guard/scripts/pre_tool_use.py"
+    target = str(sandbox / "docs/smoke-content.txt")  # docs/ is not gated by the write gate
+
+    def call(content: str):
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {"file_path": target, "content": content},
+            "session_id": "s-smoke-content",
+            "cwd": str(sandbox),
+        }
+        return runner.run([sys.executable, str(hook)], sandbox, stdin=json.dumps(payload))
+
+    proc, took = call(f"token = {FAKE_KEY}\n")
+    ok = proc.returncode == 2 and "CONTENT_SECRET" in proc.stderr and FAKE_KEY not in proc.stderr
+    runner.add(stage, "tool-guard PreToolUse blocks a fake key in a written file", ok, "" if ok else tail(proc), took)
+
+    proc, took = call("print('plain text')\n")
+    ok = proc.returncode == 0 and not proc.stdout and not proc.stderr
+    runner.add(stage, "tool-guard PreToolUse allows a plain written file", ok, "" if ok else tail(proc), took)
+
+    proc, took = call(f"phone {FAKE_PHONE}\n")
+    ok = proc.returncode == 0 and "CONTENT_PHI" in proc.stdout and FAKE_PHONE not in proc.stdout
+    runner.add(
+        stage, "tool-guard PreToolUse warns about PHI in a non-HIPAA project", ok, "" if ok else tail(proc), took
+    )
+
+    config = sandbox / HIPAA_CONFIG_REL
+    if config.exists():
+        runner.add(stage, "tool-guard PreToolUse blocks PHI in a HIPAA project", False, f"{HIPAA_CONFIG_REL} exists")
+        return
+    config.write_text('[agent]\nphi = "block"\n', encoding="utf-8")
+    try:
+        proc, took = call(f"phone {FAKE_PHONE}\n")
+    finally:
+        config.unlink()
+    ok = proc.returncode == 2 and "CONTENT_PHI" in proc.stderr and FAKE_PHONE not in proc.stderr
+    runner.add(stage, "tool-guard PreToolUse blocks PHI in a HIPAA project", ok, "" if ok else tail(proc), took)
 
 
 def check_pre_tool_use(runner: Runner, stage: str, sandbox: Path) -> None:

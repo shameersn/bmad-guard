@@ -456,7 +456,7 @@ class ProtectedPlaceTests(TextGuardCase):
         for rel in (
             "_bmad/custom/project/guard-notes.md",
             "_bmad/custom/project/bmad-build/context.md",
-            "_bmad/custom/tool-guard.toml",
+            "_bmad/custom/bmad-prd.toml",  # tool-guard.toml is DOC_GUARD_SCRIPTS (T5 review)
             "_bmad/custom/project.json",
         ):
             with self.subTest(rel=rel):
@@ -634,6 +634,13 @@ class GuardScriptsTests(TextGuardCase):
             self.codes("Edit", {"file_path": ".claude/settings.json", "old_string": "a", "new_string": "b"}),
             ["DOC_GUARD_SCRIPTS"],
         )
+
+    def test_the_developer_overrides_of_guard_skills_are_blocked(self):
+        for name in ("prompt-guard", "tool-guard", "ready-for-dev-gate", "agent-approval-grant"):
+            with self.subTest(name=name):
+                self.assertEqual(self.save(f"_bmad/custom/{name}.toml", 'phi = "warn"'), ["DOC_GUARD_SCRIPTS"])
+        self.assertEqual(self.save("_bmad/custom/bmad-prd.toml", "x"), [])
+        self.assertEqual(self.save("_bmad/custom/prompt-guard-notes.toml", "x"), [])
 
     def test_files_listed_in_the_setup_manifest_are_blocked(self):
         manifest = {"version": "1", "files": {"_bmad/custom/bmad-build.toml": "abc", "../outside.txt": "x"}}

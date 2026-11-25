@@ -97,6 +97,8 @@ def guard_files(root: Path) -> list[str]:
     """Project-relative files and folders that make up the guard. The manifest adds what setup installed; a missing
     or broken manifest leaves the fixed list (the folder that holds the manifest is protected itself)."""
     found = [GUARD_DIR_REL, *SETTINGS_FILES, *(f"{d}/{s}" for d in SKILL_DIRS for s in GUARD_SKILLS)]
+    # The developer's override of a guard skill (e.g. prompt-guard.toml with phi = "block" in a HIPAA project).
+    found += [f"_bmad/custom/{s}.toml" for s in GUARD_SKILLS]
     try:
         files = json.loads((root / MANIFEST_REL).read_text(encoding="utf-8")).get("files")
     except (OSError, ValueError, AttributeError):

@@ -4,7 +4,8 @@
 """Shared pieces of the tool-guard hook scripts (Phase 2, T1).
 
 - `Verdict` and `Guard`: the contract a guard module follows. A guard module defines `GUARDS = [Guard(...)]`;
-  `pre_tool_use.py` imports it once its module name is listed in `GUARD_MODULES`.
+  `pre_tool_use.py` imports it once its module name is listed in `GUARD_MODULES`. A verdict blocks by default;
+  `severity="warn"` lets the call go ahead and tells the developer and the model (T5, content scan).
 - `read_payload()`: parse the hook JSON that Claude Code sends on stdin.
 - `project_root()`, `emit()`: find the project and record one guard event through Ledger. Never raises.
 
@@ -25,14 +26,20 @@ from pathlib import Path
 GUARD = "tool-guard"
 
 
+BLOCK, WARN = "block", "warn"
+
+
 @dataclass(frozen=True)
 class Verdict:
-    """One reason to block a tool call. `reason` must never contain file content or command text."""
+    """One reason to block a tool call, or (severity "warn") one warning. `reason` and `detail` must never contain
+    file content or command text."""
 
     code: str  # stable reason code, e.g. "BAD_HOOK_INPUT"
     reason: str  # one short sentence for the developer and the model
     guard: str = ""  # name of the guard that decided
     path: str = ""  # project-relative path involved, if any
+    severity: str = BLOCK  # "block" stops the call; "warn" lets it through with a message
+    detail: str = ""  # short text for the event only (rule ids, an error type); never content
 
 
 @dataclass(frozen=True)
@@ -42,6 +49,14 @@ class Guard:
     name: str
     tools: tuple[str, ...]
     check: Callable[[dict, Path], list[Verdict]]  # (hook payload, project root) -> [] means allow
+
+
+def blocks(verdicts: list[Verdict]) -> list[Verdict]:
+    return [v for v in verdicts if v.severity != WARN]
+
+
+def warnings(verdicts: list[Verdict]) -> list[Verdict]:
+    return [v for v in verdicts if v.severity == WARN]
 
 
 def read_payload(raw: str) -> dict:

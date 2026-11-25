@@ -56,6 +56,7 @@ FRAGMENTS = (  # for a target with a variable in it: the part of the path that g
     (dg.GUARD_DIR_REL, "DOC_GUARD_SCRIPTS"),
     (".claude/settings", "DOC_GUARD_SCRIPTS"),
     *((f"/{skill}/", "DOC_GUARD_SCRIPTS") for skill in dg.GUARD_SKILLS),
+    *((f"_bmad/custom/{skill}.toml", "DOC_GUARD_SCRIPTS") for skill in dg.GUARD_SKILLS),
 )
 COPY_COMMANDS = {"cp", "install", "ln", "rsync", "scp", "mv"}
 REMOVE_COMMANDS = {"rm", "unlink", "rmdir", "shred", "truncate"}
