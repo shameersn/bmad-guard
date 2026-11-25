@@ -26,6 +26,7 @@ from pathlib import Path
 GUARD = "git-hooks"
 SKILL_FOLDERS = (".claude/skills", ".agents/skills")
 INSTALL_HINT = "Run scripts/setup_guard.py from the bmad-guard module to install it."
+_warned: list[str] = []  # the event warning is printed once per run, not once per event
 
 
 class HookError(Exception):
@@ -142,4 +143,6 @@ def emit(root: Path, stage: str, verdict: str, reason_code: str, agent: str, **f
         event = ge.build_event(GUARD, stage, verdict, reason_code, project=_project_name(root), agent=agent, **fields)
         ge.emit(event, ge.Config(queue=root / ge.QUEUE_REL))  # no endpoint: the queue only, no network
     except Exception as err:  # logging never changes a decision
-        print(f"bmad-guard: warning: event not recorded ({type(err).__name__})", file=sys.stderr)
+        if not _warned:
+            _warned.append(type(err).__name__)
+            print(f"bmad-guard: warning: event not recorded ({type(err).__name__})", file=sys.stderr)

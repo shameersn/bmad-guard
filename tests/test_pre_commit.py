@@ -10,10 +10,17 @@ writes. Key-shaped fakes are built at run time; no literal token is committed. A
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import runpy
+import shutil
+import subprocess
+import sys
 import unittest
+from unittest import mock
 
-from tests.hook_harness import FAKE, HOOKS_REL, LIST_REL, MARKER, STATE_REL, HookTestCase
+from tests.hook_harness import FAKE, HOOKS, HOOKS_REL, LIST_REL, MARKER, STATE_REL, HookTestCase
 
 KEY = FAKE["github-token"]
 PHONE = FAKE["phone-us"]
@@ -482,6 +489,23 @@ class TechStackTests(HookTestCase):
         proc = self.approve(LIST_REL, "tech-stack")
         self.assertTrue(json.loads(proc.stdout)["git_commit"]["ok"], proc.stdout)
 
+    def test_deleting_an_approved_list_blocks_until_it_is_reopened(self):
+        self.listed()
+        self.git("rm", "-q", "--", LIST_REL)
+        self.write("package.json", package("react", "pg"))
+        self.stage("package.json")
+        proc = self.hook()
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("COMMIT_TECH_STACK_REMOVED", proc.stderr)
+        self.git("checkout", "-q", "HEAD", "--", LIST_REL)
+        self.git("checkout", "-q", "HEAD", "--", "package.json")
+        self.warden("reopen_document.py", "--doc-path", LIST_REL, "--doc-type", "tech-stack", "--state-file", STATE_REL)
+        self.stage(LIST_REL, STATE_REL)
+        self.assertEqual(self.hook().returncode, 0)  # reopening is allowed
+        self.commit_all("reopen the list")
+        self.git("rm", "-q", "--", LIST_REL)
+        self.assertQuiet(self.hook())  # a list that is not in force may be deleted (an info event, nothing else)
+
     def test_a_bad_list_blocks(self):
         for text in (
             '---\nstatus: draft\n---\n[allowed]\nrust = ["serde"]\n',
@@ -561,12 +585,13 @@ class FailClosedTests(HookTestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("the checks cannot start", proc.stderr)
 
-    def test_a_missing_ledger_warns_but_does_not_block(self):
-        self.stage_plain()
+    def test_a_missing_ledger_warns_once_and_does_not_block(self):
+        self.write("docs/note.md", f"Phone {PHONE}\n")  # a warning and the allow event: two events to record
+        self.stage("docs/note.md")
         (self.project / ".claude/skills/agent-project-logger/scripts/guard_events.py").unlink()
         proc = self.hook()
         self.assertEqual(proc.returncode, 0)
-        self.assertIn("event not recorded", proc.stderr)
+        self.assertEqual(proc.stderr.count("event not recorded"), 1)
 
     def test_the_hook_does_not_send_events_even_when_a_collector_is_set(self):
         self.write("src/app.py", f"token = '{KEY}'\n")
@@ -586,6 +611,20 @@ class FailClosedTests(HookTestCase):
         self.hook()
         found = [p for p in self.project.rglob("__pycache__") if ".git" not in p.parts]
         self.assertEqual(found, [])
+
+
+class LauncherTests(unittest.TestCase):
+    def test_an_old_python_blocks_with_a_plain_message(self):
+        err = io.StringIO()
+        with (
+            mock.patch.object(sys, "version_info", (3, 9, 6, "final", 0)),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            runpy.run_path(str(HOOKS / "pre-commit"), run_name="__main__")
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("needs Python 3.10 or later", err.getvalue())
+        self.assertIn("3.9", err.getvalue())
 
 
 class EventTests(HookTestCase):
@@ -612,6 +651,25 @@ class EventTests(HookTestCase):
 
 
 class RealCommitTests(HookTestCase):
+    def test_the_first_commit_of_a_new_repository_is_checked_too(self):
+        fresh = self.project.parent / "fresh"
+        shutil.copytree(self.project / ".claude", fresh / ".claude")
+        shutil.copytree(self.project / HOOKS_REL, fresh / HOOKS_REL)
+        run = lambda *a: subprocess.run(["git", *a], cwd=fresh, capture_output=True, text=True, env=self.env)  # noqa: E731
+        run("init", "-q", "-b", "main")
+        run("config", "core.hooksPath", HOOKS_REL)
+        run("config", "user.name", "dev")
+        run("config", "user.email", "dev@example.invalid")
+        (fresh / "src").mkdir()
+        (fresh / "src/app.py").write_text(f"token = '{KEY}'\n")
+        run("add", "src/app.py")
+        proc = run("commit", "-q", "-m", "first")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("COMMIT_SECRET", proc.stderr)
+        (fresh / "src/app.py").write_text("print('hello')\n")
+        run("add", "src/app.py")
+        self.assertEqual(run("commit", "-q", "-m", "first").returncode, 0)
+
     def head(self):
         return self.git("rev-parse", "HEAD").stdout.strip()
 

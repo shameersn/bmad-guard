@@ -38,6 +38,7 @@ a warning exits 0 with a message on stderr. Any failure of the hook itself block
      COMMIT_TECH_STACK_UNAPPROVED   a dependency was added but the list has no matching Warden entry (never approved,
                                     edited since, or reopened). Blocks: the list could be edited in the same commit.
      COMMIT_TECH_STACK_BAD_FILE     the list, or a dependency file, cannot be read. Blocks.
+     COMMIT_TECH_STACK_REMOVED      the commit deletes a list that is approved and in force. Blocks: reopen it first.
      COMMIT_DEPENDENCY_UNCHECKED    go.mod, Cargo.toml, ... changed, or the list does not govern that ecosystem. Warns.
      COMMIT_NO_TECH_STACK           no list, and a dependency file changed. Event only, no message.
 
@@ -373,12 +374,23 @@ def check_documents(root: Path, paths: list[str], head: bool, approvals: Approva
 # --- 3. tech stack -----------------------------------------------------------------------------------------------
 
 
-def check_tech_stack(root: Path, paths: list[str], head: bool, approvals: Approvals) -> list[Reason]:
+def check_tech_stack(root: Path, paths: list[str], head: bool, approvals: Approvals, list_gone: bool) -> list[Reason]:
     deps = [p for p in paths if ts.kind_of(p)]
-    if not deps and LIST_REL not in paths:
+    if not deps and LIST_REL not in paths and not list_gone:
         return []
     blob = lib.index_blob(root, LIST_REL)
     if blob is None:
+        old = lib.head_blob(root, LIST_REL, head)
+        if old is not None and approvals.status(LIST_REL, lib.text_of(old)) == "ok":
+            return [
+                Reason(
+                    "COMMIT_TECH_STACK_REMOVED",
+                    f"this commit deletes {LIST_REL}, which the architect approved. A list is retired in two steps: "
+                    "reopen it with Warden (agent-approval-grant, Reopen Document) and commit that, then delete it.",
+                    BLOCK,
+                    "tech-stack",
+                )
+            ]
         return [Reason("COMMIT_NO_TECH_STACK", "", INFO, "tech-stack", str(len(deps)))] if deps else []
     text = lib.text_of(blob)
     try:
@@ -468,12 +480,18 @@ def check_tech_stack(root: Path, paths: list[str], head: bool, approvals: Approv
 # --- run ---------------------------------------------------------------------------------------------------------
 
 
-def run_checks(root: Path, paths: list[str]) -> list[Reason]:
+def list_deleted(root: Path) -> bool:
+    """True when this commit deletes the tech-stack list (staged_paths does not list deleted files)."""
+    out = lib.git(root, "diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=D", "--", LIST_REL)
+    return bool(out.strip(b"\0"))
+
+
+def run_checks(root: Path, paths: list[str], list_gone: bool) -> list[Reason]:
     head = lib.has_head(root)
     approvals = Approvals(root)
     reasons = scan(root, paths, added_text(root, paths))
     reasons += check_documents(root, paths, head, approvals)
-    reasons += check_tech_stack(root, paths, head, approvals)
+    reasons += check_tech_stack(root, paths, head, approvals, list_gone)
     if approvals.loaded and approvals.entries is None:
         reasons.append(
             Reason(
@@ -536,10 +554,11 @@ def main() -> int:
     paths: list[str] = []
     try:
         paths = staged_paths(root)
-        if not paths:
+        list_gone = list_deleted(root)
+        if not paths and not list_gone:
             record(root, [], 0, nothing=True)
             return 0
-        reasons = run_checks(root, paths)
+        reasons = run_checks(root, paths, list_gone)
     except Exception as err:  # any failure blocks: a hook that cannot check must not wave a commit through
         cause = str(err) if isinstance(err, lib.HookError) else type(err).__name__
         reasons = [
