@@ -39,7 +39,7 @@ We choose **Option A** (Shameer, 25 Nov), because it removes the data exposure i
 
 Design:
 - **Checks** (all local, standard library):
-  - secrets: a vendored subset of well-known secret patterns (gitleaks rules, MIT licence) plus an entropy check for random-looking strings;
+  - secrets: well-known public key formats, written by hand from public documentation (gitleaks-style; vendoring gitleaks itself would need a separate download approval), plus an entropy check for random-looking strings;
   - PII / PHI identifiers: patterns with validation (Luhn for card numbers, mod-11 for NHS numbers, Verhoeff for Aadhaar) to cut false alarms;
   - prompt injection: patterns, **record only** (in a user's own prompt the user is not the attacker);
   - size: a token estimate.
