@@ -88,10 +88,11 @@ class RunTests(unittest.TestCase):
         raw = payload if isinstance(payload, str) else json.dumps(payload)
         return pt.run(raw, guards, root=Path("/fake"))
 
-    def test_no_guards_registered_allows_a_valid_call(self):
-        self.assertEqual(pt.GUARD_MODULES, ())  # T1 registers nothing; T2-T5 add modules
+    def test_registered_guards_allow_a_harmless_call(self):
+        self.assertEqual(pt.GUARD_MODULES, ("command_guard",))  # T2 registers its guards here; T3-T5 add modules
         self.assertEqual(self.run_call(CALL, [])[1], [])
         self.assertEqual(self.run_call(CALL, pt.load_guards())[1], [])
+        self.assertEqual([g.name for g in pt.load_guards()], ["command-guard"])
 
     def test_malformed_input_blocks(self):
         bad = [

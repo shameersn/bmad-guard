@@ -57,10 +57,12 @@ NO_ARGPARSE_SMOKE = {
     "hook_common.py": None,  # library
     "hook_wiring.py": None,  # library
     "shell_parse.py": None,  # library
+    "guard_config.py": None,  # library
+    "command_guard.py": None,  # library
     "pre_tool_use.py": (
         [],
-        '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}',
-    ),  # no guards yet
+        '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}}',
+    ),  # a harmless command: allowed, exit 0
     "session_start.py": ([], "{}"),  # silent and exit 0 when hooksPath and the wiring are in place
 }
 
