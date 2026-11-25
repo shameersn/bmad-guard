@@ -190,7 +190,7 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 - **Pushed commits** = `git rev-list <local> --not <remote sha> --remotes=<remote>`; new branch, delete, tag and non-commit objects are handled (tests with a real bare remote).
 - **Subagent session ids stay unverified** (open check 7, todo below). The hook refuses the record call when the input has `agent_id` (a field the docs list; not run by us). Docs say: run the review in a fresh top-level session.
 - **Install test:** `review_record.py --help` smoke, and an end-to-end case: a push with no record is blocked, the hook writes the record from a fresh session, the record is committed through pre-commit, the push goes through, and the queue holds `PUSH_NO_RECORD` and `PUSH_ALLOWED`.
-- **T7 review decisions:** to be filled in at the T7 review.
+- **T7 review decisions:** a session that built any story cannot review any story; the record call is refused when the hook input has `agent_id` (subagent); one review of the branch tip covers all earlier unpushed source commits (pilot, then ask the teams); the record is written by the `PreToolUse` hook before the permission prompt (a `PostToolUse` hook is deferred); the review record is committed apart from code commits (enforced through "covered").
 
 ### T8. Red-team suite and Gate 2 (Days 13–15)
 
