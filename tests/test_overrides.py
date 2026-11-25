@@ -112,6 +112,20 @@ class OverrideTests(unittest.TestCase):
                         self.assertNotIn(word, text)
 
     @needs_toml
+    def test_bmad_build_runs_the_write_gate_check_before_coding(self):
+        facts = load(OVERRIDES / "bmad-build.toml")["workflow"]["persistent_facts"]
+        gate = [f for f in facts if f.startswith("Write gate (Guarded BMAD)")]
+        self.assertEqual(len(gate), 1)
+        self.assertIn('tool-guard/scripts/write_gate.py" --check', gate[0])
+        self.assertTrue((MODULE_SKILLS / "tool-guard/scripts/write_gate.py").is_file())
+        # it comes after the approval and Sentry step and before the scope rule
+        order = [f.split(" (Guarded BMAD")[0] for f in facts if "(Guarded BMAD" in f]
+        self.assertLess(order.index("Approval and gate"), order.index("Write gate"))
+        self.assertLess(order.index("Write gate"), order.index("Scope"))
+        for name in ("Ready-for-dev gate", "Plan-first hard gate", "Plan confidence", "Lifecycle log"):
+            self.assertIn(name, order)
+
+    @needs_toml
     def test_approval_uses_its_own_field(self):
         for name in ("agent-approval-gate-check", "agent-approval-grant"):
             self.assertEqual(load(OVERRIDES / f"{name}.toml")["agent"]["status_field"], "approval_status")
