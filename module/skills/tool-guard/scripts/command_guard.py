@@ -53,7 +53,6 @@ GIT_ARGS = {
     "clean": ("e", ("--exclude",)),
     "branch": ("u", ("--set-upstream-to",)),
 }
-GIT_GLOBAL_WITH_VALUE = {"-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--attr-source"}
 
 
 # --- context ---------------------------------------------------------------------------------------
@@ -112,37 +111,13 @@ class Context:
 # --- git -------------------------------------------------------------------------------------------
 
 
-def git_split(args: list[sp.Word]) -> tuple[list[str], str, list[sp.Word]]:
-    """(values of -c options, subcommand, words after the subcommand) for `git [global options] <subcommand> ...`."""
-    overrides: list[str] = []
-    i = 0
-    while i < len(args):
-        text = args[i].text
-        if text == "-c":
-            overrides.append(args[i + 1].text if i + 1 < len(args) else "")
-            i += 2
-        elif text in GIT_GLOBAL_WITH_VALUE:
-            i += 2
-        elif text.startswith("--config-env="):
-            overrides.append(text.partition("=")[2])
-            i += 1
-        elif text.startswith("-c") and not text.startswith("--"):
-            overrides.append(text[2:])
-            i += 1
-        elif text.startswith("-"):
-            i += 1
-        else:
-            return overrides, text, args[i + 1 :]
-    return overrides, "", []
-
-
 def check_git_hooks_path(inv: sp.Invocation, ctx: Context) -> bool:
     """Any write to core.hooksPath: `git config`, `git -c`, or GIT_CONFIG_* in the environment. Reading it is fine."""
     if inv.name.lower() != "git":
         return False
     if any("hookspath" in value.lower() for key, value in inv.env.items() if key.startswith("GIT_CONFIG")):
         return True
-    overrides, sub, rest = git_split(inv.args)
+    overrides, sub, rest = sp.git_split(inv.args)
     if any("hookspath" in value.lower() for value in overrides):
         return True
     if sub != "config":
@@ -524,7 +499,7 @@ def match_data_rule(rule: dict, inv: sp.Invocation) -> bool:
     if inv.name.lower() != rule["command"].lower():
         return False
     if inv.name.lower() == "git":
-        _, sub, rest = git_split(inv.args)
+        _, sub, rest = sp.git_split(inv.args)
         if rule.get("subcommand") and sub not in rule["subcommand"]:
             return False
         opts = sp.parse_options(rest, *GIT_ARGS.get(sub, ("", ())))

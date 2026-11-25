@@ -55,6 +55,21 @@ REASONS = {
 }
 GREP_COMMANDS = {"grep", "egrep", "fgrep", "rg", "ag", "ack"}
 TEXT_COMMANDS = {"echo", "printf"}
+GIT_TEXT_OPTIONS = {
+    "-m",
+    "-S",
+    "-G",
+    "--message",
+    "--grep",
+    "--author",
+    "--committer",
+    "--pretty",
+    "--format",
+    "--date",
+    "--since",
+    "--until",
+    "--exec",
+}
 GREP_VALUE_OPTIONS = {"-m", "-A", "-B", "-C", "-d", "-D", "--max-count", "--after-context", "--before-context"}
 GREP_PATTERN_OPTIONS = {"-e", "--regexp"}
 KEY_VALUE_RE = re.compile(r"^-{0,2}[A-Za-z_][A-Za-z0-9_-]*=")
@@ -140,13 +155,14 @@ class Matcher:
             return found
         literal = text[: min((text.index(c) for c in "*?[" if c in text), default=len(text))]
         if "$" not in text:
-            for candidate in {
-                os.path.normpath(os.path.join(self.cwd, literal)),
-                os.path.realpath(os.path.join(self.cwd, literal)),
-            }:
+            plain = os.path.normpath(os.path.join(self.cwd, literal))
+            real = os.path.realpath(plain)
+            for candidate in {plain, real}:
                 for rule in self.dirs:
                     if candidate == rule.folder or candidate.startswith(rule.folder + os.sep):
                         found.append(rule.code)
+            if real != plain and literal == text:  # a link to a sensitive file name
+                found += self._name_hits(os.path.basename(real))
         name = text.rstrip("/").rsplit("/", 1)[-1]
         if not name.startswith("$"):
             found += self._name_hits(name)
@@ -189,12 +205,34 @@ def _grep_exempt(args: list[sp.Word]) -> set[int]:
     return skip
 
 
+def _git_text(args: list[sp.Word]) -> set[int]:
+    """Positions of words in a git command that are text, not paths: messages, -S/-G strings, git grep patterns."""
+    skip: set[int] = set()
+    for i, word in enumerate(args):
+        key, eq, _ = word.text.partition("=")
+        if word.text in GIT_TEXT_OPTIONS:
+            skip.update({i, i + 1})
+        elif eq and key in GIT_TEXT_OPTIONS:
+            skip.add(i)
+        elif len(word.text) > 2 and word.text[:2] in GIT_TEXT_OPTIONS and word.text[1] != "-":  # -G.env, -mtext
+            skip.add(i)
+    _, sub, rest = sp.git_split(args)
+    if sub == "grep":
+        offset = len(args) - len(rest)
+        skip |= {offset + k for k in _grep_exempt(rest)}
+    return skip
+
+
 def bash_words(invocations: list[sp.Invocation]) -> list[str]:
     words: list[str] = []
     for inv in invocations:
         name = inv.name.lower()
         args = inv.args
-        skip = _grep_exempt(args) if name in GREP_COMMANDS else set()
+        skip: set[int] = set()
+        if name in GREP_COMMANDS:
+            skip = _grep_exempt(args)
+        elif name == "git":
+            skip = _git_text(args)
         if name not in TEXT_COMMANDS:
             words += [w.text for i, w in enumerate(args) if i not in skip]
         words += [w.text for op, w in inv.redirects if not op.endswith("&")]

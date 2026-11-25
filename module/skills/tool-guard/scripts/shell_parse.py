@@ -746,3 +746,30 @@ def _find_exec(
             if inner:
                 yield from _expand(inner, env, command, stdin, None, depth, False)
         i += 1
+
+
+GIT_GLOBAL_WITH_VALUE = {"-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--attr-source"}
+
+
+def git_split(args: list[Word]) -> tuple[list[str], str, list[Word]]:
+    """(values of -c options, subcommand, words after the subcommand) for `git [global options] <subcommand> ...`."""
+    overrides: list[str] = []
+    i = 0
+    while i < len(args):
+        text = args[i].text
+        if text == "-c":
+            overrides.append(args[i + 1].text if i + 1 < len(args) else "")
+            i += 2
+        elif text in GIT_GLOBAL_WITH_VALUE:
+            i += 2
+        elif text.startswith("--config-env="):
+            overrides.append(text.partition("=")[2])
+            i += 1
+        elif text.startswith("-c") and not text.startswith("--"):
+            overrides.append(text[2:])
+            i += 1
+        elif text.startswith("-"):
+            i += 1
+        else:
+            return overrides, text, args[i + 1 :]
+    return overrides, "", []

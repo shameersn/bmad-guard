@@ -302,6 +302,34 @@ class BashPathTests(GuardTestCase):
         self.assertEqual(self.bash("grep -m 3 pattern .env"), ["PATH_ENV_FILE"])
         self.assertEqual(self.bash("grep -f .env x"), ["PATH_ENV_FILE"])
 
+    def test_git_message_and_search_text_are_not_paths(self):
+        self.assertAllows(
+            "git log --grep=.env",
+            "git log -S .env",
+            "git log -G.env --oneline",
+            "git log --author=.env",
+            "git grep .env",
+            "git grep -n -e .env -- src",
+            "git commit -m .env",
+            "git commit --message .env",
+        )
+        self.assertEqual(self.bash("git grep -f .env x"), ["PATH_ENV_FILE"])
+        self.assertEqual(self.bash("git log -- .env"), ["PATH_ENV_FILE"])
+        self.assertEqual(self.bash("git show HEAD:.env"), ["PATH_ENV_FILE"])
+
+    def test_option_letters_of_other_commands_do_not_hide_a_path(self):
+        for command in ("cat -e .env", "less -m .env", "head -S .env", "tail -G .env", "sed -e p .env", "cp -m .env x"):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command), ["PATH_ENV_FILE"], command)
+
+    def test_a_link_to_a_sensitive_file_name_is_followed(self):
+        (self.project / "link-one").symlink_to(self.project / "id_rsa")
+        (self.project / "link-two").symlink_to(self.project / ".env.local")
+        self.assertEqual(self.codes("Read", {"file_path": str(self.project / "link-one")}), ["PATH_PRIVATE_KEY"])
+        self.assertEqual(self.bash("cat link-two"), ["PATH_ENV_FILE"])
+        (self.project / "link-three").symlink_to(self.project / "readme.md")
+        self.assertEqual(self.bash("cat link-three"), [])
+
     def test_relative_paths_are_resolved_from_the_call_directory(self):
         self.assertEqual(self.bash("cat .ssh/config", cwd=str(self.home)), ["PATH_SSH_DIR"])
         self.assertEqual(self.bash("cat ../home/.ssh/config"), ["PATH_SSH_DIR"])

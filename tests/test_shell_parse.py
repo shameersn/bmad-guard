@@ -280,6 +280,23 @@ class NestedScriptTests(unittest.TestCase):
         self.assertEqual(names("find . -name x -type f"), ["find"])
 
 
+class GitSplitTests(unittest.TestCase):
+    def split(self, text: str):
+        overrides, sub, rest = sp.git_split([sp.Word(t) for t in text.split()])
+        return overrides, sub, [w.text for w in rest]
+
+    def test_global_options_are_skipped_and_config_overrides_are_collected(self):
+        self.assertEqual(self.split("push --force origin"), ([], "push", ["--force", "origin"]))
+        self.assertEqual(self.split("-C dir push"), ([], "push", []))
+        self.assertEqual(self.split("-c a=1 -c b=2 --no-pager log -n 3"), (["a=1", "b=2"], "log", ["-n", "3"]))
+        self.assertEqual(self.split("-ca=1 status"), (["a=1"], "status", []))
+        self.assertEqual(self.split("--config-env=a=VAR --git-dir x commit"), (["a=VAR"], "commit", []))
+
+    def test_no_subcommand(self):
+        self.assertEqual(self.split("--version"), ([], "", []))
+        self.assertEqual(self.split(""), ([], "", []))
+
+
 class OptionTests(unittest.TestCase):
     def opts(self, text: str, short_arg: str = "", long_arg=()):
         words = [sp.Word(t) for t in text.split()]
