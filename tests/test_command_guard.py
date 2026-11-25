@@ -156,6 +156,29 @@ class DestructiveCommandTests(GuardTestCase):
             "git log -f",
         )
 
+    def test_git_push_that_deletes_remote_refs(self):
+        for command in (
+            "git push origin --delete old-branch",
+            "git push -d origin old-branch",
+            "git push origin :old-branch",
+            "git push origin :refs/tags/v1",
+            "git push --mirror",
+            "git push --prune origin",
+            "git -C other push origin --delete x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command), ["CMD_GIT_PUSH_DELETE"], command)
+
+    def test_git_push_delete_lookalikes_are_allowed(self):
+        self.assertAllows(
+            "git push origin feature/a:feature/a",
+            "git push origin HEAD:main",
+            "git branch -d merged",
+            "git fetch --prune",
+            "git remote prune origin",
+            "git tag -d v1",
+        )
+
     def test_git_reset_hard(self):
         self.assertBlocks("git reset --hard", "CMD_GIT_RESET_HARD")
         self.assertBlocks("git reset --hard HEAD~1", "CMD_GIT_RESET_HARD")

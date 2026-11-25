@@ -63,6 +63,14 @@ arg_prefixes = ["+"]
 reason = "A force push (also --force-with-lease and +refspec) rewrites shared history. The developer runs it."
 
 [[agent.command_rules]]
+id = "CMD_GIT_PUSH_DELETE"
+command = "git"
+subcommand = "push"
+flag_sets = [["-d|--delete"], ["--mirror"], ["--prune"]]
+arg_prefixes = [":"]
+reason = "This push deletes remote branches or tags (--delete, :refspec, --mirror, --prune). The developer runs it."
+
+[[agent.command_rules]]
 id = "CMD_GIT_RESET_HARD"
 command = "git"
 subcommand = "reset"

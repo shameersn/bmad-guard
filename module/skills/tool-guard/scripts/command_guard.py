@@ -10,6 +10,7 @@ never the command text.
 Blocked, with the rule id:
   CMD_RM_RECURSIVE, CMD_FIND_DELETE            recursive delete (or find -delete) outside the scratch folders
   CMD_GIT_FORCE_PUSH                           git push --force, -f, --force-with-lease, +refspec
+  CMD_GIT_PUSH_DELETE                          git push --delete, -d, :refspec, --mirror, --prune
   CMD_GIT_RESET_HARD, CMD_GIT_CLEAN, CMD_GIT_BRANCH_DELETE
   CMD_GIT_NO_VERIFY, CMD_GIT_COMMIT_SKIP_HOOKS  --no-verify, git commit -n
   CMD_GIT_HOOKS_PATH                           any change of core.hooksPath
