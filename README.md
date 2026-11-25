@@ -8,15 +8,32 @@ plus guards that run outside the model and can block.
 - Guards are small, tested Python scripts (standard library only) with a clear verdict: allow or block.
 - Every guard decision is an event: OpenTelemetry collector → ClickHouse → Grafana.
 
-Status: Phase 0 (decide). Not ready for use.
+Status: Phase 1 (guard module). Not ready for use.
 
 ## Layout
 
 | Path | What |
 |---|---|
+| `module/skills/` | Guard skills, copied into a project's `.claude/skills/` and `.agents/skills/` |
+| `module/hooks/` | Git hooks (Phase 2) |
+| `module/overrides/` | Files copied into a project's `_bmad/custom/` |
+| `scripts/` | Repo tools: setup script, ready-for-dev gate, install test |
+| `tests/` | Unit tests and repo rules |
 | `docs/plans/` | One plan per phase. Each plan is approved by PR before its work starts. |
 | `docs/adr/` | Architecture decision records. |
-| `spikes/` | Throwaway experiments from Phase 0. Each has a `REPORT.md`. |
+| `spikes/` | Throwaway experiments from Phase 0. Each has a `REPORT.md`. Not linted. |
+
+## Checks
+
+Run before every PR (CI runs the same on Python 3.10 and 3.13):
+
+```bash
+python3 -m unittest discover
+uvx ruff@0.17.6 check .
+uvx ruff@0.17.6 format --check .
+```
+
+Rules enforced by `tests/test_repo_rules.py`: every Python file under `module/` and `scripts/` has a PEP 723 header with `requires-python`, and imports only the standard library or a sibling module.
 
 ## Related
 
