@@ -51,7 +51,8 @@ FAKE_USER = ("dev", "dev@example.invalid")
 # Guard scripts without argparse, and the smoke call used instead of --help: (argv after the script, stdin).
 NO_ARGPARSE_SMOKE = {
     "approval_core.py": None,  # library: imported, not run
-    "prompt_gateway_hook.py": ([], "{}"),  # empty prompt: exits 0 at once, no network
+    "prompt_rules.py": None,  # library: imported, not run
+    "prompt_guard_hook.py": ([], "{}"),  # empty prompt: exits 0 at once, nothing recorded
 }
 
 

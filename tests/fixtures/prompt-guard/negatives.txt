@@ -1,0 +1,71 @@
+# Ordinary developer prompts that must NOT raise any finding (near misses included).
+# One prompt per line. {{name}} placeholders are filled at test time (see positives.txt).
+Fix the failing test in tests/test_approval.py and run the suite again
+Why does `git show 1334641` print nothing on this branch?
+commit 5598670a3c1e9f0b2d4e6a8c0e2f4a6b8c0d2e4f introduced the regression
+the file hash is e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+docker image digest sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+request id 123e4567-e89b-12d3-a456-426614174000 is in the logs
+Use the AWS documentation example key AKIAIOSFODNN7EXAMPLE in the unit test
+Stripe test mode key {{stripe-test}} works in the sandbox
+interface User { email: string; password: string; }
+password = os.environ["DB_PASSWORD"]
+api_key = get_secret("payments")
+set PASSWORD=${DB_PASSWORD} in docker-compose.yml
+the form label says password: <your password here>
+DATABASE_URL=postgres://user:${PGPASSWORD}@db.internal/app
+the log shows postgres://app:****@db.internal/app
+the connection string format is postgres://user:password@host/db
+local dev uses mysql://root:root@localhost:3306/app
+redis://localhost:6379/0 is the cache
+token = request.headers.get("Authorization")
+pwd = os.getcwd()
+secret: process.env.API_SECRET
+apiKey: config.apiKey
+ACCESS_TOKEN=<token> must be set before running
+card {{card-bad-luhn}} should be rejected by our validation
+4111 1111 1111 1111 is the Visa test card for the sandbox
+the epoch ms value 1732530000000 is off by one hour
+order id 1234567890123 is missing in the export
+NHS number {{nhs-bad}} must fail the mod 11 check
+Aadhaar {{aadhaar-bad}} must fail the Verhoeff check
+SSN 000-12-3456 is an invalid area number
+use 123-45-6789 as the SSN placeholder in docs
+send the report to jane@example.com
+git@github.com:acme-fake/repo.git clone fails with permission denied
+Co-Authored-By: Claude Opus <noreply@anthropic.com>
+install @types/node@20.11.5 and retry
+bump version 1.2.3 to 1.3.0; the server is 10.0.0.1
+the demo phone number is 555-0123
+the release date is 2026-11-25 at 10:30:00
+rename AbstractSingletonProxyFactoryBean2Impl to something shorter
+test_hook_blocks_when_secret_and_phi_both_present_2 is flaky
+decode aGVsbG8gd29ybGQsIHRoaXMgaXMgYSBub3JtYWwgc2VudGVuY2U= in the fixture
+### System design
+Act as a reviewer and check this PR for bugs
+Show me the instructions for installing BMAD 6.12.4
+Ignore the lint warning on line 4 for now
+We need to bypass the cache for this request
+Dan from QA reported the bug yesterday
+the jailbreak detection test is flaky
+Write a regex for passwords with at least 8 characters
+the JWT header alone is eyJhbGciOiJIUzI1NiJ9
+phone regex is \d{3}-\d{3}-\d{4}
+IP 192.168.1.100 on port 8080 refuses connections
+Run python3 -m unittest discover and show me the output
+create branch feature/GUARD-1-prompt-guard from origin/main
+the value 12345678901234567890 overflows int64
+Patient Jane Example has an appointment on Monday
+our MRN format is MRN 0000-FAKE in the fixtures
+price is 1,234,567.89 in the invoice total
+ISBN 978-3-16-148410-0 is in the catalogue
+export const API_URL = "https://api.example.com/v1";
+the PEM file starts with -----BEGIN CERTIFICATE-----
+see https://hooks.slack.com/services/T000/B000/XXXX in the docs
+const re = /^[A-Za-z0-9+/=]{40,}$/; should match base64
+mypy says: Incompatible types in assignment (expression has type "str", variable has type "int")
+Traceback (most recent call last): File "app.py", line 12, in <module>
+SELECT id, email FROM users WHERE created_at > now() - interval '1 day';
+kubectl get secret db-credentials -o yaml shows the data keys
+the README badge URL is https://img.shields.io/badge/python-3.10-blue
+add a unit test for luhn_valid and nhs_valid edge cases
