@@ -89,11 +89,13 @@ class Zones:
         self.cwd = os.path.realpath(cwd)
         self.home = os.path.realpath(Path.home())
         roots = {os.path.normpath(root), os.path.realpath(root)}
+        self.roots = [base.lower() for base in roots]
         self.bmad = [os.path.join(base, "_bmad").lower() for base in roots]  # where approval-state.json lives
         self.zones = [
             Zone(code, os.path.join(base, rel).lower())
             for base in roots
             for code, rel in (
+                ("DOC_APPROVAL_STATE", "_bmad/custom/approval-state.json"),  # so `rm -r _bmad` is seen to take it
                 ("DOC_GUARD_RECORD", "_bmad-output/guard"),
                 ("DOC_GUARD_CONFIG", "_bmad/custom/project/guard"),
             )
@@ -117,7 +119,8 @@ class Zones:
         return any(p == b or p.startswith(b + os.sep) for p in self.paths(text, cwd) for b in self.bmad)
 
     def hits(self, text: str, cwd: str | None = None, ancestors: bool = False) -> list[str]:
-        """Reason codes for a path. `ancestors`: a folder that holds a zone counts too (for delete and move)."""
+        """Reason codes for a path. `ancestors`: a folder that holds a zone counts too (for delete and move), when it
+        is inside the project: `rm -rf .` and `rm -rf /` are the command guard's."""
         if not text.strip():
             return []
         found: list[str] = []
@@ -126,7 +129,11 @@ class Zones:
                 found.append("DOC_APPROVAL_STATE")
             for zone in self.zones:
                 inside = path == zone.folder or path.startswith(zone.folder + os.sep)
-                holds = ancestors and zone.folder.startswith(path.rstrip(os.sep) + os.sep)
+                holds = (
+                    ancestors
+                    and zone.folder.startswith(path.rstrip(os.sep) + os.sep)
+                    and any(path.startswith(root + os.sep) for root in self.roots)
+                )
                 if inside or holds:
                     found.append(zone.code)
         return list(dict.fromkeys(found))

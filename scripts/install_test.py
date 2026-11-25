@@ -61,6 +61,7 @@ NO_ARGPARSE_SMOKE = {
     "command_guard.py": None,  # library
     "path_guard.py": None,  # library
     "document_guard.py": None,  # library
+    "bash_write_guard.py": None,  # library
     "document_text.py": None,  # library
     "pre_tool_use.py": (
         [],
@@ -509,6 +510,14 @@ PRE_TOOL_SMOKE = (
         2,
         "DOC_APPROVAL_FIELD",
     ),
+    (
+        "blocks a shell write to the approval state",
+        "Bash",
+        {"command": "echo {} > _bmad/custom/approval-state.json"},
+        2,
+        "DOC_APPROVAL_STATE",
+    ),
+    ("allows a shell read of the approval state", "Bash", {"command": "cat _bmad/custom/approval-state.json"}, 0, ""),
     (
         "allows a new document that waits for approval",
         "Write",
