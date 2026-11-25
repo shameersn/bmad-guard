@@ -5,11 +5,14 @@
 
 - Every Python file under module/ and scripts/ starts with a PEP 723 header that sets requires-python.
 - It imports only the standard library or a sibling module in the same folder.
+- A git hook has no `.py` extension (git runs it by name). It is checked as a Python script too: a `python3` shebang,
+  the same header, and the executable bit.
 """
 
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 import unittest
@@ -42,11 +45,16 @@ def non_stdlib_imports(source: str, siblings: set[str]) -> list[str]:
     return found
 
 
+def git_hooks() -> list[Path]:
+    """The hook files in module/hooks: the files with no extension (the folder README is not one)."""
+    return sorted(p for p in (ROOT / "module/hooks").iterdir() if p.is_file() and not p.suffix)
+
+
 def shipped_python_files() -> list[Path]:
     files = []
     for folder in SHIPPED:
         files.extend(p for p in (ROOT / folder).rglob("*.py") if "__pycache__" not in p.parts)
-    return sorted(files)
+    return sorted(files + git_hooks())
 
 
 class CheckerTests(unittest.TestCase):
@@ -88,6 +96,14 @@ class ShippedFilesTests(unittest.TestCase):
             if bad:
                 problems[str(path.relative_to(ROOT))] = bad
         self.assertEqual(problems, {}, "shipped scripts must use the standard library only")
+
+    def test_every_git_hook_is_an_executable_python_script(self):
+        hooks = git_hooks()
+        self.assertTrue(hooks, "module/hooks has no hook")
+        for path in hooks:
+            with self.subTest(hook=path.name):
+                self.assertTrue(path.read_text().startswith("#!/usr/bin/env python3\n"))
+                self.assertTrue(os.access(path, os.X_OK), "git does not run a hook that is not executable")
 
 
 if __name__ == "__main__":

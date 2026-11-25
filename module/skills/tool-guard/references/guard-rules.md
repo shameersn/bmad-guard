@@ -174,7 +174,7 @@ The first check is the plan (Sentry's logic, `hash_mode = build`: the plan's app
 - **`cd` is followed in the order of the command**, a subshell is not scoped (`(cd /tmp; ls); echo x > src/a.py` is read as if the `cd` stayed). After a `cd` into a variable, only absolute targets are checked.
 - **Paths outside the project are not gated**, and the project is the folder Claude Code started in (`CLAUDE_PROJECT_DIR`).
 - **Reviewers and subagents** run in the same project. Their session id may be the parent's; this is not checked yet (T7).
-- **`gate: generic` from the shell.** File-tool edits of the marker are blocked (`DOC_APPROVAL_FIELD`). A `sed -i` or `python -c` that adds it is not seen; T6 pre-commit is the backstop. ADR 0004 still asks to review the marker's use in the pilot.
+- **`gate: generic` from the shell.** File-tool edits of the marker are blocked (`DOC_APPROVAL_FIELD`). A `sed -i` or `python -c` that adds it is not seen; the T6 pre-commit hook warns about it at commit (`COMMIT_GATE_GENERIC`). It cannot block: a person sets the marker too, and the hook cannot tell who typed it. ADR 0004 still asks to review the marker's use in the pilot.
 - **A project with a renamed output folder** (not `_bmad-output`) finds no plan, so every source write is blocked until the folder is named `_bmad-output` again.
 - **Test and build commands** that write to a source folder through a tool option (`pytest --junitxml=reports/x.xml`) are not seen; a redirect into a source folder is gated like any write.
 
@@ -210,7 +210,7 @@ A command can write a secret without a file tool: `cat > f <<EOF`, `echo KEY > f
 
 "Writes to a file" is the same reader as `bash-write-guard`: redirects and `tee`, `cp`, `sed -i` and so on. Writes to `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty` and `>&2` do not count. **A command that only reads is never scanned:** `grep KEY file`, `echo KEY`, `curl -H "Authorization: ..."`, `git log --grep KEY`, `cat <<EOF` to the screen all pass.
 
-Why this design, and not "scan the whole command for secrets": a secret in a command that does not write it (a `curl` header, a search term) is not a file leak, the plan says not to block a command that only reads, and the pre-commit scan (T6) is the backstop for what ends up in a file. The cost is the limits below.
+Why this design, and not "scan the whole command for secrets": a secret in a command that does not write it (a `curl` header, a search term) is not a file leak, the plan says not to block a command that only reads, and the pre-commit hook (T6) is the backstop for what ends up in a committed file (`module/hooks/README.md`). The cost is the limits below.
 
 Not seen: `python3 -c` or a script that opens the file itself, `sed -i 's/x/KEY/'`, `dd`, `node -e`, `awk`, a value held in a variable (`echo $KEY > f` writes no literal), text that `cat other > f` copies, a command that cannot be read (the command guard blocks it as `CMD_UNPARSABLE`).
 
@@ -279,7 +279,7 @@ The guard reads the command text. It cannot see what the command text does when 
 - **`aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host** are not export rules yet.
 - **`UPDATE` without `WHERE`** is not in the SQL rule. `git checkout .` and `git restore .` (throw away changes) are not rules yet. Both are todos in the Phase 2 plan.
 - **The extension file** (`_bmad/custom/project/guard/`) is protected from the file tools and from the shell commands listed above. A script the agent writes and runs (`python3 -c`, a script file, `node -e`) can still write it; so can `awk -i inplace`, `ed`, `tar -x`, an editor started from Bash and a path built from variables.
-- **Approval fields written from Bash.** The shell guard protects the three places above, not Markdown documents. `sed -i 's/pending-approval/approved/' prd.md` is not seen. The pre-commit hook (T6) blocks a commit that changes an approval status without a matching Warden entry.
+- **Approval fields written from Bash.** The shell guard protects the three places above, not Markdown documents. `sed -i 's/pending-approval/approved/' prd.md` is not seen. The pre-commit hook (T6) is the backstop: it blocks a commit of a document whose status is `approved` (or whose `approved_by` / `approved_at` changed) without a matching Warden entry (`COMMIT_APPROVAL_NO_ENTRY`, `COMMIT_APPROVAL_STALE`). `gate: generic` and a removed question only warn there, because a person sets them too. The work tree itself stays changed until someone commits.
 - **Warden's script can be run by the agent.** The two confirmations are enforced by Warden's skill text, not by the hook: a model that runs `grant_approval.py` itself is not stopped. The audit is the `APPROVED` event, the `approved_by` entry and the git commit.
 - **Document rules look at one edit.** A person can still change anything by hand; the guard stops the agent. Resolution records and approval fields in files that are not Markdown (a `.yaml` story, a `.txt` plan) are not checked.
 - **Documents that teach the markup** (for example `docs/ready-for-dev-markup.md`, with its example `Resolved:` lines and `[ASSUMPTION ...]` tags) are checked like stories: an agent edit that changes those example lines blocks. The developer edits them by hand.

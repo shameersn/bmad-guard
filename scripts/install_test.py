@@ -10,6 +10,9 @@ hook wiring in .claude/settings.json is checked after setup and after every BMAD
   fresh    BMAD 6.12.4 -> setup_guard.py -> quick-update -> update; overrides resolve; guard scripts run.
   upgrade  BMAD 6.11.0 -> setup_guard.py -> install 6.12.4 over it; guard files untouched; overrides resolve.
 
+The fresh stage ends with smoke calls for every guard. The pre-commit hook (Phase 2, T6) is tested through real
+`git commit` calls in the sandbox, so git starts the installed hook through core.hooksPath.
+
 Needs network (npx downloads bmad-method@6.12.4 and @6.11.0), Node (npx), uv and git. uv also provides
 a Python 3.11+ to read the override TOML files. Fake data only. Not part of `python3 -m unittest discover`.
 
@@ -490,6 +493,7 @@ def check_smokes(runner: Runner, stage: str, sandbox: Path) -> None:
     check_pre_tool_use(runner, stage, sandbox)
     check_write_gate(runner, stage, sandbox)
     check_content_scan(runner, stage, sandbox)
+    check_pre_commit(runner, stage, sandbox)
 
 
 # (label, tool, tool input, expected exit code, expected reason code or "") for the PreToolUse hook as Claude Code
@@ -657,6 +661,90 @@ def check_content_scan(runner: Runner, stage: str, sandbox: Path) -> None:
         config.unlink()
     ok = proc.returncode == 2 and "CONTENT_PHI" in proc.stderr and FAKE_PHONE not in proc.stderr
     runner.add(stage, "tool-guard PreToolUse blocks PHI in a HIPAA project", ok, "" if ok else tail(proc), took)
+
+
+def try_commit(runner: Runner, sandbox: Path, rel: str, text: str, message: str):
+    """Write a file, stage only it and run a real `git commit`, so git starts the hook through core.hooksPath.
+    Returns (process, True when a commit was made). A blocked file is taken out of the index again."""
+    path = sandbox / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    before = git(runner, sandbox, "rev-parse", "HEAD").stdout.strip()
+    git(runner, sandbox, "add", "--", rel)
+    proc, _ = runner.run(["git", "commit", "-q", "-m", message], sandbox)
+    made = git(runner, sandbox, "rev-parse", "HEAD").stdout.strip() != before
+    if not made:
+        git(runner, sandbox, "rm", "--cached", "-q", "-f", "--", rel)
+        path.unlink()
+    return proc, made
+
+
+def check_pre_commit(runner: Runner, stage: str, sandbox: Path) -> None:
+    """The pre-commit hook end to end, through real commits: a fake key and a hand-set approval block; a plain file and
+    a Warden approval (Warden commits through the hook itself) go through."""
+    hook = sandbox / setup_guard.HOOKS_REL / "pre-commit"
+    runner.add(
+        stage, "pre-commit hook is installed and executable", os.access(hook, os.X_OK), str(hook.relative_to(sandbox))
+    )
+
+    proc, took = runner.run([sys.executable, str(hook)], sandbox)
+    runner.add(
+        stage,
+        "pre-commit with nothing staged exits 0 at once",
+        proc.returncode == 0 and not proc.stderr,
+        tail(proc),
+        took,
+    )
+
+    proc, made = try_commit(runner, sandbox, "docs/hook-key.txt", f"token = {FAKE_KEY}\n", "fake key")
+    ok = (
+        not made
+        and proc.returncode != 0
+        and "COMMIT_SECRET" in proc.stderr
+        and FAKE_KEY not in proc.stderr + proc.stdout
+    )
+    runner.add(stage, "git commit with a fake key is blocked by the pre-commit hook", ok, tail(proc))
+
+    proc, made = try_commit(runner, sandbox, "docs/hook-ok.txt", "plain text\n", "plain file")
+    runner.add(
+        stage, "git commit of a plain file goes through the pre-commit hook", made and proc.returncode == 0, tail(proc)
+    )
+
+    forged = "---\ntitle: Fake\nstatus: approved\n---\n\n# Fake\n"
+    proc, made = try_commit(runner, sandbox, "docs/hook-forged.md", forged, "forged approval")
+    ok = not made and "COMMIT_APPROVAL_NO_ENTRY" in proc.stderr
+    runner.add(stage, "git commit of a hand-set approved status is blocked", ok, tail(proc))
+
+    draft = forged.replace("approved", "draft")
+    proc, made = try_commit(runner, sandbox, "docs/hook-brief.md", draft, "draft brief")
+    runner.add(stage, "git commit of a draft document goes through", made and proc.returncode == 0, tail(proc))
+    result, err = run_json(
+        runner,
+        sandbox,
+        "agent-approval-grant/scripts/grant_approval.py",
+        "--doc-path",
+        "docs/hook-brief.md",
+        "--doc-type",
+        "hook-brief",
+        "--state-file",
+        "_bmad/custom/approval-state.json",
+        "--approved-by",
+        "dev",
+    )
+    committed = result.get("git_commit", {})
+    runner.add(
+        stage,
+        "Warden approves and commits through the pre-commit hook",
+        bool(committed.get("ok")),
+        err or json.dumps(committed),
+    )
+    codes = [e.get("reason_code") for e in queue_lines(sandbox) if e.get("guard") == "git-hooks"]
+    runner.add(
+        stage,
+        "the hook queued its events",
+        "COMMIT_SECRET" in codes and "COMMIT_ALLOWED" in codes,
+        ", ".join(dict.fromkeys(codes)),
+    )
 
 
 def check_pre_tool_use(runner: Runner, stage: str, sandbox: Path) -> None:

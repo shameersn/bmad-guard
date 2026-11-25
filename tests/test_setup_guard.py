@@ -169,6 +169,43 @@ class InstallTests(Base):
         self.assertEqual(text.count(".bmad-guard/"), 1)
 
 
+class HookFileTests(Base):
+    """T6: the hooks are copied with their library files, are executable, and --check notices when one is not."""
+
+    def setUp(self):
+        super().setUp()
+        write(self.module / "module/hooks/guard_lib.py", "x = 1\n")
+        write(self.module / "module/hooks/README.md", "folder readme, not shipped")
+        git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "-A")
+        git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "hooks")
+        self.hooks = self.project / sg.HOOKS_REL
+
+    def test_every_hook_file_is_copied_executable_and_recorded(self):
+        run(self.project, self.module)
+        self.assertEqual(sorted(p.name for p in self.hooks.iterdir()), ["guard_lib.py", "pre-commit"])
+        for path in self.hooks.iterdir():
+            self.assertTrue(path.stat().st_mode & 0o111, path.name)
+        self.assertIn(f"{sg.HOOKS_REL}/pre-commit", self.manifest()["files"])
+
+    def test_check_fails_when_a_hook_lost_its_executable_bit_and_a_run_repairs_it(self):
+        run(self.project, self.module)
+        (self.hooks / "pre-commit").chmod(0o644)
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("update   _bmad/custom/guard/hooks/pre-commit (not executable)", out)
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 0, out)
+        self.assertTrue((self.hooks / "pre-commit").stat().st_mode & 0o111)
+        self.assertEqual(run(self.project, self.module, "--check")[0], 0)
+
+    def test_a_hook_that_changed_locally_is_a_conflict(self):
+        run(self.project, self.module)
+        (self.hooks / "pre-commit").write_text("#!/bin/sh\nexit 0  # emptied\n")
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("conflict _bmad/custom/guard/hooks/pre-commit (changed since install)", out)
+
+
 class UpdateTests(Base):
     def commit_module(self, msg: str, tag: str | None = None):
         git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "-A")

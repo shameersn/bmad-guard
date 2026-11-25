@@ -6,7 +6,8 @@
 What it does (ADR 0001, Phase 0 spike T2):
 - copies each guard skill into every tool skill folder that exists (.claude/skills, .agents/skills);
 - copies overrides into _bmad/custom/;
-- copies git hooks into _bmad/custom/guard/hooks/ and points core.hooksPath there;
+- copies git hooks into _bmad/custom/guard/hooks/ (every file there is made executable; --check reports one that is not)
+  and points core.hooksPath there;
 - merges the Claude Code hook entries and sensitive-path deny rules into .claude/settings.json (Phase 2, T1;
   the definition lives in module/skills/tool-guard/scripts/hook_wiring.py). The project's own entries are kept;
   ours are found by their exact command, so a re-run changes nothing. Skipped when the project has no
@@ -34,6 +35,7 @@ import difflib
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -205,7 +207,11 @@ def make_plan(project_dir: Path, module_dir: Path, force: bool = False) -> Plan:
             continue
         now = sha256(dest)
         if now == new_hash:
-            plan.actions.append(Action("keep", rel))
+            # git skips a hook that is not executable, so a hook file without the bit is not "up to date"
+            if rel.startswith(HOOKS_REL + "/") and not os.access(dest, os.X_OK):
+                plan.actions.append(Action("update", rel, "not executable"))
+            else:
+                plan.actions.append(Action("keep", rel))
         elif rel in installed and installed[rel] == now:
             plan.actions.append(Action("update", rel))
         elif force:

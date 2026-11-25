@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# ///
+"""Git pre-commit hook of bmad-guard (Phase 2, T6). Installed in _bmad/custom/guard/hooks/ by scripts/setup_guard.py.
+
+Plain Python, no Node, no Husky. It only starts the checks in guard_pre_commit.py (same folder), and blocks the commit
+when they cannot start (fail closed). What it checks and the rule ids: see guard_pre_commit.py and
+module/hooks/README.md.
+Exit 0: commit may go ahead (a warning may be on stderr). Exit 1: commit blocked, the reasons are on stderr.
+"""
+
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True  # no __pycache__ folders inside the project
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def main() -> int:
+    if sys.version_info < (3, 10):  # noqa: UP036 - the macOS system python3 can be 3.9: say so, in plain words
+        found = f"{sys.version_info[0]}.{sys.version_info[1]}"
+        print(
+            f"bmad-guard pre-commit: the commit is blocked: this hook needs Python 3.10 or later, and {sys.executable} "
+            f"is {found}. Put a newer python3 first in your PATH.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        import guard_pre_commit
+    except BaseException as err:  # a hook that cannot load must block, not wave the commit through
+        print(
+            f"bmad-guard pre-commit: the commit is blocked: the checks cannot start ({type(err).__name__}).",
+            file=sys.stderr,
+        )
+        print("Run scripts/setup_guard.py from the bmad-guard module again to repair the hooks.", file=sys.stderr)
+        return 1
+    return guard_pre_commit.main()
+
+
+sys.exit(main())

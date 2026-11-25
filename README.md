@@ -15,7 +15,7 @@ Status: Phase 1 (guard module). Not ready for use.
 | Path | What |
 |---|---|
 | `module/skills/` | Guard skills, copied into a project's `.claude/skills/` and `.agents/skills/` |
-| `module/hooks/` | Git hooks (Phase 2) |
+| `module/hooks/` | Git hooks, plain Python, copied to `_bmad/custom/guard/hooks/` (Phase 2): `pre-commit` (scan, approval fields, tech stack). Rules and limits: `module/hooks/README.md`. |
 | `module/overrides/` | Files copied into a project's `_bmad/custom/` |
 | `module/managed-settings/` | Managed-settings template for a later IT rollout (not installed by anything here) |
 | `scripts/` | Repo tools: setup script (also wires the Claude Code hooks into `.claude/settings.json`), install test |
