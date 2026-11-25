@@ -56,6 +56,7 @@ NO_ARGPARSE_SMOKE = {
     "prompt_guard_hook.py": ([], "{}"),  # empty prompt: exits 0 at once, nothing recorded
     "hook_common.py": None,  # library
     "hook_wiring.py": None,  # library
+    "shell_parse.py": None,  # library
     "pre_tool_use.py": (
         [],
         '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}',
