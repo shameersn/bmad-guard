@@ -190,6 +190,22 @@ The hook input of the file-writing tools. The hooks page we read only shows the 
 - **How Claude Code applies an edit** (binary): the `old_string` is replaced in the file text, once, or everywhere with `replace_all`; `MultiEdit` repeats that for each edit on the result of the one before. An `old_string` that is not in the file, or is not unique without `replace_all`, fails the edit. An edit with an empty `old_string` on a file that does not exist creates it. The guard does the same replacement on the file on disk to get the whole text before and after.
 - **Paths.** The tool schemas ask for an absolute path. The guard also accepts a relative path (resolved from `cwd`) and `~`.
 
+## 12. What T4 builds (write gate)
+
+Rules, reason codes, design choices and limits: `module/skills/tool-guard/references/guard-rules.md` ("Write gate").
+
+What the gate takes from the hook input and from BMAD:
+
+| Fact | Used for | Status |
+|---|---|---|
+| `session_id` in the `PreToolUse` input | The build session id written to `_bmad-output/guard/builds/<story>.json`. Never `CLAUDE_CODE_SESSION_ID`, never a value the model types (section 6). | Verified (docs) for `PreToolUse`; the field is also in every payload we ran for other events |
+| `cwd`, `tool_input.file_path` / `notebook_path` / `command` | Which path a write goes to (relative paths from `cwd`) and the Bash write targets (section 10 and 11) | Verified (docs, binary strings) |
+| Plan file: `{implementation_artifacts}/spec-{slug}.md`, with frontmatter `status` set to `in-progress` by step 3 and `in-review` by step 4 | Finding the current plan | Verified by reading `bmm-skills/ship/bmad-build` in BMAD 6.12.4 (`step-01` to `step-04`, `spec-template.md`, `module.yaml`); not run |
+| `story`, `approval_status`, `confidence` in the plan's frontmatter | Finding the story and the approval | Our override (`module/overrides/bmad-build.toml`); BMAD's template does not have them |
+
+- **Subagents.** bmad-build hands the code to a subagent. Section 1 lists `agent_id` and `agent_type` for hooks that run inside a subagent, so those calls reach the same `PreToolUse` hook. Whether their `session_id` is the parent's is **Unverified**. The build record then holds whatever id the hook gets; T7 must compare the reviewer's id with it (see open check 7).
+- **A block is exit 2 with the reasons on stderr** (section 2), like the other guards. The `--check` command line prints the same lines on stdout and exits 1, so the override can stop before any code is written.
+
 ## Open checks (to close in T2 or the pilot)
 
 1. Run one real blocked `PreToolUse` call (exit 2, stderr reaches the model) on 2.1.326, and one crash with `onFailure: "block"`. Needs a working model session.
@@ -198,3 +214,4 @@ The hook input of the file-writing tools. The hooks page we read only shows the 
 4. Confirm whether the same hook in managed and project settings runs once or twice (the template sets `allowManagedHooksOnly`, which should make this moot).
 5. See how the terminal UI shows a `SessionStart` `systemMessage`.
 6. Read the remaining third of the hooks page and the full settings reference for anything that changes the above.
+7. Check whether a hook that runs for a subagent's tool call gets the parent's `session_id` or its own (T4 records it as the build session, T7 compares the reviewer's id with it). Needs a real model session.

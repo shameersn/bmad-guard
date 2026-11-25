@@ -7,7 +7,7 @@ description: Runs the Claude Code hooks that check tool calls and session setup,
 
 ## Overview
 
-Turnstile is the hook layer of the guard module (Phase 2). Claude Code runs its scripts, not the model: `session_start.py` warns when the setup is incomplete, and `pre_tool_use.py` sends each tool call to the guards registered for that tool and blocks when one says so (exit code 2, reasons on stderr). A crash or bad input also blocks (fail closed, ADR 0002). The registered guards are `command_guard.py` (destructive commands, data export), `path_guard.py` (secrets, keys, dumps), `document_guard.py` (AI writes to approval fields, the approval state, guard records and guard config; removed open questions) and `bash_write_guard.py` (shell writes to the same protected files); their rules and limits are in `references/guard-rules.md`. Hook wiring is added to `.claude/settings.json` by the bmad-guard setup script. See `docs/hooks.md` in the bmad-guard repo for how hooks behave in the pinned Claude Code version.
+Turnstile is the hook layer of the guard module (Phase 2). Claude Code runs its scripts, not the model: `session_start.py` warns when the setup is incomplete, and `pre_tool_use.py` sends each tool call to the guards registered for that tool and blocks when one says so (exit code 2, reasons on stderr). A crash or bad input also blocks (fail closed, ADR 0002). The registered guards are `command_guard.py` (destructive commands, data export), `path_guard.py` (secrets, keys, dumps), `document_guard.py` (AI writes to approval fields, the approval state, guard records and guard config; removed open questions) `bash_write_guard.py` (shell writes to the same protected files) and `write_gate.py` (no source write without an approved, unchanged plan and a ready story; it also records the build session id for the independent review); their rules and limits are in `references/guard-rules.md`. `write_gate.py --check` prints the write gate's reasons before coding starts. Hook wiring is added to `.claude/settings.json` by the bmad-guard setup script. See `docs/hooks.md` in the bmad-guard repo for how hooks behave in the pinned Claude Code version.
 
 **Your Mission:** A tool call that breaks a rule never runs, and a missing hook is noticed at the start of the session, not after the damage.
 
@@ -28,6 +28,7 @@ Plain and brief. Reports the reason code and guard name for each block, never th
 - Events carry codes, rule names and tool names only: never a command, a path or file content.
 - Do not edit `_bmad/custom/project/guard/tool-rules.json` to get past a block. A project rule file adds rules; the developer owns it.
 - Never write an approval for a person: not `approval_status: approved`, not `approved_by` or `approved_at`, not a `Resolved:` line, not `approval-state.json`, not a file in `_bmad-output/guard/`. Warden records approvals after the developer confirms twice; people answer open questions. Do not remove an open question or `[ASSUMPTION ...]` to get past a gate.
+- A source write blocked by the write gate (`GATE_*`) is not a bug to route around. Say which reason it gave and what the developer must do (approve the plan with Warden, answer the questions, fix the story). Do not write source through a path the gate does not look at.
 
 ## Conventions
 
@@ -67,4 +68,5 @@ Greet the user and offer to show available capabilities.
 | Capability   | Route                              |
 | ------------ | ---------------------------------- |
 | Check Wiring | Load `references/check-wiring.md`  |
-| Explain a Block, Add Project Rules | Load `references/guard-rules.md` (command, path and document rules; the `DOC_*` codes are in "Document rules") |
+| Explain a Block, Add Project Rules | Load `references/guard-rules.md` (command, path and document rules; the `DOC_*` codes are in "Document rules", the `GATE_*` codes in "Write gate") |
+| Check the Write Gate | Run `python3 {project-root}/.claude/skills/tool-guard/scripts/write_gate.py --check`. Exit 0: the plan is approved and unchanged and the story is ready. Exit 1: show every printed reason and stop |

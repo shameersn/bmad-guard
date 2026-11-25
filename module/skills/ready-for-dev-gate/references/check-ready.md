@@ -11,7 +11,7 @@ type: script-backed
 
 ## What Success Looks Like
 
-A story moves to planning or coding only when the script says `allow`. On `block`, the user sees every reason with its ids, and (in `{agent.mode}` = `advisory`) decides knowingly; in `enforce` mode the work stops.
+A story moves to planning or coding only when the script says `allow`. On `block`, the user sees every reason with its ids, and in `{agent.mode}` = `enforce` (the default) the work stops; in `advisory` mode the user decides knowingly.
 
 ## The markup (short version)
 
@@ -52,7 +52,7 @@ Reason codes: `OPEN_QUESTIONS`, `OPEN_ASSUMPTIONS`, `RESOLUTION_MISSING_WHO_OR_W
 ### Handle a block
 
 - **`{agent.mode}` = `enforce`** — stop. Tell the user what must change in the story (answers recorded by a named person with a date, deleted ids restored, confidence re-scored). Do not offer to proceed anyway.
-- **`{agent.mode}` = `advisory`** (default until the BA team agrees the markup) — after listing the reasons, ask the user whether to continue despite the block. Continue only on an explicit yes. Log the answer via `skill:agent-project-logger` with action `'Ready-for-dev block overridden by user'` or `'Ready-for-dev block accepted'`, `--stage "ready-for-dev"`, `--agent "ready-for-dev-gate/READY"`, `--event "READY_OVERRIDDEN"` or `"READY_STOPPED"`, `--verdict allow` or `block`, and `--doc-path "<story_path>"`. Never put story text in the log.
+- **`{agent.mode}` = `advisory`** (a project's own choice; the write gate hook still blocks source writes) — after listing the reasons, ask the user whether to continue despite the block. Continue only on an explicit yes. Log the answer via `skill:agent-project-logger` with action `'Ready-for-dev block overridden by user'` or `'Ready-for-dev block accepted'`, `--stage "ready-for-dev"`, `--agent "ready-for-dev-gate/READY"`, `--event "READY_OVERRIDDEN"` or `"READY_STOPPED"`, `--verdict allow` or `block`, and `--doc-path "<story_path>"`. Never put story text in the log.
 
 ### Never
 

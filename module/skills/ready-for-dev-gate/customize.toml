@@ -23,9 +23,10 @@ activation_steps_prepend = []
 activation_steps_append = []
 persistent_facts = []
 
-# advisory: report a block and let the user decide (logged). enforce: a block is a hard stop.
-# Stays advisory until the BA team agrees the markup (docs/ready-for-dev-markup.md in bmad-guard).
-mode = "advisory"
+# enforce: a block is a hard stop. advisory: report a block and let the user decide (logged).
+# The markup is agreed (docs/ready-for-dev-markup.md in bmad-guard, Gate 1), so the default is enforce.
+# This setting is for the skill's chat flow. The write gate hook (tool-guard) always enforces and does not read it.
+mode = "enforce"
 
 # Lowest confidence (0-100) that may pass the gate (ADR 0004).
 min_confidence = 80

@@ -9,7 +9,9 @@ codes to block with:
   DOC_APPROVAL_FIELD    a frontmatter line `status: approved`, `approval_status: approved`, `approved_by:` or
                         `approved_at:` was added, removed or changed, or a resolution record was: a `Resolved:` line,
                         or an `[ASSUMPTION-RESOLVED ...]` tag. Any other value of `status` / `approval_status`
-                        (`draft`, `in-progress`, `pending-approval`) is an ordinary edit.
+                        (`draft`, `in-progress`, `pending-approval`) is an ordinary edit. Also `gate: generic`
+                        added, removed or changed: it makes a story skip the ready-for-dev gate (ADR 0004), so a
+                        person sets it, not the agent (T4 review).
   DOC_QUESTION_REMOVED  an open question (`Q-n` under `## Open questions`) or an open `[ASSUMPTION ...]` tag is gone
                         from the new text, and the new text has no record for it (as the ready-for-dev markup defines
                         it: the id is still there, resolved).
@@ -34,6 +36,8 @@ from pathlib import Path
 APPROVED = "approved"
 STATE_KEYS = ("status", "approval_status")  # only the value `approved` matters
 RECORD_KEYS = ("approved_by", "approved_at")  # any change matters
+GENERIC = "generic"
+GATE_KEYS = ("gate",)  # only the value `generic` matters: it skips the ready-for-dev gate
 FIELD_RE = re.compile(r"^(?P<quote>[\"']?)(?P<key>[A-Za-z_][\w-]*)(?P=quote)[ \t]*:(?P<value>.*)$")  # key may be quoted
 COMMENT_RE = re.compile(r"\s+#.*$")
 FENCE_END_RE = re.compile(r"^(---|\.\.\.)[ \t]*$")
@@ -75,7 +79,7 @@ def field_values(lines: list[str]) -> dict[str, list[str]]:
         if not match:
             continue
         key = match.group("key").lower()
-        if key in STATE_KEYS or key in RECORD_KEYS:
+        if key in STATE_KEYS or key in RECORD_KEYS or key in GATE_KEYS:
             value = COMMENT_RE.sub("", match.group("value")).strip().strip("'\"").strip().lower()
             found.setdefault(key, []).append(value)
     return found
@@ -88,6 +92,9 @@ def fields_changed(old_lines: list[str], new_lines: list[str]) -> bool:
             return True
     for key in STATE_KEYS:
         if [v for v in old.get(key, []) if v == APPROVED] != [v for v in new.get(key, []) if v == APPROVED]:
+            return True
+    for key in GATE_KEYS:
+        if [v for v in old.get(key, []) if v == GENERIC] != [v for v in new.get(key, []) if v == GENERIC]:
             return True
     return False
 

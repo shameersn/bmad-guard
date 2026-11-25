@@ -37,8 +37,17 @@ import approval_core as core  # noqa: E402 - sibling module, found through the l
 GUARD = "sentry"
 
 
-def check(doc_path: Path, doc_type: str, state_file: Path, status_field: str, draft_value: str, approved_value: str):
-    """Return (result dict, project_root)."""
+def check(
+    doc_path: Path,
+    doc_type: str,
+    state_file: Path,
+    status_field: str,
+    draft_value: str,
+    approved_value: str,
+    reset_stale: bool = True,
+):
+    """Return (result dict, project_root). `reset_stale=False` leaves the document alone: the write gate hook
+    (tool-guard, Phase 2 T4) only asks, it does not change a plan."""
     project_root = core.project_root_for(doc_path if doc_path.exists() else doc_path.parent)
     if not doc_path.exists():
         return {"result": "blocked", "reason": "missing"}, project_root
@@ -65,7 +74,7 @@ def check(doc_path: Path, doc_type: str, state_file: Path, status_field: str, dr
             new_text = core.set_status(text, status_field, draft_value)
         except ValueError:
             new_text = text
-        if new_text != text:
+        if reset_stale and new_text != text:
             doc_path.write_text(new_text, encoding="utf-8")
         return {
             "result": "blocked",

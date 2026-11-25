@@ -90,6 +90,30 @@ class ApprovalFieldTests(TextGuardCase):
             with self.subTest(old=old, new=new):
                 self.assertEqual(self.edit("docs/story.md", old, new), ["DOC_APPROVAL_FIELD"])
 
+    def test_the_generic_gate_marker_is_for_a_person_to_set(self):
+        self.put("docs/story.md", STORY)
+        for old, new in (
+            ("confidence: 85", "confidence: 85\ngate: generic"),
+            ("confidence: 85", "confidence: 85\ngate: 'Generic' # chore"),
+        ):
+            with self.subTest(new=new):
+                self.assertEqual(self.edit("docs/story.md", old, new), ["DOC_APPROVAL_FIELD"])
+        self.assertEqual(
+            self.save("docs/new-chore.md", "---\ntitle: Chore\ngate: generic\n---\nBody\n"), ["DOC_APPROVAL_FIELD"]
+        )
+        marked = STORY.replace("confidence: 85", "confidence: 85\ngate: generic")
+        self.put("docs/chore.md", marked)
+        self.assertEqual(self.edit("docs/chore.md", "gate: generic\n", ""), ["DOC_APPROVAL_FIELD"])
+        self.assertEqual(self.edit("docs/chore.md", "gate: generic", "gate: full"), ["DOC_APPROVAL_FIELD"])
+
+    def test_other_gate_values_and_body_text_are_ordinary_edits(self):
+        self.put("docs/story.md", STORY)
+        self.assertEqual(self.edit("docs/story.md", "confidence: 85", "confidence: 85\ngate: full"), [])
+        self.assertEqual(self.edit("docs/story.md", "# Story 2.3", "# Story 2.3\n\ngate: generic is not used here"), [])
+        marked = STORY.replace("confidence: 85", "confidence: 85\ngate: generic")
+        self.put("docs/chore.md", marked)
+        self.assertEqual(self.edit("docs/chore.md", "# Story 2.3", "# Story 2.3 (chore)"), [])
+
     def test_an_edit_elsewhere_in_an_approved_document_is_allowed(self):
         self.put("docs/story.md", APPROVED)
         self.assertEqual(self.edit("docs/story.md", "# Story 2.3", "# Story 2.3 (final)"), [])

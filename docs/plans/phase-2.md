@@ -49,7 +49,7 @@ From the grill session on 25 Nov (Shameer):
 | L1 | `PreToolUse` Read / Grep / Glob / Bash | sensitive-path guard | Environment files, keys, dumps, `~/.config/bmad-guard/` |
 | L1 | `PreToolUse` Write / Edit / MultiEdit / NotebookEdit, and Bash | document guard | AI writes to approval fields, `approval-state.json`, guard records and guard config; removal of an unresolved question or assumption |
 | L1 | `PreToolUse` Write / Edit | content scan | Secrets; PHI in HIPAA projects |
-| L1 | `PreToolUse` Write / Edit | write gate | Source writes without an approved, unchanged plan, or with a story that is not ready for dev |
+| L1 | `PreToolUse` Write / Edit / MultiEdit / NotebookEdit, and Bash write targets | write gate | Source writes without an approved, unchanged plan, or with a story that is not ready for dev; records the build session |
 | L2 | `pre-commit` | scan, brief status, tech stack | Same scan on staged files; brief status changes not made by Warden; dependency not on the list (only when a list exists) |
 | L2 | `pre-push` | review record | No review record, same session as the build, or a record for another commit |
 
@@ -112,6 +112,20 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 - `bmad-build` override: run the write gate's check before coding starts, so the developer sees a block before any code is written.
 
 **Done when:** tests cover no plan, unapproved plan, edited plan, open question, open assumption, low confidence, generic story, allowed path, and all reasons in one message.
+
+**Built (T4), what differs from the text above:** rules, design choices and limits are in `module/skills/tool-guard/references/guard-rules.md` ("Write gate").
+
+- **Rule ids:** `GATE_NO_ACTIVE_PLAN` (the plan says `NO_ACTIVE_PLAN`), `GATE_MANY_ACTIVE_PLANS`, `GATE_PLAN_NOT_APPROVED`, `GATE_PLAN_CHANGED`, `GATE_STATE_UNREADABLE`, `GATE_STORY_NOT_FOUND`, `GATE_RECORD_FAILED`, `GATE_ERROR`, and one `GATE_READY_<CODE>` per ready-for-dev reason (open questions, open assumptions, low confidence, ...), so a test and a developer see the exact cause.
+- **Where the plan lives (checked in BMAD 6.12.4, `bmm-skills/ship/bmad-build`):** step 1 sets `spec_file` to `{implementation_artifacts}/spec-{slug}.md` (default `_bmad-output/implementation-artifacts/`), or `{spec_folder}/stories/{story_id}-{slug}.md`. The spec template carries `status: draft | ready-for-dev | in-progress | in-review | done`; step 3 sets `in-progress` before coding, step 4 sets `in-review` before the review. The `story` and `approval_status` fields come from our override. The gate looks for the plan in any Markdown file under `_bmad-output/`.
+- **`in-review` also counts** when no plan is in progress (bmad-build patches code in step 4). `in-progress` wins when both exist. Two plans in progress block.
+- **The Bash gate is on** (best effort), for explicit write targets only; scratch folders, `/dev/null`, `/tmp` and anything outside the project are not gated. Writes outside the project are not gated at all.
+- **Build record:** `_bmad-output/guard/builds/<story>.json` = `{"story", "sessions", "first_at", "last_at"}`; session ids from the hook input only. If it cannot be written, the write is blocked. T7 reads it and derives the story name the same way (`write_gate.story_key`).
+- **Sentry** got a `reset_stale` option (default on, as before). The hook calls it with `False`: it asks and does not change the plan.
+- **The ready-for-dev default is `enforce`.** The hook always enforces and reads the skill's own `customize.toml` only (not a project override, which the agent could edit).
+- **Project paths:** `write_gate_allowed_paths` in `tool-rules.json`, add-only, validated; a bad file blocks through the path and command guards and adds nothing to the gate.
+- **Install test:** smoke calls for the hook and the `--check` CLI, and an end-to-end case with a fake plan approved by Warden.
+- **`gate: generic` is person-only (T4 review):** `DOC_APPROVAL_FIELD` now also blocks an AI edit that adds, removes or changes `gate: generic` in a Markdown frontmatter, so the agent cannot make a story skip ready-for-dev. A person sets it.
+- **T4 review decisions:** `in-review` counts when nothing is in progress; two plans in progress block; the `story` field is a path or an id (`<id>.md`, `<id>-*.md`); the hook always enforces, `mode = advisory` is for the chat skill only; `git checkout <path>` / `git restore <path>` are not gated for now.
 
 ### T5. Content scan on writes and prompt wiring (Days 8–9)
 
@@ -190,6 +204,16 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Real block seen** in Claude Code for one command rule and one path rule (rollout doc, test step 8).
 - [ ] **Revisit person-only resolutions** (`DOC_APPROVAL_FIELD` on `Resolved:` lines) with the pilot's false-block numbers. Owner: Shameer.
 - [ ] **Protect developer-written guard overrides** (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/tool-guard.toml`) that are not in the setup manifest, if the pilot shows agents editing them.
+
+## Write gate todos (from T4)
+
+- [ ] **Subagent session ids.** Check in a real session whether a hook that runs for a subagent's tool call has the parent's `session_id` (`docs/hooks.md`, open check 7). T7 needs the answer before the same-session test means anything. Owner: Shameer.
+- [x] **`gate: generic` in a separate story file.** Done: `gate: generic` is in `DOC_APPROVAL_FIELD` (T4 review).
+- [ ] **`git checkout <path>` / `git restore <path>` through the gate.** Not gated now (false blocks on branch switches). Look again with the pilot's false-block numbers. Owner: Shameer.
+- [ ] **`story` field format.** A path or an id is supported. Check with the pilot BAs that this is how they fill it. Owner: Manesh G.
+- [ ] **Plan outside `_bmad-output/`** (a renamed output folder, or a spec folder elsewhere) is not found, so every source write blocks. Read `implementation_artifacts` from the BMAD config if a pilot project renames it.
+- [ ] **Real block seen** in Claude Code for a `GATE_*` rule and for a Bash write target (rollout doc, test step 8).
+- [ ] **False-block numbers** for the Bash gate (tools that write source through an option, not a redirect, are not seen; tools that use a redirect into source are gated). Measure in the pilot.
 
 ## Open items for later phases
 
