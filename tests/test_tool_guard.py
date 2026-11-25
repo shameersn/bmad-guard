@@ -35,6 +35,7 @@ hc = load("hook_common")
 hw = load("hook_wiring")
 pt = load("pre_tool_use")
 ss = load("session_start")
+REAL_MANAGED_DIR = ss.managed_dir  # SessionStartTests patch ss.managed_dir; keep the real one for its own tests
 
 CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
 CALL = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": "s-1"}
@@ -291,6 +292,15 @@ class SessionStartTests(unittest.TestCase):
         env = mock.patch.dict(os.environ, CLEAN_ENV, clear=True)
         env.start()
         self.addCleanup(env.stop)
+        self.managed = self.root / "managed"  # stands in for the OS managed-settings folder
+        patcher = mock.patch.object(ss, "managed_dir", return_value=self.managed)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write_managed(self, name: str, settings: dict | str) -> None:
+        path = self.managed / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(settings if isinstance(settings, str) else json.dumps(settings))
 
     def wire(self, hooks_path: bool = True, settings: bool = True) -> None:
         if hooks_path:
@@ -369,6 +379,59 @@ class SessionStartTests(unittest.TestCase):
         (self.root / hw.SETTINGS_REL).write_text("{broken")
         self.assertFalse(ss.wiring_ok(self.root))
         self.assertEqual(self.start()[0], 0)
+
+    def test_managed_file_alone_counts_as_wired(self):
+        self.wire(settings=False)
+        self.write_managed("managed-settings.json", hw.merge(None).settings)
+        self.assertTrue(ss.wiring_ok(self.root))
+        self.assertEqual(self.start(), (0, "", ""))
+
+    def test_template_in_managed_folder_counts_as_wired(self):
+        self.wire(settings=False)
+        self.write_managed(
+            "managed-settings.json", (ROOT / "module/managed-settings/managed-settings.json").read_text()
+        )
+        self.assertTrue(ss.wiring_ok(self.root))
+
+    def test_managed_drop_ins_are_read_together(self):
+        self.wire(settings=False)
+        full = hw.merge(None).settings
+        self.write_managed("managed-settings.d/10-hooks.json", {"hooks": full["hooks"]})
+        self.write_managed("managed-settings.d/20-deny.json", {"permissions": full["permissions"]})
+        self.assertTrue(ss.wiring_ok(self.root))
+
+    def test_partial_managed_wiring_still_warns(self):
+        self.wire(settings=False)
+        self.write_managed("managed-settings.json", {"hooks": hw.merge(None).settings["hooks"]})
+        self.assertFalse(ss.wiring_ok(self.root))
+
+    def test_broken_managed_file_warns_instead_of_crashing(self):
+        self.wire(settings=False)
+        self.write_managed("managed-settings.json", "{broken")
+        self.assertFalse(ss.wiring_ok(self.root))
+        self.assertEqual(self.start()[0], 0)
+
+    def test_broken_managed_file_does_not_hide_good_project_wiring(self):
+        self.wire()
+        self.write_managed("managed-settings.json", "{broken")
+        self.assertTrue(ss.wiring_ok(self.root))
+
+    def test_managed_dir_follows_the_platform(self):
+        for platform, expected in (
+            ("darwin", "/Library/Application Support/ClaudeCode"),
+            ("linux", "/etc/claude-code"),
+        ):
+            with mock.patch.object(ss.sys, "platform", platform):
+                self.assertEqual(REAL_MANAGED_DIR(), Path(expected))
+
+    def test_unknown_platform_has_no_managed_settings(self):
+        with mock.patch.object(ss.sys, "platform", "plan9"):
+            self.assertIsNone(REAL_MANAGED_DIR())
+        self.assertIsNone(ss.managed_settings(None))
+
+    def test_empty_managed_folder_is_not_wired(self):
+        self.managed.mkdir()
+        self.assertIsNone(ss.managed_settings(self.managed))
 
     def test_garbage_stdin_still_exits_0(self):
         with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.root)}):

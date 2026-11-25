@@ -8,7 +8,9 @@ Wired by scripts/setup_guard.py as:
 
 Checks two things and warns the developer (a `systemMessage`, shown by Claude Code) when one is missing:
   - git config core.hooksPath is not _bmad/custom/guard/hooks (the git hooks would not run);
-  - the project's .claude/settings.json does not hold the guard hook wiring (see hook_wiring.py).
+  - neither the project's .claude/settings.json nor the managed settings file(s) hold the guard hook wiring
+    (see hook_wiring.py). Managed settings: the OS file and its managed-settings.d/ drop-ins, read as one.
+    A macOS configuration profile, the Windows registry and server-managed settings are not read.
 One `warn` event records it (code SETUP_INCOMPLETE, field `missing`). It always exits 0, even on an error.
 """
 
@@ -30,7 +32,16 @@ AGENT = f"{hc.GUARD}/SessionStart"
 TAG = "[tool-guard]"
 FIXES = {
     "hooks_path": f"git config core.hooksPath is not {hw.HOOKS_REL}, so the git hooks will not run",
-    "hook_wiring": f"{hw.SETTINGS_REL} is missing the guard hooks or deny rules, so Claude Code hooks will not run",
+    "hook_wiring": (
+        f"neither {hw.SETTINGS_REL} nor the managed settings hold the guard hooks and deny rules, "
+        "so Claude Code hooks will not run"
+    ),
+}
+# Managed settings folder per OS (docs/managed-settings-rollout.md). WSL reports linux.
+MANAGED_DIRS = {
+    "darwin": "/Library/Application Support/ClaudeCode",
+    "linux": "/etc/claude-code",
+    "win32": "C:\\Program Files\\ClaudeCode",
 }
 
 
@@ -45,11 +56,45 @@ def hooks_path_ok(root: Path) -> bool:
     return (root / value).resolve() == (root / hw.HOOKS_REL).resolve()
 
 
-def wiring_ok(root: Path) -> bool:
+def managed_dir() -> Path | None:
+    value = MANAGED_DIRS.get(sys.platform)
+    return Path(value) if value else None
+
+
+def managed_settings(base: Path | None) -> dict | None:
+    """The managed file and its drop-ins combined (hooks and deny lists merge), or None when there are none.
+    Raises ValueError when a file is unusable."""
+    if base is None:
+        return None
+    files = [base / "managed-settings.json", *sorted((base / "managed-settings.d").glob("*.json"))]
+    combined: dict = {}
+    for path in files:
+        data = hw.load_settings(path)
+        if data is None:
+            continue
+        hooks = data.get("hooks")
+        if isinstance(hooks, dict):
+            for event, groups in hooks.items():
+                if isinstance(groups, list):
+                    combined.setdefault("hooks", {}).setdefault(event, []).extend(groups)
+        perms = data.get("permissions")
+        deny = perms.get("deny") if isinstance(perms, dict) else None
+        if isinstance(deny, list):
+            combined.setdefault("permissions", {}).setdefault("deny", []).extend(deny)
+    return combined or None
+
+
+def _wired(load) -> bool:
     try:
-        return hw.merge(hw.load_settings(root / hw.SETTINGS_REL)).ok
-    except ValueError:
+        settings = load()
+    except (ValueError, OSError):
         return False
+    return settings is not None and hw.merge(settings).ok
+
+
+def wiring_ok(root: Path) -> bool:
+    """True when the project settings or the managed settings hold the full wiring."""
+    return _wired(lambda: hw.load_settings(root / hw.SETTINGS_REL)) or _wired(lambda: managed_settings(managed_dir()))
 
 
 def problems(root: Path) -> list[str]:
