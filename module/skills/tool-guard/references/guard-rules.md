@@ -23,6 +23,7 @@ The list is in `customize.toml` (`[[agent.command_rules]]`). A project adds rule
 | `CMD_RM_RECURSIVE` | `rm -r` / `-rf` / `-fr` / `-r -f` / `--recursive` on anything that is not provably inside a scratch folder; `--no-preserve-root`; `xargs rm -rf` with unknown targets; a target with a variable or `$(...)` | `rm file.txt`, `rm -rf tmp/x`, `rm -rf node_modules`, `rm -rf /tmp/build-1` |
 | `CMD_FIND_DELETE` | `find ... -delete` outside the scratch folders | `find tmp -name '*.o' -delete` |
 | `CMD_GIT_FORCE_PUSH` | `git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, a `+refspec` | `git push`, `git push -u origin x`, `git push -n` |
+| `CMD_GIT_PUSH_DELETE` | `git push --delete`, `-d`, a `:refspec`, `--mirror`, `--prune` | `git push origin a:a`, `git fetch --prune`, `git branch -d x` |
 | `CMD_GIT_RESET_HARD` | `git reset --hard` | `git reset --soft`, `git reset HEAD file` |
 | `CMD_GIT_CLEAN` | `git clean -f` (also `-fd`, `-fdx`) | `git clean -n` (dry run) |
 | `CMD_GIT_BRANCH_DELETE` | `git branch -D`, `-d -f`, `--delete --force` | `git branch -d old` |
@@ -46,6 +47,11 @@ Local hosts are `localhost`, `127.0.0.1`, `::1`, any `127.x.x.x`, and a path to 
 
 - **Force push.** `--force-with-lease` and `--force-if-includes` are blocked too: they are still a force push, and the agent does not push over shared history. A `+refspec` counts as a force. A normal `git push` is allowed.
 - **Scratch folders.** `rm -r` is allowed only when every target is inside a scratch folder. Built-in: `tmp`, `.tmp`, `temp`, `build`, `dist`, `coverage`, `.cache`, `.pytest_cache`, `.bmad-guard/tmp` (from the project root), `**/node_modules` and `**/__pycache__` (at any depth), `/tmp`, `/var/tmp`, `/private/tmp`, and the system temp folder. A relative target is resolved from the working directory of the call, with `..` and symlinks resolved. The folder itself counts (`rm -rf tmp`) for a project folder; an absolute folder counts only for what is inside it (`rm -rf /tmp` is blocked). A glob is fine when the folder is written out (`tmp/*`), not otherwise (`tmp*`, `*/x`). A variable or `$(...)` in a target is never provable, so it is blocked.
+- **Push that deletes.** `git push --delete` / `-d`, a `:refspec`, `--mirror` and `--prune` delete remote branches or tags. Blocked; the developer runs them.
+- **No exception for cleanup.** `find -delete` and `rm -r` stay blocked outside the scratch folders, also for `*.pyc` cleanup. A project adds a scratch folder instead (decision, T2 review).
+- **No block on `eval` / `sh -c` with text built at run time.** Too many false blocks (`eval "$(ssh-agent -s)"`). Left to a sandbox (decision, T2 review).
+- **No extra local database hosts.** A project cannot add a host to `local_hosts`, so a shared dev database is blocked. Use a local tunnel or run it by hand (decision, T2 review).
+- **File-writing tools are checked too.** Write, Edit and NotebookEdit go through the path guard, like the `permissions.deny` rules (decision, T2 review).
 - **Local dev data.** A destructive SQL statement is blocked on a local database too. The developer runs it.
 - **Sensitive paths.** One list, `SENSITIVE_PATHS` in `hook_wiring.py`. It generates the `permissions.deny` rules and is matched by the hook, so the two cannot drift (a test checks it).
 
@@ -108,7 +114,8 @@ The guard reads the command text. It cannot see what the command text does when 
 - **Other tools and MCP servers** are not routed to these guards.
 - **Writes that change the guard's own inputs:** an edit of `.git/config` or `.git/hooks` is not a `core.hooksPath` change by name. Editing the guard scripts or `.claude/settings.json` is the job of the document guard and the write gate (T3, T4), and of git review.
 - **`aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host** are not export rules yet.
-- **`UPDATE` without `WHERE`** is not in the SQL rule.
+- **`UPDATE` without `WHERE`** is not in the SQL rule. `git checkout .` and `git restore .` (throw away changes) are not rules yet. Both are todos in the Phase 2 plan.
+- **The extension file can be edited by the agent** until T3 blocks agent writes to `_bmad/custom/project/guard/`.
 - **The matching is by name.** `id_rsa_utils.py` looks like an SSH key to the path guard.
 
 The real limit is an OS sandbox, which is not in scope for Phase 2. The `permissions.deny` rules are the second layer for file tools.
