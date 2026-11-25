@@ -7,6 +7,10 @@ What it does (ADR 0001, Phase 0 spike T2):
 - copies each guard skill into every tool skill folder that exists (.claude/skills, .agents/skills);
 - copies overrides into _bmad/custom/;
 - copies git hooks into _bmad/custom/guard/hooks/ and points core.hooksPath there;
+- merges the Claude Code hook entries and sensitive-path deny rules into .claude/settings.json (Phase 2, T1;
+  the definition lives in module/skills/tool-guard/scripts/hook_wiring.py). The project's own entries are kept;
+  ours are found by their exact command, so a re-run changes nothing. Skipped when the project has no
+  .claude/skills folder (the hooks would point at scripts that are not there);
 - adds .bmad-guard/ (local event queue) to the project's .gitignore;
 - records what it installed in _bmad/custom/guard/manifest.json (file hashes + module version).
 
@@ -14,8 +18,10 @@ Safety rules:
 - A file the module did not install, or that changed since it was installed, is never overwritten
   or removed without --force. It is reported as a conflict instead.
 - An existing core.hooksPath that points elsewhere is not replaced without --force.
-- --dry-run prints the plan and changes nothing. --check reports whether the project is up to date
-  and exits 1 if not.
+- A hook entry that looks like ours but is not the expected command, or "disableAllHooks": true, is a
+  conflict in .claude/settings.json; it is left as it is without --force. Other settings are never touched.
+- --dry-run prints the plan (and the settings.json diff) and changes nothing. --check reports whether the project
+  is up to date and exits 1 if not.
 
 Usage:
     python3 scripts/setup_guard.py --project <dir> [--module <dir>] [--dry-run | --check] [--force]
@@ -24,7 +30,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -36,6 +44,9 @@ TOOL_SKILL_DIRS = (".claude/skills", ".agents/skills")
 GUARD_DIR = "_bmad/custom/guard"
 HOOKS_REL = f"{GUARD_DIR}/hooks"
 MANIFEST_REL = f"{GUARD_DIR}/manifest.json"
+SETTINGS_REL = ".claude/settings.json"
+WIRING_REL = "module/skills/tool-guard/scripts/hook_wiring.py"
+WIRING_TRIGGER = ".claude/skills/tool-guard/scripts/pre_tool_use.py"  # installed only when .claude/skills exists
 GITIGNORE_LINE = ".bmad-guard/"
 SKIP_NAMES = {"__pycache__", "tests", ".DS_Store"}
 DEFAULT_MODULE = Path(__file__).resolve().parents[1]
@@ -62,6 +73,9 @@ class Plan:
     gitignore_ok: bool = True
     version: str = "unknown"
     version_now: str | None = None
+    settings_new: str | None = None  # new text for .claude/settings.json, None = nothing to write
+    settings_diff: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     def changes(self) -> list[Action]:
         return [a for a in self.actions if a.kind in ("create", "update", "remove")]
@@ -123,6 +137,38 @@ def module_files(module_dir: Path, project_dir: Path) -> dict[str, Path]:
     return files
 
 
+def load_wiring(module_dir: Path):
+    """The module's hook_wiring module (loaded by path), or None when the module does not ship it."""
+    path = module_dir / WIRING_REL
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("bmad_guard_hook_wiring", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look the module up while it loads
+    spec.loader.exec_module(module)
+    return module
+
+
+def plan_settings(plan: Plan, project_dir: Path, wiring, force: bool) -> None:
+    """Add the actions that bring .claude/settings.json to the wiring. Reads only."""
+    try:
+        current = wiring.load_settings(project_dir / SETTINGS_REL)
+    except ValueError as err:
+        raise SetupError(f"{SETTINGS_REL}: {err}") from err
+    result = wiring.merge(current, force)
+    kind = "create" if current is None else "update"
+    plan.actions += [Action(kind, SETTINGS_REL, change) for change in result.changes]
+    plan.actions += [Action("conflict", SETTINGS_REL, why) for why in result.conflicts]
+    if result.changes:
+        plan.settings_new = wiring.render(result.settings)
+        old = wiring.render(current).splitlines() if current is not None else []
+        plan.settings_diff = list(
+            difflib.unified_diff(
+                old, plan.settings_new.splitlines(), f"a/{SETTINGS_REL}", f"b/{SETTINGS_REL}", lineterm=""
+            )
+        )
+
+
 def read_manifest(project_dir: Path) -> dict:
     path = project_dir / MANIFEST_REL
     if not path.is_file():
@@ -179,6 +225,14 @@ def make_plan(project_dir: Path, module_dir: Path, force: bool = False) -> Plan:
         else:
             plan.actions.append(Action("conflict", rel, "removed from the module but changed locally"))
 
+    wiring = load_wiring(module_dir) if WIRING_TRIGGER in plan.files else None
+    if wiring:
+        plan_settings(plan, project_dir, wiring, force)
+    else:
+        plan.notes.append(
+            f"skip     {SETTINGS_REL}: no .claude/skills folder or no tool-guard skill, so no Claude Code hooks"
+        )
+
     hooks_now = git(["config", "--local", "core.hooksPath"], project_dir).stdout.strip() or None
     plan.hooks_path_now = hooks_now
     if hooks_now != HOOKS_REL:
@@ -194,6 +248,8 @@ def make_plan(project_dir: Path, module_dir: Path, force: bool = False) -> Plan:
 def apply_plan(plan: Plan, project_dir: Path) -> None:
     manifest = read_manifest(project_dir)["files"]
     for action in plan.actions:
+        if action.path == SETTINGS_REL:  # merged below, never copied or recorded in the manifest
+            continue
         dest = project_dir / action.path
         if action.kind in ("create", "update"):
             src = plan.files[action.path]
@@ -208,6 +264,11 @@ def apply_plan(plan: Plan, project_dir: Path) -> None:
             dest.unlink()
             manifest.pop(action.path, None)
             _prune_empty_dirs(dest.parent, project_dir)
+
+    if plan.settings_new is not None:
+        settings = project_dir / SETTINGS_REL
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(plan.settings_new, encoding="utf-8")
 
     if not plan.hooks_path_ok and not plan.hooks_path_conflict:
         (project_dir / HOOKS_REL).mkdir(parents=True, exist_ok=True)
@@ -246,6 +307,7 @@ def describe(plan: Plan) -> list[str]:
         lines.append(f"set      core.hooksPath = {HOOKS_REL}")
     if not plan.gitignore_ok:
         lines.append(f"append   .gitignore: {GITIGNORE_LINE}")
+    lines += plan.notes
     kept = sum(1 for a in plan.actions if a.kind == "keep")
     lines.append(f"{len(plan.changes())} change(s), {len(plan.conflicts())} conflict(s), {kept} unchanged")
     return lines
@@ -275,6 +337,8 @@ def main(argv: list[str] | None = None) -> int:
         print("up to date" if plan.up_to_date() else "NOT up to date: run setup_guard.py without --check")
         return 0 if plan.up_to_date() else 1
     if args.dry_run:
+        for line in plan.settings_diff:
+            print(line)
         print("dry run: nothing changed")
         return 0
 
