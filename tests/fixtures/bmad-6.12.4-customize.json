@@ -1,0 +1,342 @@
+{
+ "bmad_version": "6.12.4",
+ "skills": {
+  "bmad-advanced-elicitation": {
+   "workflow": {
+    "additional_methods": "list",
+    "methods_file": "str",
+    "preferences": "list"
+   }
+  },
+  "bmad-agent-analyst": {
+   "agent": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "communication_style": "str",
+    "icon": "str",
+    "identity": "str",
+    "menu": "list",
+    "name": "str",
+    "persistent_facts": "list",
+    "principles": "list",
+    "role": "str",
+    "title": "str"
+   }
+  },
+  "bmad-agent-architect": {
+   "agent": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "communication_style": "str",
+    "icon": "str",
+    "identity": "str",
+    "menu": "list",
+    "name": "str",
+    "persistent_facts": "list",
+    "principles": "list",
+    "role": "str",
+    "title": "str"
+   }
+  },
+  "bmad-agent-dev": {
+   "agent": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "communication_style": "str",
+    "icon": "str",
+    "identity": "str",
+    "menu": "list",
+    "name": "str",
+    "persistent_facts": "list",
+    "principles": "list",
+    "role": "str",
+    "title": "str"
+   }
+  },
+  "bmad-agent-pm": {
+   "agent": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "communication_style": "str",
+    "icon": "str",
+    "identity": "str",
+    "menu": "list",
+    "name": "str",
+    "persistent_facts": "list",
+    "principles": "list",
+    "role": "str",
+    "title": "str"
+   }
+  },
+  "bmad-agent-ux-designer": {
+   "agent": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "communication_style": "str",
+    "icon": "str",
+    "identity": "str",
+    "menu": "list",
+    "name": "str",
+    "persistent_facts": "list",
+    "principles": "list",
+    "role": "str",
+    "title": "str"
+   }
+  },
+  "bmad-architecture": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "doc_standards": "list",
+    "external_handoffs": "list",
+    "external_sources": "list",
+    "finalize_reviewers": "list",
+    "on_complete": "str",
+    "persistent_facts": "list",
+    "run_folder_pattern": "str",
+    "spine_output_path": "str",
+    "spine_template": "str"
+   }
+  },
+  "bmad-brainstorming": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "additional_techniques": "list",
+    "brain_methods": "str",
+    "external_handoffs": "list",
+    "favorite_techniques": "list",
+    "on_complete": "str",
+    "output_dir": "str",
+    "output_folder_name": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-build": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "implementation_handoff": "str",
+    "on_complete": "str",
+    "oneshot_review_layers": "list",
+    "open_spec": "str",
+    "persistent_facts": "list",
+    "review_layers": "list"
+   }
+  },
+  "bmad-build-auto": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "implementation_handoff": "str",
+    "on_complete": "str",
+    "persistent_facts": "list",
+    "review_layers": "list"
+   }
+  },
+  "bmad-code-review": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list",
+    "review_layers": "list"
+   }
+  },
+  "bmad-correct-course": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-create-epics-and-stories": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-deep-recon": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "audience": "str",
+    "banned_sources": "list",
+    "doc_standards": "list",
+    "external_handoffs": "list",
+    "external_sources": "list",
+    "html_theme": "str",
+    "max_depth": "int",
+    "max_sources_per_round": "int",
+    "on_complete": "str",
+    "output_format": "str",
+    "persistent_facts": "list",
+    "preferred_sources": "list",
+    "preset": "str",
+    "red_team": "str",
+    "research_output_path": "str",
+    "research_template": "str",
+    "research_types": "list",
+    "run_folder_pattern": "str",
+    "subagent_models": "list",
+    "subagents": "str",
+    "use_workflows": "str",
+    "validation": "str"
+   }
+  },
+  "bmad-forge-idea": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "forge_output_path": "str",
+    "on_complete": "list",
+    "persistent_facts": "list",
+    "run_folder_pattern": "str"
+   }
+  },
+  "bmad-party-mode": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "default_party": "str",
+    "memory_dir": "str",
+    "on_complete": "str",
+    "output_dir": "str",
+    "party_groups": "list",
+    "party_members": "list",
+    "party_memory": "bool",
+    "party_mode": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-prd": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "doc_standards": "list",
+    "external_handoffs": "list",
+    "external_sources": "list",
+    "finalize_reviewers": "list",
+    "on_complete": "str",
+    "persistent_facts": "list",
+    "prd_output_path": "str",
+    "prd_template": "str",
+    "run_folder_pattern": "str",
+    "validation_checklist_template": "str",
+    "validation_report_template": "str"
+   }
+  },
+  "bmad-prfaq": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-product-brief": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "brief_output_path": "str",
+    "brief_template": "str",
+    "doc_standards": "list",
+    "external_handoffs": "list",
+    "external_sources": "list",
+    "on_complete": "str",
+    "persistent_facts": "list",
+    "run_folder_pattern": "str"
+   }
+  },
+  "bmad-project-context": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "external_sources": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-qa-generate-e2e-tests": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-retrospective": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-review": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "lenses": "list",
+    "on_complete": "str",
+    "output_format": "str",
+    "output_preferences": "str",
+    "persistent_facts": "list",
+    "reader_type": "str",
+    "report_path": "str",
+    "review_guidance": "list",
+    "style_guide": "str"
+   }
+  },
+  "bmad-spec": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list",
+    "run_folder_pattern": "str",
+    "spec_filename": "str",
+    "spec_output_path": "str",
+    "spec_template": "str"
+   }
+  },
+  "bmad-sprint-planning": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  },
+  "bmad-ux": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "creative_tools": "list",
+    "design_handoffs": "list",
+    "design_md_examples": "list",
+    "doc_standards": "list",
+    "experience_md_examples": "list",
+    "external_handoffs": "list",
+    "external_sources": "list",
+    "finalize_reviewers": "list",
+    "on_complete": "str",
+    "persistent_facts": "list",
+    "run_folder_pattern": "str",
+    "ux_output_path": "str",
+    "validation_report_template": "str"
+   }
+  },
+  "bmad-walkthrough": {
+   "workflow": {
+    "activation_steps_append": "list",
+    "activation_steps_prepend": "list",
+    "on_complete": "str",
+    "persistent_facts": "list"
+   }
+  }
+ }
+}

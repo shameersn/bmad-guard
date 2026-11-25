@@ -1,0 +1,24 @@
+# bmad-guard team override for Warden. Installed by scripts/setup_guard.py; do not edit in a project
+# (changes belong in the bmad-guard repo). Personal overrides: agent-approval-grant.user.toml.
+
+[agent]
+# Approval lives in its own frontmatter field. BMAD's `status` field (draft/final) belongs to BMAD.
+status_field = "approval_status"
+approved_value = "approved"
+reopen_value = "draft"
+
+# doc_type -> skill that (re)generates the companion review before approval.
+# For prd and architecture it is the drafting skill's own Validate intent.
+[agent.review_skill_defaults]
+brief = "experion-brief-review"
+prd = "bmad-prd"
+architecture = "bmad-architecture"
+
+# doc_type -> name of the review used in the confirmation questions (default "review report").
+[agent.review_artifact_label_defaults]
+brief = "review report"
+prd = "validation report"
+
+# doc_type -> review file name beside the document (default "review-report.md").
+[agent.review_artifact_filename_defaults]
+prd = "review-rubric.md"

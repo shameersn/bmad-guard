@@ -1,0 +1,8 @@
+# bmad-guard team override for Sentry. Installed by scripts/setup_guard.py; do not edit in a project
+# (changes belong in the bmad-guard repo). Personal overrides: agent-approval-gate-check.user.toml.
+
+[agent]
+# Approval lives in its own frontmatter field. BMAD's `status` field (draft/final) belongs to BMAD.
+status_field = "approval_status"
+draft_value = "draft"
+approved_value = "approved"
