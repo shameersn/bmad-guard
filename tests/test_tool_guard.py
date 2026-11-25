@@ -90,13 +90,14 @@ class RunTests(unittest.TestCase):
 
     def test_registered_guards_allow_a_harmless_call(self):
         self.assertEqual(
-            pt.GUARD_MODULES, ("command_guard", "path_guard", "document_guard", "bash_write_guard", "write_gate")
-        )  # T2 to T4 register their guards here; T5 adds a module
+            pt.GUARD_MODULES,
+            ("command_guard", "path_guard", "document_guard", "bash_write_guard", "write_gate", "content_scan"),
+        )  # T2 to T5 register their guards here
         self.assertEqual(self.run_call(CALL, [])[1], [])
         self.assertEqual(self.run_call(CALL, pt.load_guards())[1], [])
         self.assertEqual(
             [g.name for g in pt.load_guards()],
-            ["command-guard", "path-guard", "document-guard", "bash-write-guard", "write-gate"],
+            ["command-guard", "path-guard", "document-guard", "bash-write-guard", "write-gate", "content-scan"],
         )
 
     def test_the_matcher_reaches_every_tool_a_registered_guard_is_for(self):

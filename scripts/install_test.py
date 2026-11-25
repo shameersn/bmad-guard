@@ -62,6 +62,7 @@ NO_ARGPARSE_SMOKE = {
     "path_guard.py": None,  # library
     "document_guard.py": None,  # library
     "bash_write_guard.py": None,  # library
+    "content_scan.py": None,  # library (run through pre_tool_use.py)
     "document_text.py": None,  # library
     "pre_tool_use.py": (
         [],

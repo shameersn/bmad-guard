@@ -104,6 +104,18 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     return config, warnings
 
 
+def is_hipaa(root: Path) -> bool:
+    """True when the project is marked HIPAA: `phi = "block"` in the prompt-guard config (the team layer sets it).
+
+    Fails closed: when the setting cannot be read (an unreadable or invalid file), the project counts as HIPAA.
+    Used to choose the fail mode of the hooks (a crash blocks in a HIPAA project, warns elsewhere).
+    """
+    try:
+        return load_config(root)[0]["phi"] == "block"
+    except Exception:  # any failure to read the setting means "treat as HIPAA"
+        return True
+
+
 def load_project_patterns(root: Path) -> tuple[tuple[pr.Rule, ...], tuple[str, ...], list[str]]:
     """Project rules and allow-list. Bad entries are skipped with a warning; never raises."""
     path = root / PATTERNS_REL

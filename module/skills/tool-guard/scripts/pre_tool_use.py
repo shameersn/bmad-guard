@@ -44,6 +44,7 @@ GUARD_MODULES: tuple[str, ...] = (
     "document_guard",
     "bash_write_guard",
     "write_gate",
+    "content_scan",
 )
 # module names next to this file
 STAGE = "tool"
