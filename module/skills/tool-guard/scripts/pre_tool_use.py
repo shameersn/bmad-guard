@@ -21,7 +21,8 @@ error in this script blocks the call and records a GUARD_ERROR / BAD_HOOK_INPUT 
 (for example a Python syntax error) would not block by itself; the hook entry sets "onFailure": "block" for that.
 
 Each guard is a module with `GUARDS = [Guard(...)]`, listed by name in GUARD_MODULES
-(T2: command_guard, path_guard; T3: document_guard, bash_write_guard; T4: write_gate; T5: content_scan).
+(T2: command_guard, path_guard; T3: document_guard, bash_write_guard; T4: write_gate; T5: content_scan;
+T7: review_record).
 content_scan is the one guard that does not fail closed in every project: it catches its own errors and decides
 by the HIPAA setting (see content_scan.py). The dispatcher still fails closed for every other guard.
 """
@@ -45,6 +46,7 @@ GUARD_MODULES: tuple[str, ...] = (
     "bash_write_guard",
     "write_gate",
     "content_scan",
+    "review_record",
 )
 # module names next to this file
 STAGE = "tool"

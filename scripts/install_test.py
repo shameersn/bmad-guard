@@ -66,6 +66,7 @@ NO_ARGPARSE_SMOKE = {
     "document_guard.py": None,  # library
     "bash_write_guard.py": None,  # library
     "content_scan.py": None,  # library (run through pre_tool_use.py)
+    "review_record.py": (["--help"], ""),  # the hook reads the same arguments, so no argparse: --help exits 0
     "document_text.py": None,  # library
     "pre_tool_use.py": (
         [],
