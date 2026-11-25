@@ -487,6 +487,7 @@ def check_smokes(runner: Runner, stage: str, sandbox: Path) -> None:
     runner.add(stage, "confidence_score scores a file", ok, err or f"confidence {result.get('confidence')}")
 
     check_pre_tool_use(runner, stage, sandbox)
+    check_write_gate(runner, stage, sandbox)
 
 
 # (label, tool, tool input, expected exit code, expected reason code or "") for the PreToolUse hook as Claude Code
@@ -525,7 +526,87 @@ PRE_TOOL_SMOKE = (
         0,
         "",
     ),
+    (
+        "blocks a source write when no plan is in progress",
+        "Write",
+        {"file_path": "{sandbox}/src/app.py", "content": "print('fake')\n"},
+        2,
+        "GATE_NO_ACTIVE_PLAN",
+    ),
+    (
+        "blocks a shell write to source when no plan is in progress",
+        "Bash",
+        {"command": "echo x > src/app.py"},
+        2,
+        "GATE_NO_ACTIVE_PLAN",
+    ),
+    ("allows a shell write to /dev/null", "Bash", {"command": "echo x > /dev/null"}, 0, ""),
+    ("allows a shell write to a scratch folder", "Bash", {"command": "echo x > tmp/out.txt"}, 0, ""),
 )
+
+
+GATE_PLAN_REL = "_bmad-output/implementation-artifacts/spec-smoke.md"
+GATE_PLAN = (
+    "---\ntitle: Smoke plan\ntype: chore\nstatus: in-progress\nroute: dispatch\nreview_loop_iteration: 0\n"
+    "approval_status: pending-approval\nconfidence: 90\ngate: generic\n---\n\n# Smoke plan\n\nFake text.\n"
+)
+
+
+def check_write_gate(runner: Runner, stage: str, sandbox: Path) -> None:
+    """The write gate end to end: no plan blocks; after Warden approves a fake plan the gate opens and records."""
+    scripts = sandbox / ".claude/skills"
+    gate = scripts / "tool-guard/scripts/write_gate.py"
+    hook = scripts / "tool-guard/scripts/pre_tool_use.py"
+    write = {"hook_event_name": "PreToolUse", "tool_name": "Write", "session_id": "s-smoke-build", "cwd": str(sandbox)}
+    write["tool_input"] = {"file_path": str(sandbox / "src/app.py"), "content": "print('fake')\n"}
+
+    proc, took = runner.run([sys.executable, str(gate), "--check"], sandbox)
+    ok = proc.returncode == 1 and "GATE_NO_ACTIVE_PLAN" in proc.stdout
+    runner.add(stage, "write_gate --check blocks when no plan is in progress", ok, "" if ok else tail(proc), took)
+
+    plan = sandbox / GATE_PLAN_REL
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    plan.write_text(GATE_PLAN, encoding="utf-8")
+    proc, took = runner.run([sys.executable, str(hook)], sandbox, stdin=json.dumps(write))
+    ok = proc.returncode == 2 and "GATE_PLAN_NOT_APPROVED" in proc.stderr
+    runner.add(
+        stage, "tool-guard PreToolUse blocks a source write while the plan is not approved", ok, tail(proc), took
+    )
+
+    grant = "agent-approval-grant/scripts/grant_approval.py"
+    result, err = run_json(
+        runner,
+        sandbox,
+        grant,
+        "--doc-path",
+        GATE_PLAN_REL,
+        "--doc-type",
+        f"build:{GATE_PLAN_REL}",
+        "--state-file",
+        "_bmad/custom/approval-state.json",
+        "--status-field",
+        "approval_status",
+        "--create-status-field",
+        "--hash-mode",
+        "build",
+        "--no-commit",
+        "--approved-by",
+        "dev",
+    )
+    proc, took = runner.run([sys.executable, str(hook)], sandbox, stdin=json.dumps(write))
+    ok = not err and proc.returncode == 0
+    runner.add(stage, "Warden approves a fake plan, then the source write passes the hook", ok, err or tail(proc), took)
+
+    record = sandbox / "_bmad-output/guard/builds" / f"{plan.stem}.json"
+    try:
+        sessions = json.loads(record.read_text(encoding="utf-8")).get("sessions")
+    except (OSError, ValueError):
+        sessions = None
+    runner.add(stage, "the hook records the build session id", sessions == ["s-smoke-build"], f"sessions {sessions}")
+
+    proc, took = runner.run([sys.executable, str(gate), "--check"], sandbox)
+    ok = proc.returncode == 0 and "OK" in proc.stdout
+    runner.add(stage, "write_gate --check passes for the approved plan", ok, "" if ok else tail(proc), took)
 
 
 def check_pre_tool_use(runner: Runner, stage: str, sandbox: Path) -> None:
