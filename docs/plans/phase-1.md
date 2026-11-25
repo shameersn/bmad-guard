@@ -156,6 +156,14 @@ Phase 2 starts only when all of these are true:
 - [ ] The ready-for-dev markup is agreed with the BA team.
 - [ ] A draft Phase 2 plan exists.
 
+## Open items for later phases
+
+1. **Credential storage for developer keys (Phase 3, with ADR 0006).** Two keys arrive in Phase 3: the collector ingest key (`BMAD_GUARD_KEY`) and the gateway API key (`BMAD_GUARD_GATEWAY_KEY`, needed once PromptGateway runs as a shared service with `REQUIRE_API_KEY=true`). Today both come only from environment variables.
+   - Proposed: a per-user file outside every repo, `~/.config/bmad-guard/credentials` (mode 600), written once by the setup script; scripts read the environment variable first, then this file. Later option: the OS keychain.
+   - Not a `.env` file in the project: the AI agent works in that folder and could read the key into its context, and a wrong `.gitignore` commits it.
+   - Phase 2 hooks should deny the agent access to `~/.config/bmad-guard/`.
+   - Raised by Shameer, 25 Nov. Decide in the Phase 3 plan.
+
 ## Open questions (all decided)
 
 1. **Ledger CSV:** keep writing the CSV next to the event queue? **Decided (Shameer, 24 Nov): no.** The queue file is the local record; the CSV goes.
