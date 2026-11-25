@@ -35,16 +35,39 @@ HOOKS = (
     ("PreToolUse", PRE_TOOL_MATCHER, "tool-guard", "pre_tool_use.py", {"timeout": 10, "onFailure": "block"}),
 )
 
-# Sensitive paths (Phase 2 plan, T2). `!` carves out the example file; it must come after the rule it carves from.
-# A Read deny also blocks Edit and Write on the same path.
-DENY_RULES = (
-    "Read(.env)",
-    "Read(.env.*)",
-    "Read(!.env.example)",
-    "Read(*.pem)",
-    "Read(*.key)",
-    "Read(~/.config/bmad-guard/**)",
+# Sensitive paths (Phase 2 plan, T2): (rule id, patterns, carve-outs). One list, two users:
+#   - DENY_RULES below (Claude Code `permissions.deny`, the second layer);
+#   - path_guard.py (the PreToolUse hook), which matches the same patterns and reports the rule id.
+# A pattern with no "/" matches a file name at any depth (gitignore style). `~/dir/**` is a folder under the home
+# folder. A carve-out is a name that stays readable. Matching is case-insensitive in the hook.
+# `id_rsa*` and friends are SSH keys by name; `id_test.py` or `identity.md` are not (see references/guard-rules.md).
+SENSITIVE_PATHS = (
+    ("PATH_ENV_FILE", (".env", ".env.*", "*.env"), (".env.example",)),
+    ("PATH_PRIVATE_KEY", ("*.pem", "*.key", "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*"), ()),
+    ("PATH_KEY_STORE", ("*.p12",), ()),
+    ("PATH_DB_DUMP", ("*dump*.sql",), ()),
+    (
+        "PATH_DB_BACKUP",
+        ("*.sql.bak", "*.db.bak", "*.sqlite.bak", "*.sqlite3.bak", "*dump*.bak", "*database*.bak"),
+        (),
+    ),
+    ("PATH_AWS_DIR", ("~/.aws/**",), ()),
+    ("PATH_SSH_DIR", ("~/.ssh/**",), ()),
+    ("PATH_GUARD_CONFIG", ("~/.config/bmad-guard/**",), ()),
 )
+
+
+def _deny_rules() -> tuple[str, ...]:
+    """`Read(...)` deny rules for SENSITIVE_PATHS. `!` carves out a name; it must come after the rule it carves from.
+    A Read deny also blocks Edit and Write on the same path."""
+    rules: list[str] = []
+    for _, patterns, carve_outs in SENSITIVE_PATHS:
+        rules.extend(f"Read({pattern})" for pattern in patterns)
+        rules.extend(f"Read(!{name})" for name in carve_outs)
+    return tuple(rules)
+
+
+DENY_RULES = _deny_rules()
 
 # A command containing one of these looks like ours. If it is not exactly one of ours, it is stale.
 MARKERS = ("/skills/tool-guard/scripts/", "prompt_guard_hook.py")

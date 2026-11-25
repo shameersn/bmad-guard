@@ -84,6 +84,7 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 
 - **Approval fields:** block an AI Write / Edit that changes `_bmad/custom/approval-state.json`, or that changes `status: approved`, `approval_status`, `approved_by`, `approved_at` or a `Resolved:` / `[ASSUMPTION-RESOLVED: …]` line in a planning document. Bash redirections to the same files are blocked by T2's path check. Warden's own script is not a tool write, so it still works after human confirmation.
 - **Guard records:** block AI Write / Edit to the review and build records of T7 (`_bmad-output/guard/`); only the guard scripts and hooks write them.
+- **Guard config:** block AI Write / Edit (and Bash writes, best effort) to `_bmad/custom/project/guard/` (for example `tool-rules.json`). Otherwise the agent can add a scratch folder and widen `rm -r`. From the T2 review.
 - **Question delete:** on an edit to a story, plan or PRD, compare old and new text with the ready-for-dev markup (`docs/ready-for-dev-markup.md`). Removing an open question or `[ASSUMPTION: …]` that has no resolution record blocks.
 
 **Done when:** tests cover each field, a legitimate edit that keeps the item, and a delete with and without a resolution.
@@ -161,7 +162,7 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Pilot machine check.** Every Claude Code project on the machine has the module installed and `setup_guard.py --check` says `up to date`. A project without it blocks every tool call. Keep a list of pilot machines and their projects. Owner: Shameer with IT.
 - [ ] **Claude Code 2.1.295 or later** on every pilot machine (`onFailure: "block"` needs it). Checked version: 2.1.326. Owner: IT.
 - [ ] **Keep `allowManagedHooksOnly: true` in the pilot.** Tell pilot developers first: it turns off their personal and plugin hooks. Owner: Shameer.
-- [ ] **Run the rollout doc test** ("How to test", steps 1–7) on one machine and record the results. Owner: Shameer.
+- [ ] **Run the rollout doc test** ("How to test", steps 1–8) on one machine and record the results. Owner: Shameer.
 - [ ] **Rollback tested** on that machine (delete the file, `/status` no longer shows it).
 
 **Before the full IT rollout (open item 3):**
@@ -169,6 +170,14 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Machine-level script location.** Install the guard scripts once per machine and point the managed hooks there, so projects without the module are not blocked and the scripts cannot be edited per project. Needs an ADR, a setup script change, a template change and an install-test case. Owner: Shameer. Phase 3 at the latest.
 - [ ] **Uninstall for the wiring** in the setup script (rollback is by hand today).
 - [ ] **Open `PreToolUse` checks** from `docs/hooks.md` closed: a real block and a crash with `onFailure` seen in Claude Code, the `.env.example` carve-out, a double run when the same hook is in managed and project settings.
+
+## Command guard todos (from T2)
+
+- [ ] **T3:** block agent writes to `_bmad/custom/project/guard/` (see T3, "Guard config").
+- [ ] **Rule:** `git checkout .` / `git checkout -- .` and `git restore .` (throw away uncommitted work). Needs a close-but-safe allow test (`git checkout -- file`).
+- [ ] **Rule:** `UPDATE` without `WHERE` in the SQL rule.
+- [ ] **Export rules:** `aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host.
+- [ ] **Real block seen** in Claude Code for one command rule and one path rule (rollout doc, test step 8).
 
 ## Open items for later phases
 

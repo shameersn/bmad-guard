@@ -23,3 +23,115 @@ agent_type = "stateless"   # stateless | memory | autonomous
 activation_steps_prepend = []
 activation_steps_append = []
 persistent_facts = []
+
+# --- Guard rules (Phase 2, T2) ---
+# Read by command_guard.py from THIS file only. The project's tool-guard.toml and tool-guard.user.toml are not read
+# for these keys, so an override cannot remove or weaken a built-in rule. A project adds rules in
+# _bmad/custom/project/guard/tool-rules.json (see references/guard-rules.md).
+# The scripts read this file with a small TOML reader: keep every value on one line, strings in double quotes.
+
+# Folders where `rm -r` is allowed. A name or path is relative to the project root; a leading **/ means at any depth.
+# A path that starts with / is an absolute folder: only what is inside it counts, never the folder itself.
+# The system temp folder ($TMPDIR) always counts as an absolute scratch folder.
+scratch_folders = ["tmp", ".tmp", "temp", "build", "dist", "coverage", ".cache", ".pytest_cache", ".bmad-guard/tmp", "**/node_modules", "**/__pycache__", "/tmp", "/var/tmp", "/private/tmp"]
+
+# Database hosts that count as local. A path to a unix socket and 127.x.x.x also count.
+local_hosts = ["localhost", "127.0.0.1", "::1"]
+
+# Each rule has a stable id (the reason code in the block message and the event). A rule is either `check = "name"`
+# (code in command_guard.py) or data: `command`, plus any of `subcommand` (git only), `words` (positional words,
+# in order), `flag_sets` (match when any inner list is fully present; "-f|--force" = either), `arg_prefixes`
+# (a positional starting with it) and `unless_flags` (the rule does not apply when one is present).
+# `flag_sets` and `arg_prefixes` are alternatives: either one triggers the rule.
+
+[[agent.command_rules]]
+id = "CMD_RM_RECURSIVE"
+check = "rm_recursive"
+reason = "Recursive delete outside the scratch folders. Delete inside tmp, build, dist or node_modules only, or ask the developer."
+
+[[agent.command_rules]]
+id = "CMD_FIND_DELETE"
+check = "find_delete"
+reason = "find -delete outside the scratch folders. Delete inside tmp, build, dist or node_modules only, or ask the developer."
+
+[[agent.command_rules]]
+id = "CMD_GIT_FORCE_PUSH"
+command = "git"
+subcommand = "push"
+flag_sets = [["-f|--force|--force-with-lease|--force-if-includes"]]
+arg_prefixes = ["+"]
+reason = "A force push (also --force-with-lease and +refspec) rewrites shared history. The developer runs it."
+
+[[agent.command_rules]]
+id = "CMD_GIT_PUSH_DELETE"
+command = "git"
+subcommand = "push"
+flag_sets = [["-d|--delete"], ["--mirror"], ["--prune"]]
+arg_prefixes = [":"]
+reason = "This push deletes remote branches or tags (--delete, :refspec, --mirror, --prune). The developer runs it."
+
+[[agent.command_rules]]
+id = "CMD_GIT_RESET_HARD"
+command = "git"
+subcommand = "reset"
+flag_sets = [["--hard"]]
+reason = "git reset --hard throws away uncommitted work. Use git stash or ask the developer."
+
+[[agent.command_rules]]
+id = "CMD_GIT_CLEAN"
+command = "git"
+subcommand = "clean"
+flag_sets = [["-f|--force"]]
+unless_flags = ["-n|--dry-run"]
+reason = "git clean -f deletes untracked files for good. Run git clean -n to see them, or ask the developer."
+
+[[agent.command_rules]]
+id = "CMD_GIT_BRANCH_DELETE"
+command = "git"
+subcommand = "branch"
+flag_sets = [["-D"], ["-d|--delete", "-f|--force"]]
+reason = "Forced branch delete (-D) can lose unmerged commits. Use -d, or ask the developer."
+
+[[agent.command_rules]]
+id = "CMD_GIT_NO_VERIFY"
+command = "git"
+subcommand = ["commit", "push", "merge", "rebase", "am"]
+flag_sets = [["--no-verify"]]
+reason = "--no-verify skips the git hooks that guard this project. Fix what the hook reports instead."
+
+[[agent.command_rules]]
+id = "CMD_GIT_COMMIT_SKIP_HOOKS"
+command = "git"
+subcommand = "commit"
+flag_sets = [["-n"]]
+reason = "git commit -n is --no-verify: it skips the git hooks that guard this project. Fix what the hook reports."
+
+[[agent.command_rules]]
+id = "CMD_GIT_HOOKS_PATH"
+check = "git_hooks_path"
+reason = "core.hooksPath points git at the guard hooks. The agent must not change or bypass it."
+
+[[agent.command_rules]]
+id = "CMD_SQL_DESTRUCTIVE"
+check = "sql_destructive"
+reason = "DROP, TRUNCATE or DELETE without WHERE in a SQL client. The developer runs destructive SQL."
+
+[[agent.command_rules]]
+id = "CMD_CHMOD_WORLD_WRITABLE"
+check = "chmod_world_writable"
+reason = "chmod -R that makes files writable by everyone (777 and the like). Give the least access that works."
+
+[[agent.command_rules]]
+id = "EXPORT_DB_REMOTE"
+check = "db_remote"
+reason = "A database client or dump tool is pointed at a host that is not local. The agent does not export data from shared databases."
+
+[[agent.command_rules]]
+id = "EXPORT_DB_HOST_UNKNOWN"
+check = "db_host_unknown"
+reason = "Cannot tell which host this database command uses (variable, service file or login path). Name a local host, or ask the developer."
+
+[[agent.command_rules]]
+id = "EXPORT_S3_DOWNLOAD"
+check = "s3_download"
+reason = "Downloading from an S3 bucket (aws s3 cp, sync, mv with s3:// as the source). The agent does not export data from buckets."

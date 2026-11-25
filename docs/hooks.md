@@ -141,7 +141,7 @@ Verified (docs):
 - In Bash, `Read` / `Edit` deny rules reach only commands Claude Code can analyse (`cat`, `head`, `tail`, `sed`, `tee`, redirections). They do **not** stop `grep -r pattern .` or a Python or Node script that opens the file itself. This is why the command guard (T2) is also needed, and why OS sandboxing would be the real limit.
 - A `!` pattern is a gitignore negation and must come after the rule it carves from: `Read(*.env)` then `Read(!sample.env)`. We use `Read(.env.*)` then `Read(!.env.example)`. The negation with our exact bare-name patterns is **Unverified** (not run).
 
-The list we install (`DENY_RULES` in `module/skills/tool-guard/scripts/hook_wiring.py`): the environment file and its variants except the example, `*.pem`, `*.key`, and `~/.config/bmad-guard/**`.
+The list we install (`DENY_RULES` in `module/skills/tool-guard/scripts/hook_wiring.py`) is generated from `SENSITIVE_PATHS`, the same list the `PreToolUse` path guard matches (section 10): environment files and variants except `.env.example`, `*.pem`, `*.key`, SSH keys by name (`id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`), `*.p12`, `*dump*.sql`, database backups (`*.sql.bak`, `*.db.bak`, `*.sqlite.bak`, `*.sqlite3.bak`, `*dump*.bak`, `*database*.bak`), `~/.aws/**`, `~/.ssh/**` and `~/.config/bmad-guard/**`. A test builds a sample file name from every pattern and checks that the hook blocks it.
 
 ## 9. What T1 builds on this
 
@@ -155,6 +155,23 @@ The list we install (`DENY_RULES` in `module/skills/tool-guard/scripts/hook_wiri
 | Hooks only wired when `.claude/skills` exists in the project | A hook that points at a missing script exits 2 and would block every tool call |
 | Session ids come from hook input | §6 |
 | Managed template carries `allowManagedHooksOnly: true` | §7 |
+
+## 10. What T2 builds (command and path guards)
+
+Rules, reason codes, design choices and known limits: `module/skills/tool-guard/references/guard-rules.md` (shipped with the skill, so the model can read why it was blocked).
+
+What the hook payloads give the guards (all Verified (docs), see section 1):
+
+| Fact | Used for |
+|---|---|
+| `tool_input.command` (Bash), `file_path` (Read, Edit, Write), `notebook_path` (NotebookEdit), `path` and `glob` (Grep), `pattern` and `path` (Glob) | What each guard reads. The Grep `pattern` is search text, so it is not checked as a path. |
+| `cwd` is in every payload | Relative paths in a command are resolved from it. `CLAUDE_PROJECT_DIR` is the project root (scratch folders and the extension file are relative to it). |
+| One hook entry runs every guard in one process | Both guards look at the same call; each reports its own codes and the dispatcher prints them in one message. |
+| A guard that raises, or a rule list that cannot be read, blocks (`GUARD_ERROR`) | A bad project extension file is a clear `EXT_BAD_FILE` block instead, with the problem named. |
+
+Limits that matter for the rollout (full list in the rules doc): the guards read command text only. Text built at run time (`$CMD`, `eval "$x"`, `base64 | sh`), script files, `python -c` and remote commands (`ssh`, `kubectl exec`) are not seen. The `permissions.deny` rules and code review are the other layers; an OS sandbox is the real limit and is not in scope.
+
+Not yet seen in a real Claude Code session (same reason as section 2: no model session in our test environment): a `PreToolUse` block by these guards, and how the model reacts to the multi-line stderr message.
 
 ## Open checks (to close in T2 or the pilot)
 

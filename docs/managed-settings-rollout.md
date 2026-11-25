@@ -14,17 +14,30 @@ Claude Code applies managed settings above every other settings file. A develope
 | Key | Effect |
 |---|---|
 | `hooks` | The three guard hooks: `SessionStart` (setup check), `UserPromptSubmit` (prompt-guard), `PreToolUse` (tool-guard dispatcher). Same commands as the project wiring. |
-| `permissions.deny` | The sensitive-path deny rules: the environment file and its variants except the example, `*.pem`, `*.key`, `~/.config/bmad-guard/**`. Deny rules cannot be overridden by allow rules. |
+| `permissions.deny` | The sensitive-path deny rules (table below). Deny rules cannot be overridden by allow rules. |
 | `allowManagedHooksOnly: true` | Only managed hooks run. User, project, local and plugin hooks are switched off, so a developer cannot turn the guard hooks off with `disableAllHooks` in a lower file. |
 
-The JSON file cannot hold comments, so this table is the explanation. The test `tests/test_hook_wiring.py` checks that the template and `hook_wiring.py` (used by the setup script) stay equal.
+The deny rules come from one list (`SENSITIVE_PATHS` in `hook_wiring.py`); the `PreToolUse` path guard matches the same list and reports the rule id. Each rule is written `Read(<pattern>)`; a Read deny also blocks Edit and Write on the same path.
+
+| Rule id (hook) | Deny patterns | Stays readable |
+|---|---|---|
+| `PATH_ENV_FILE` | `.env`, `.env.*`, `*.env` | `.env.example` (`Read(!.env.example)`) |
+| `PATH_PRIVATE_KEY` | `*.pem`, `*.key`, `id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*` | |
+| `PATH_KEY_STORE` | `*.p12` | |
+| `PATH_DB_DUMP` | `*dump*.sql` | |
+| `PATH_DB_BACKUP` | `*.sql.bak`, `*.db.bak`, `*.sqlite.bak`, `*.sqlite3.bak`, `*dump*.bak`, `*database*.bak` | |
+| `PATH_AWS_DIR` | `~/.aws/**` | |
+| `PATH_SSH_DIR` | `~/.ssh/**` | |
+| `PATH_GUARD_CONFIG` | `~/.config/bmad-guard/**` | |
+
+The JSON file cannot hold comments, so these tables are the explanation. The test `tests/test_hook_wiring.py` checks that the template and `hook_wiring.py` (used by the setup script) stay equal.
 
 ## Read this before rolling out
 
 1. **Fail closed means a project without the module blocks.** Managed settings apply to every project on the machine. The hook commands run `${CLAUDE_PROJECT_DIR}/.claude/skills/tool-guard/scripts/pre_tool_use.py`. In a project where the setup script has not been run, that file does not exist: Python exits with code 2 and **every tool call is blocked**. Roll out only to pilot machines whose Claude Code projects all have the module installed. The machine-level script location (open question 1) is required before the full rollout. Both are todos in the Phase 2 plan ("Managed settings rollout todos").
 2. **The lock covers the entries, not the scripts.** The scripts live inside each project and can be edited there. Managed settings stop a developer from removing the hook; they do not stop an edit of `pre_tool_use.py`. Git review of `.claude/skills/` and the setup script's `--check` are the control for now.
 3. **`allowManagedHooksOnly` is strict, and the pilot keeps it.** It also switches off hooks developers set up for themselves (personal hooks in `~/.claude/settings.json`, plugin hooks). Decision: it stays on in the pilot too, so the guard hooks cannot be turned off. Tell pilot developers before the file goes on.
-4. **Bash is not fully covered by deny rules.** The deny rules reach `Read`, Grep, Glob, Edit, Write and a few analysed Bash commands (`cat`, `head`, redirections). A script that opens a file itself is not covered. The command guard (T2) adds checks; the real limit is an OS sandbox (not in scope).
+4. **Bash is not fully covered by deny rules.** The deny rules reach `Read`, Grep, Glob, Edit, Write and a few analysed Bash commands (`cat`, `head`, redirections). A script that opens a file itself is not covered. The `PreToolUse` command guard and path guard (T2) add checks on the command text (rules and known limits: `module/skills/tool-guard/references/guard-rules.md`); the real limit is an OS sandbox (not in scope).
 5. **Claude Code version: 2.1.295 or later is required.** The `PreToolUse` entry uses `"onFailure": "block"`, added in 2.1.295. How older versions treat the key is unverified, so do not deploy to a machine with an older version. Checked version: 2.1.326.
 
 ## What IT installs, and where
@@ -52,6 +65,7 @@ Use a throwaway git project with fake data, not a real project.
 5. **Deny rule:** create a file with fake content named `.env` in the test project and ask Claude to read it. It must be refused. A file named `.env.example` must still be readable (this carve-out is unverified, see `docs/hooks.md` section 8; report what you see).
 6. **Hook runs:** in the test project run `git config --local --unset core.hooksPath`, start a new session. A warning from `[tool-guard]` must appear at the start. Restore it with `git config --local core.hooksPath _bmad/custom/guard/hooks`. The event `SETUP_INCOMPLETE` is in `.bmad-guard/events/queue.jsonl`.
 7. **No module:** start Claude Code in a folder where the module is not installed. Expect every tool call to be blocked with a message (limit 1 above). This is the reason for a pilot group first.
+8. **Command and path guards (T2):** in the test project ask Claude to run `git push --force` (use a project with no remote, so nothing can happen). Expect a block with `CMD_GIT_FORCE_PUSH (command-guard)` in the message and a `block` event in `.bmad-guard/events/queue.jsonl` that has the rule id and no command text. Then ask it to run `git push` and to read `.env.example`: both must be allowed. Note whether Claude shows the message and stops, or tries another command.
 
 Write down the Claude Code version and the result of each step.
 
