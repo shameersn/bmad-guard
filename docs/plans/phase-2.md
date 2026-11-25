@@ -48,7 +48,7 @@ From the grill session on 25 Nov (Shameer):
 | L1 | `PreToolUse` Bash | command guard | Destructive commands, data-export commands, `--no-verify` |
 | L1 | `PreToolUse` Read / Grep / Glob / Bash | sensitive-path guard | Environment files, keys, dumps, `~/.config/bmad-guard/` |
 | L1 | `PreToolUse` Write / Edit / MultiEdit / NotebookEdit, and Bash | document guard | AI writes to approval fields, `approval-state.json`, guard records and guard config; removal of an unresolved question or assumption |
-| L1 | `PreToolUse` Write / Edit | content scan | Secrets; PHI in HIPAA projects |
+| L1 | `PreToolUse` Write / Edit / MultiEdit / NotebookEdit, and Bash | content scan | Secrets; PHI in HIPAA projects (a warning elsewhere); Bash only for text a command writes to a file |
 | L1 | `PreToolUse` Write / Edit / MultiEdit / NotebookEdit, and Bash write targets | write gate | Source writes without an approved, unchanged plan, or with a story that is not ready for dev; records the build session |
 | L2 | `pre-commit` | scan, brief status, tech stack | Same scan on staged files; brief status changes not made by Warden; dependency not on the list (only when a list exists) |
 | L2 | `pre-push` | review record | No review record, same session as the build, or a record for another commit |
@@ -135,6 +135,18 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 
 **Done when:** a fake key in a written file is blocked; a fake patient identifier blocks in a HIPAA sandbox and warns in another; the event has no matched text.
 
+**Built (T5), what differs from the text above:** rules, design choices and limits are in `module/skills/tool-guard/references/guard-rules.md` ("Content scan").
+
+- **Rule ids:** `CONTENT_SECRET` (blocks), `CONTENT_PHI` (blocks in a HIPAA project, warns elsewhere), `GUARD_ERROR` (the scan itself failed). The event also carries the prompt-guard rule ids of the findings (`detail`), never matched text, content or path.
+- **Same rules and settings as prompt-guard.** `content_scan.py` loads `prompt_check.py` from the sibling skill and calls `check()`, so the rules, the project patterns, the allow-listed fakes and the `secrets` / `phi` actions are prompt-guard's. A "HIPAA project" is `prompt_check.is_hipaa()`: `phi = "block"` in the merged prompt-guard config. Injection and size are not checked on writes.
+- **What is scanned:** Write `content`, Edit `new_string` (not the old file text), each MultiEdit `new_string`, NotebookEdit `new_source`. Also MultiEdit and NotebookEdit, which the plan did not list.
+- **Warn support in the dispatcher:** `Verdict` got `severity` (`block` default, or `warn`) and `detail` (event only). A call with only warnings exits 0 with JSON `systemMessage` + `hookSpecificOutput.additionalContext` (no `permissionDecision`, so the normal permission prompt stays). Warnings and blocks together: one message, exit 2. No existing guard changed. Status of the mechanism is in `docs/hooks.md` section 13: the fields are Verified (docs); the display of a `PreToolUse` `systemMessage` and the model's reaction are not run (open check 8).
+- **Crash handling:** inside the content scan, not the dispatcher. HIPAA project: block with `GUARD_ERROR`. Other projects: allow with a warning and a `warn` `GUARD_ERROR` event. A HIPAA setting that cannot be read (bad file, bad encoding, prompt-guard missing) counts as HIPAA. The prompt hook (`prompt_guard_hook.py`) now follows the same rule (before: always fail open); a prompt it cannot parse is still let through.
+- **Bash content (decided):** scan the literal text that a command writes to a file: here-documents and here-strings, text piped from `echo` / `printf`, and `echo` / `printf` arguments, when the same command redirects to a file or uses `tee` (the write targets come from `bash_write_guard`). `/dev/null` and friends do not count. A command that only reads is never scanned. Not "scan the whole command": that would block `curl` headers and searches, and the pre-commit scan (T6) is the backstop. Limits: `python -c`, scripts, `sed -i` replacements, variables.
+- **`UserPromptSubmit` wiring:** already done in T1 (`hook_wiring.HOOKS`, the managed template, the setup script, `--check`, tests). T5 changed only the script's crash behaviour. A marker test shows the prompt hook's events hold rule ids and the error type only.
+- **No path and no BAD_HOOK_INPUT from the scan:** a call with no text field passes this guard (the path guards report bad paths).
+- **Install test:** four smoke calls: a fake key blocks, plain text passes, PHI warns, PHI blocks with a HIPAA setting written in the sandbox.
+
 ### T6. Git hooks: pre-commit (Days 9–11)
 
 - Plain Python hooks in `module/hooks/`, copied to `_bmad/custom/guard/hooks/` by the setup script. No Husky, no Node.
@@ -203,7 +215,7 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Export rules:** `aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host.
 - [ ] **Real block seen** in Claude Code for one command rule and one path rule (rollout doc, test step 8).
 - [ ] **Revisit person-only resolutions** (`DOC_APPROVAL_FIELD` on `Resolved:` lines) with the pilot's false-block numbers. Owner: Shameer.
-- [ ] **Protect developer-written guard overrides** (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/tool-guard.toml`) that are not in the setup manifest, if the pilot shows agents editing them.
+- [ ] **Protect developer-written guard overrides** (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/tool-guard.toml`) that are not in the setup manifest, if the pilot shows agents editing them. T5 raises the stakes: `prompt-guard.toml` holds the HIPAA setting (`phi = "block"`), so an agent that edits it turns the PHI block into a warning. Recommend protecting at least that file (`DOC_GUARD_SCRIPTS`) before the first HIPAA pilot. Owner: Shameer.
 
 ## Write gate todos (from T4)
 
@@ -214,6 +226,14 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Plan outside `_bmad-output/`** (a renamed output folder, or a spec folder elsewhere) is not found, so every source write blocks. Read `implementation_artifacts` from the BMAD config if a pilot project renames it.
 - [ ] **Real block seen** in Claude Code for a `GATE_*` rule and for a Bash write target (rollout doc, test step 8).
 - [ ] **False-block numbers** for the Bash gate (tools that write source through an option, not a redirect, are not seen; tools that use a redirect into source are gated). Measure in the pilot.
+
+## Content scan todos (from T5)
+
+- [ ] **Real warning seen** in Claude Code: a `CONTENT_PHI` warn in a project that is not HIPAA. Is the `systemMessage` shown, does the model get the `additionalContext` reminder (`docs/hooks.md`, open check 8)? Needs a real model session. Owner: Shameer.
+- [ ] **False-block numbers** for the content scan in the pilot (regex PHI on emails and phone numbers in code and fixtures; a Write of a whole file that already holds a flagged value). Tune the allow list in `prompt-patterns.json`. Owner: Manesh G.
+- [ ] **Edit: subtract what was already there?** An Edit reads its `new_string` only. If agents often retype a line that holds an old fake, scan the `old_string` too and block only findings that are new. Look at it with the false-block numbers.
+- [ ] **A prompt hook input that cannot be parsed** is let through in every project (nothing to check). Decide in the pilot whether a HIPAA project should block it.
+- [ ] **Bash content gaps:** `sed -i 's/x/KEY/'`, `dd`, a script that writes the file. The pre-commit scan (T6) is the backstop.
 
 ## Open items for later phases
 

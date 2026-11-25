@@ -1,11 +1,11 @@
 ---
 name: guard-rules
-description: The command, path, document and write gate rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
+description: The command, path, document, write gate and content scan rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
 ---
 
 # Guard rules
 
-`pre_tool_use.py` runs five guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer.
+`pre_tool_use.py` runs six guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer. A guard may also **warn**: the call goes ahead, and the developer and the model get one message (only the content scan does this today; see "Content scan").
 
 | Guard | Tools | Rules |
 |---|---|---|
@@ -14,6 +14,7 @@ description: The command, path, document and write gate rules that tool-guard en
 | `document-guard` | Write, Edit, MultiEdit, NotebookEdit | approval state, guard records, guard config, approval fields, removed questions (see "Document rules") |
 | `bash-write-guard` | Bash | the same protected files, written from the shell |
 | `write-gate` | Write, Edit, MultiEdit, NotebookEdit, and the write targets of Bash | source writes without an approved plan and a ready story (see "Write gate") |
+| `content-scan` | Write, Edit, MultiEdit, NotebookEdit, and text that a Bash command writes to a file | secrets and PHI in the new text (see "Content scan") |
 
 Each rule has a stable id. The id is the reason code in the message and in the event. Events carry the rule id, the guard name, the tool name and the session id. They never carry the command text, a file path or file content.
 
@@ -177,6 +178,64 @@ The first check is the plan (Sentry's logic, `hash_mode = build`: the plan's app
 - **A project with a renamed output folder** (not `_bmad-output`) finds no plan, so every source write is blocked until the folder is named `_bmad-output` again.
 - **Test and build commands** that write to a source folder through a tool option (`pytest --junitxml=reports/x.xml`) are not seen; a redirect into a source folder is gated like any write.
 
+## Content scan
+
+Written for `content_scan.py`. It reads the text the agent is about to write and applies prompt-guard's rules to it (`prompt_rules.py`, loaded from the sibling skill as a library; no rule is copied). It uses prompt-guard's settings too: the actions in `prompt-guard.toml`, the project patterns and the allow-listed fakes in `_bmad/custom/project/guard/prompt-patterns.json`. A fake that prompt-guard lets through (`AKIAIOSFODNN7EXAMPLE`, `sk_test_...`, `jane@example.com`, `123-45-6789`, the public card test numbers, `555-01xx`) passes here too.
+
+| Rule id | When | Action |
+|---|---|---|
+| `CONTENT_SECRET` | the new text holds a secret (a key format, a credential assignment, a connection string, a private key header, a high-entropy token) | **block** (prompt-guard `secrets = "block"`, the default) |
+| `CONTENT_PHI` | the new text holds a card, NHS, Aadhaar or US SSN number, an email address or a phone number | **block** in a HIPAA project (`phi = "block"`), **warn** in every other project: the write goes ahead and a message tells the developer and the model |
+| `GUARD_ERROR` | the scan itself failed | **block** in a HIPAA project, **warn** (the write goes ahead) in every other project; see "Fail mode" |
+
+The message and the event carry the rule id and the prompt-guard rule ids of the findings (for example `secret.github-token`), the tool name and the session id. They never carry the matched text, the file content or the path (marker tests check this).
+
+### What is scanned
+
+- **Write:** the whole `content` (the agent writes the whole file).
+- **Edit:** the `new_string` only. The old text of the file, and the `old_string`, are not read. Replacing a hard-coded key with a variable passes; an edit near an old secret passes; an edit that types a secret blocks.
+- **MultiEdit:** each `new_string`. **NotebookEdit:** `new_source` (a deleted cell adds nothing).
+- **Bash:** the literal text that a command writes to a file (see below).
+- Every file type, including Markdown and notebooks. Injection phrasing and size are not checked (a document about prompt injection is fine). There is no size limit: about 0.5 seconds for a 1 MB text (measured), against the 10-second hook timeout.
+- A call with no text field, or a field that is not text, has nothing to scan and passes. Claude Code rejects such a call itself.
+
+### Bash content
+
+A command can write a secret without a file tool: `cat > f <<EOF`, `echo KEY > f`, `printf ... | tee f`. The guard scans the literal text that a command writes to a file:
+
+- a here-document or here-string that feeds a command which also writes to a file (`cat > f <<EOF`, `tee f <<< text`);
+- text piped from `echo` or `printf` into a command that writes to a file (`echo KEY | tee f`);
+- the arguments of `echo` or `printf` when the same command redirects to a file (`echo KEY >> f`);
+- the same inside `bash -c "..."` and `sudo`, `env` and other wrappers, as the command guard reads them.
+
+"Writes to a file" is the same reader as `bash-write-guard`: redirects and `tee`, `cp`, `sed -i` and so on. Writes to `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty` and `>&2` do not count. **A command that only reads is never scanned:** `grep KEY file`, `echo KEY`, `curl -H "Authorization: ..."`, `git log --grep KEY`, `cat <<EOF` to the screen all pass.
+
+Why this design, and not "scan the whole command for secrets": a secret in a command that does not write it (a `curl` header, a search term) is not a file leak, the plan says not to block a command that only reads, and the pre-commit scan (T6) is the backstop for what ends up in a file. The cost is the limits below.
+
+Not seen: `python3 -c` or a script that opens the file itself, `sed -i 's/x/KEY/'`, `dd`, `node -e`, `awk`, a value held in a variable (`echo $KEY > f` writes no literal), text that `cat other > f` copies, a command that cannot be read (the command guard blocks it as `CMD_UNPARSABLE`).
+
+### Fail mode
+
+This is the one guard that does **not** fail closed everywhere. It catches its own errors and decides by the HIPAA setting. The dispatcher still fails closed for every other guard.
+
+| Project | The scan crashes | Event |
+|---|---|---|
+| HIPAA (`phi = "block"`) | the call is **blocked**, `GUARD_ERROR` | `block` |
+| any other | the call is **allowed** with a warning that the write was not checked | `warn`, `GUARD_ERROR` |
+
+"HIPAA" is `prompt_check.is_hipaa()`: `phi = "block"` after the layers of the prompt-guard config are merged. **If that setting cannot be read** (an unreadable file, bytes that are not UTF-8, prompt-guard not installed), the project counts as HIPAA and the write is blocked. The prompt hook (`UserPromptSubmit`) uses the same rule.
+
+A bad project patterns file or an invalid action value is not a crash: prompt-guard skips it, and the message of a finding ends with `Config warnings: ...`.
+
+### Content scan limits
+
+- **Regex rules.** Free-text PHI (names, diagnoses in a sentence) is not seen. `allow` does not mean "no PHI". The semantic check is a later phase (ADR 0006).
+- **An edit is read alone.** A secret that an edit completes by joining its `new_string` to the text around it is not seen. A secret split over two MultiEdit edits is not seen.
+- **Rewriting a file that already has a flagged value blocks** (a Write sends the whole content). The developer allow-lists a fake in `prompt-patterns.json`, or the agent removes the value.
+- **The HIPAA setting is a file the agent can edit.** `_bmad/custom/prompt-guard.toml` is not protected (see "Known limits"). An agent that sets `phi = "warn"` turns the PHI block into a warning. This is a Phase 2 todo.
+- **Test data that looks real** (a valid-looking phone number or email in a fixture) blocks in a HIPAA project. Use the allow-listed fakes, or add the fake to the project's `allow` list.
+- **Other tools** (MCP servers that write files) are not routed to this guard.
+
 ## Project extensions
 
 Create `_bmad/custom/project/guard/tool-rules.json`. It can only add.
@@ -216,7 +275,7 @@ The guard reads the command text. It cannot see what the command text does when 
 - **Globs:** `cat .e*` is not caught; `cat .env*` is. A glob in a folder part (`*/node_modules`) is treated as not provable for `rm`.
 - **Search inside folders:** Grep and `grep -r` over a folder can read a sensitive file inside it. Name-based rules cannot see that.
 - **Other tools and MCP servers** are not routed to these guards.
-- **Writes that change the guard's own inputs:** an edit of `.git/config` or `.git/hooks` is not a `core.hooksPath` change by name. Edits of the guard scripts, the guard skills and `.claude/settings.json` are blocked by `DOC_GUARD_SCRIPTS`; a write from `python -c` or a script file is not seen. `_bmad/custom/prompt-guard.toml` and other override files that the developer wrote (not in the manifest) are not protected.
+- **Writes that change the guard's own inputs:** an edit of `.git/config` or `.git/hooks` is not a `core.hooksPath` change by name. Edits of the guard scripts, the guard skills and `.claude/settings.json` are blocked by `DOC_GUARD_SCRIPTS`; a write from `python -c` or a script file is not seen. `_bmad/custom/prompt-guard.toml` and other override files that the developer wrote (not in the manifest) are not protected; that includes the HIPAA setting (`phi = "block"`) the content scan reads.
 - **`aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host** are not export rules yet.
 - **`UPDATE` without `WHERE`** is not in the SQL rule. `git checkout .` and `git restore .` (throw away changes) are not rules yet. Both are todos in the Phase 2 plan.
 - **The extension file** (`_bmad/custom/project/guard/`) is protected from the file tools and from the shell commands listed above. A script the agent writes and runs (`python3 -c`, a script file, `node -e`) can still write it; so can `awk -i inplace`, `ed`, `tar -x`, an editor started from Bash and a path built from variables.

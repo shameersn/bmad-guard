@@ -60,7 +60,7 @@ Design consequence: a guard must treat every field as optional and fail closed w
 - **`"onFailure": "block"` on a hook entry: Verified (docs), v2.1.295+.** Turns a failure, timeout or non-2xx result into a block. We set it on the `PreToolUse` entry as a second layer behind the dispatcher's own `try/except`. Its exact behaviour is Unverified (not run).
 - **No decision on `SessionStart`, `InstructionsLoaded`, `Setup`:** they cannot block. Verified (docs).
 - **Hooks do not override permission rules: Verified (docs).** A matching `deny` rule blocks the call whatever a `PreToolUse` hook returns, and a matching `ask` rule still asks when the hook says `allow`. So deny rules are a real second layer (and a hook cannot weaken them).
-- **What we use:** `PreToolUse` guards: exit 2 and one message on stderr, for a verdict and for a failure alike (one mechanism, no JSON to get wrong). `UserPromptSubmit`: the Phase 1 JSON `decision: block`. `SessionStart`: never blocks, exit 0 always.
+- **What we use:** `PreToolUse` guards: exit 2 and one message on stderr, for a verdict and for a failure alike (one mechanism, no JSON to get wrong). A warning that does not block (T5): exit 0 and JSON with `systemMessage` and `hookSpecificOutput.additionalContext` (section 13). `UserPromptSubmit`: the Phase 1 JSON `decision: block`. `SessionStart`: never blocks, exit 0 always.
 - Whether exit 2 still blocks when the session runs in `bypassPermissions` mode: **Unverified.**
 
 ## 3. `SessionStart` output
@@ -206,6 +206,27 @@ What the gate takes from the hook input and from BMAD:
 - **Subagents.** bmad-build hands the code to a subagent. Section 1 lists `agent_id` and `agent_type` for hooks that run inside a subagent, so those calls reach the same `PreToolUse` hook. Whether their `session_id` is the parent's is **Unverified**. The build record then holds whatever id the hook gets; T7 must compare the reviewer's id with it (see open check 7).
 - **A block is exit 2 with the reasons on stderr** (section 2), like the other guards. The `--check` command line prints the same lines on stdout and exits 1, so the override can stop before any code is written.
 
+## 13. What T5 builds (content scan, and a warning that does not block)
+
+Rules, fail mode, the Bash content design and limits: `module/skills/tool-guard/references/guard-rules.md` ("Content scan").
+
+**How a `PreToolUse` hook warns without blocking.** Exit 0 and print JSON:
+
+```json
+{"systemMessage": "...", "hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "..."}}
+```
+
+| Part | What it does | Status |
+|---|---|---|
+| `hookSpecificOutput.additionalContext` | Text added to the model's context next to the tool result, as a system reminder. Supported for `PreToolUse` ("Add context for Claude" section; field table of the PreToolUse decision control). Ignored when `permissionDecision` is `defer`. Not shown in the chat. | **Verified (docs)**, 2026-11-25 (hooks page, read at about two thirds). Not run by us. No minimum version found in the text we read. |
+| top-level `systemMessage` | "Warning message shown to the user." A field every event accepts. The page says some events drop it (Setup, InstructionsLoaded, MessageDisplay); the text we read does not say it is dropped for `PreToolUse`. | The field: **Verified (docs)**. That it is shown for `PreToolUse`: **Unverified** (not run, no model session). The model still gets the message through `additionalContext` if the user line is not drawn. |
+| `permissionDecision` | **Not sent for a warning.** `allow` "skips the permission prompt" (deny and ask rules still apply). A warning must not approve the write, so the normal permission flow stays as it is. | **Verified (docs)** |
+
+- The same text goes to both fields. All warnings of one call are in one message. When a call has a block and a warning, the call is blocked (exit 2) and the stderr message also lists the warnings (stdout JSON is not read on exit 2).
+- **Unverified, to see in a real session:** how the terminal draws a `PreToolUse` `systemMessage`, and that the model reacts to the `additionalContext` reminder (open check 8).
+- **Tool input fields the content scan reads** (section 11): Write `content`; Edit `new_string`; MultiEdit `edits[].new_string`; NotebookEdit `new_source`; Bash `command`. Same mark as section 11: strings in the 2.1.326 binary, not run.
+- **`UserPromptSubmit` was already wired** by T1 (`hook_wiring.HOOKS`, the managed-settings template, the setup script and `--check`). T5 changed only the hook script: a crash now blocks in a HIPAA project (JSON `decision: block`, exit 0) and warns elsewhere (section 2).
+
 ## Open checks (to close in T2 or the pilot)
 
 1. Run one real blocked `PreToolUse` call (exit 2, stderr reaches the model) on 2.1.326, and one crash with `onFailure: "block"`. Needs a working model session.
@@ -215,3 +236,4 @@ What the gate takes from the hook input and from BMAD:
 5. See how the terminal UI shows a `SessionStart` `systemMessage`.
 6. Read the remaining third of the hooks page and the full settings reference for anything that changes the above.
 7. Check whether a hook that runs for a subagent's tool call gets the parent's `session_id` or its own (T4 records it as the build session, T7 compares the reviewer's id with it). Needs a real model session.
+8. See a real `PreToolUse` warning (`CONTENT_PHI` in a project that is not HIPAA) in Claude Code: is the `systemMessage` shown to the user, and does the model get the `additionalContext` reminder? Needs a real model session. (T5)
