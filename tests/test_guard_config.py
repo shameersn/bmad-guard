@@ -117,6 +117,24 @@ class BuiltinRulesTests(unittest.TestCase):
         self.assertEqual(hosts, ["localhost", "127.0.0.1", "::1"])
 
 
+class DocsTests(unittest.TestCase):
+    def test_the_skill_doc_names_every_rule_id(self):
+        hw = importlib.import_module("hook_wiring")
+        text = (gc.SKILL_ROOT / "references/guard-rules.md").read_text(encoding="utf-8")
+        for rule_id in [*EXPECTED_RULE_IDS, *(rule_id for rule_id, _, _ in hw.SENSITIVE_PATHS)]:
+            with self.subTest(rule=rule_id):
+                self.assertIn(f"`{rule_id}`", text)
+
+    def test_the_rollout_doc_lists_every_deny_pattern(self):
+        hw = importlib.import_module("hook_wiring")
+        text = (gc.SKILL_ROOT.parents[2] / "docs/managed-settings-rollout.md").read_text(encoding="utf-8")
+        for rule_id, patterns, carve_outs in hw.SENSITIVE_PATHS:
+            self.assertIn(f"`{rule_id}`", text)
+            for pattern in (*patterns, *carve_outs):
+                with self.subTest(pattern=pattern):
+                    self.assertIn(f"`{pattern}`", text)
+
+
 class ExtensionTests(GuardTestCase):
     def extension(self, data) -> None:
         text = data if isinstance(data, str) else json.dumps(data)

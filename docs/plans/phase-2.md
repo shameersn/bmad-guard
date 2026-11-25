@@ -161,7 +161,7 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Pilot machine check.** Every Claude Code project on the machine has the module installed and `setup_guard.py --check` says `up to date`. A project without it blocks every tool call. Keep a list of pilot machines and their projects. Owner: Shameer with IT.
 - [ ] **Claude Code 2.1.295 or later** on every pilot machine (`onFailure: "block"` needs it). Checked version: 2.1.326. Owner: IT.
 - [ ] **Keep `allowManagedHooksOnly: true` in the pilot.** Tell pilot developers first: it turns off their personal and plugin hooks. Owner: Shameer.
-- [ ] **Run the rollout doc test** ("How to test", steps 1–7) on one machine and record the results. Owner: Shameer.
+- [ ] **Run the rollout doc test** ("How to test", steps 1–8) on one machine and record the results. Owner: Shameer.
 - [ ] **Rollback tested** on that machine (delete the file, `/status` no longer shows it).
 
 **Before the full IT rollout (open item 3):**
