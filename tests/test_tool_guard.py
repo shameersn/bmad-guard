@@ -179,6 +179,46 @@ class RunTests(unittest.TestCase):
         self.assertIn("- B (g2): second", text)
 
 
+def warn_guard(name: str, tools: tuple[str, ...], codes: list[str], detail: str = "") -> hc.Guard:
+    def check(payload: dict, root: Path) -> list[hc.Verdict]:
+        return [hc.Verdict(code, f"{code} reason", name, severity="warn", detail=detail) for code in codes]
+
+    return hc.Guard(name, tools, check)
+
+
+class WarnVerdictTests(unittest.TestCase):
+    """A guard may warn: the call goes ahead, with one message for the developer and the model."""
+
+    def test_blocks_and_warnings_are_told_apart(self):
+        block, warn = hc.Verdict("A", "a", "g"), hc.Verdict("B", "b", "g", severity="warn")
+        self.assertEqual(hc.blocks([block, warn]), [block])
+        self.assertEqual(hc.warnings([block, warn]), [warn])
+        self.assertEqual(block.severity, "block")  # the default: existing guards are unchanged
+
+    def test_run_returns_warnings_next_to_blocks(self):
+        guards = [guard("g", ("Bash",), ["A"]), warn_guard("w", ("Bash",), ["B"])]
+        verdicts = pt.run(json.dumps(CALL), guards, root=Path("/fake"))[1]
+        self.assertEqual([(v.code, v.severity) for v in verdicts], [("A", "block"), ("B", "warn")])
+
+    def test_the_block_message_also_lists_the_warnings(self):
+        text = pt.message("Write", [hc.Verdict("A", "first", "g1"), hc.Verdict("W", "careful", "g2", severity="warn")])
+        self.assertIn("Blocked Write", text)
+        self.assertIn("- A (g1): first", text)
+        self.assertIn("Also (warnings, not blocking):", text)
+        self.assertLess(text.index("- A (g1)"), text.index("- W (g2)"))
+        self.assertEqual(text.count("- A (g1)") + text.count("- W (g2)"), 2)
+
+    def test_the_warning_output_shape(self):
+        out = pt.warning_output("Write", [hc.Verdict("W", "careful", "g", severity="warn")])
+        self.assertEqual(set(out), {"systemMessage", "hookSpecificOutput"})
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"], out["systemMessage"])
+        self.assertIn("W (g): careful", out["systemMessage"])
+        # no permissionDecision: an "allow" would skip the normal permission prompt
+        self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
+        self.assertNotIn("decision", out)
+
+
 class MainInProcessTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -219,6 +259,30 @@ class MainInProcessTests(unittest.TestCase):
         self.assertEqual((first["guard"], first["stage"], first["verdict"]), ("tool-guard", "tool", "block"))
         self.assertEqual((first["rule"], first["tool"], first["session_id"]), ("g", "Bash", "s-1"))
         self.assertNotIn("SECRET-COMMAND-TEXT", json.dumps(events))
+
+    def test_a_warning_allows_with_json_on_stdout_and_one_warn_event(self):
+        guards = [warn_guard("w", ("Bash",), ["W1", "W2"], detail="rule.a")]
+        code, out, err = self.call_entry(json.dumps(CALL), guards)
+        self.assertEqual((code, err), (0, ""))
+        answer = json.loads(out)
+        text = answer["systemMessage"]
+        self.assertEqual(text.count("[tool-guard]"), 1)  # all warnings in one message
+        self.assertIn("W1 (w)", text)
+        self.assertIn("W2 (w)", text)
+        self.assertIn("the call was allowed", text)
+        events = queue(self.root)
+        self.assertEqual([(e["reason_code"], e["verdict"]) for e in events], [("W1", "warn"), ("W2", "warn")])
+        self.assertEqual((events[0]["rule"], events[0]["detail"], events[0]["session_id"]), ("w", "rule.a", "s-1"))
+
+    def test_a_warning_and_a_block_give_one_message_and_exit_2(self):
+        guards = [warn_guard("w", ("Bash",), ["W1"]), guard("g", ("Bash",), ["A"])]
+        code, out, err = self.call_entry(json.dumps(CALL), guards)
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err.count("[tool-guard]"), 1)
+        self.assertIn("A (g)", err)
+        self.assertIn("W1 (w)", err)
+        events = queue(self.root)
+        self.assertEqual(sorted((e["reason_code"], e["verdict"]) for e in events), [("A", "block"), ("W1", "warn")])
 
     def test_malformed_input_blocks_and_records_bad_input(self):
         code, _, err = self.call_entry("{not json")
