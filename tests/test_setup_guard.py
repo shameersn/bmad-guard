@@ -206,6 +206,39 @@ class HookFileTests(Base):
         self.assertIn("conflict _bmad/custom/guard/hooks/pre-commit (changed since install)", out)
 
 
+class RealHookFilesTests(Base):
+    """T7: the real hook folder of the module (with `pre-push`) is installed executable and covered by --check."""
+
+    def setUp(self):
+        super().setUp()
+        shutil.copytree(ROOT / "module/hooks", self.module / "module/hooks", dirs_exist_ok=True)
+        git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "-A")
+        git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "real hooks")
+        self.hooks = self.project / sg.HOOKS_REL
+
+    def test_pre_push_and_its_check_are_installed_executable_and_recorded(self):
+        run(self.project, self.module)
+        for name in ("pre-push", "guard_pre_push.py", "pre-commit"):
+            with self.subTest(name=name):
+                self.assertTrue((self.hooks / name).stat().st_mode & 0o111)
+                self.assertIn(f"{sg.HOOKS_REL}/{name}", self.manifest()["files"])
+        self.assertEqual(run(self.project, self.module, "--check")[0], 0)
+
+    def test_check_reports_a_pre_push_that_is_not_executable(self):
+        run(self.project, self.module)
+        (self.hooks / "pre-push").chmod(0o644)
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("update   _bmad/custom/guard/hooks/pre-push (not executable)", out)
+
+    def test_check_reports_a_missing_pre_push(self):
+        run(self.project, self.module)
+        (self.hooks / "pre-push").unlink()
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("_bmad/custom/guard/hooks/pre-push", out)
+
+
 class UpdateTests(Base):
     def commit_module(self, msg: str, tag: str | None = None):
         git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "-A")
