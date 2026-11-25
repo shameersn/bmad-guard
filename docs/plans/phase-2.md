@@ -146,6 +146,7 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 - **`UserPromptSubmit` wiring:** already done in T1 (`hook_wiring.HOOKS`, the managed template, the setup script, `--check`, tests). T5 changed only the script's crash behaviour. A marker test shows the prompt hook's events hold rule ids and the error type only.
 - **No path and no BAD_HOOK_INPUT from the scan:** a call with no text field passes this guard (the path guards report bad paths).
 - **Install test:** four smoke calls: a fake key blocks, plain text passes, PHI warns, PHI blocks with a HIPAA setting written in the sandbox.
+- **T5 review decisions:** the guard skills' override files are protected (`DOC_GUARD_SCRIPTS`); an unparsable `UserPromptSubmit` payload still passes in HIPAA projects (look again with pilot data); Edit scans `new_string` only (look again with false-block numbers); PHI outside HIPAA projects is a warning.
 
 ### T6. Git hooks: pre-commit (Days 9–11)
 
@@ -215,7 +216,7 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Export rules:** `aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host.
 - [ ] **Real block seen** in Claude Code for one command rule and one path rule (rollout doc, test step 8).
 - [ ] **Revisit person-only resolutions** (`DOC_APPROVAL_FIELD` on `Resolved:` lines) with the pilot's false-block numbers. Owner: Shameer.
-- [ ] **Protect developer-written guard overrides** (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/tool-guard.toml`) that are not in the setup manifest, if the pilot shows agents editing them. T5 raises the stakes: `prompt-guard.toml` holds the HIPAA setting (`phi = "block"`), so an agent that edits it turns the PHI block into a warning. Recommend protecting at least that file (`DOC_GUARD_SCRIPTS`) before the first HIPAA pilot. Owner: Shameer.
+- [x] **Protect developer-written guard overrides** (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/tool-guard.toml`, and the other guard skills' `.toml`). Done in the T5 review: `DOC_GUARD_SCRIPTS` covers `_bmad/custom/<guard skill>.toml`, so the HIPAA setting (`phi = "block"`) cannot be weakened by the agent.
 
 ## Write gate todos (from T4)
 
