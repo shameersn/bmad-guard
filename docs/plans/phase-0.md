@@ -5,7 +5,7 @@
 | Ticket | GUARD-0 |
 | Time box | 1 week (5 working days). Each spike: 1 day at most. |
 | Approvers | Shameer, Manesh G (PR approval). ADRs: whole team. |
-| Status | Draft, waiting for approval |
+| Status | Done (2026-11-25) |
 | Overview doc | "Guarded BMAD: Org Rollout Plan" (Claude doc) |
 
 ## Goal
@@ -150,10 +150,10 @@ Write `docs/plans/phase-1.md` (guard module) from the spike results, on `feature
 
 Phase 1 starts only when all of these are true:
 
-- [ ] The 5 ADRs are approved by the team.
-- [ ] `REPORT.md` exists for each of the 3 spikes, with pass or fail and evidence.
-- [ ] The roadmap in the Claude doc is updated.
-- [ ] A draft Phase 1 plan exists.
+- [x] The 5 ADRs are approved by the team.
+- [x] `REPORT.md` exists for each of the 3 spikes, with pass or fail and evidence.
+- [x] The roadmap in the Claude doc is updated.
+- [x] A draft Phase 1 plan exists.
 
 ## Risks
 

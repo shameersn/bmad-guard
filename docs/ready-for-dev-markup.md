@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Draft for review |
+| Status | Agreed by Manesh G and the BA lead (2026-11-25) |
 | Decide | Manesh G and one BA lead (Phase 1 plan, open question 5) |
 | Related | ADR 0004 (ready-for-dev gate), Phase 1 task T7 |
 | Script | `module/skills/ready-for-dev-gate/scripts/ready_for_dev.py` |

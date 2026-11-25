@@ -1,6 +1,6 @@
 # 0001 — Stock BMAD plus an external guard module
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-25)
 - **Date:** 2026-11-24
 - **Project:** Other (Experion, Guarded BMAD pilot)
 - **Deciders:** Shameer (architect), Manesh G; team approval by PR

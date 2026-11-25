@@ -1,6 +1,6 @@
 # 0002 — Enforcement layers: local hooks now, CI later
 
-- **Status:** Proposed. Prompt-gateway part superseded by [0006](0006-local-prompt-check.md).
+- **Status:** Accepted (2026-11-25). Prompt-gateway part superseded by [0006](0006-local-prompt-check.md).
 - **Date:** 2026-11-24
 - **Project:** Other (Experion, Guarded BMAD pilot)
 - **Deciders:** Shameer (architect), Manesh G; team approval by PR
