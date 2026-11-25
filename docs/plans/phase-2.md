@@ -95,7 +95,9 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 - `status` and `approval_status` block only for the value `approved` (added, removed or changed). `pending-approval` and BMAD's phase values are ordinary edits, because `bmad-build` writes them.
 - An AI edit cannot add, change or remove a `Resolved:` line or `[ASSUMPTION-RESOLVED ...]` tag (`DOC_APPROVAL_FIELD`), so a question is answered by a person. `DOC_QUESTION_REMOVED` finds the item that is simply gone; an id still present, open or resolved, is not removed.
 - `MultiEdit` is in the matcher (it exists in 2.1.326; `docs/hooks.md` section 11). Run the setup script again to update a project's wiring.
-- New rule ids: `DOC_APPROVAL_FIELD`, `DOC_APPROVAL_STATE`, `DOC_GUARD_RECORD`, `DOC_GUARD_CONFIG`, `DOC_QUESTION_REMOVED`.
+- New rule ids: `DOC_APPROVAL_FIELD`, `DOC_APPROVAL_STATE`, `DOC_GUARD_RECORD`, `DOC_GUARD_CONFIG`, `DOC_GUARD_SCRIPTS`, `DOC_QUESTION_REMOVED`.
+- **Guard protects itself** (`DOC_GUARD_SCRIPTS`, from the T3 review): agent writes to `_bmad/custom/guard/**`, `.claude/settings.json` / `settings.local.json`, the guard skills and every file in the setup manifest are blocked, for file tools and shell writes.
+- **T3 review decisions:** resolutions stay person-only in the pilot (revisit after the false-block numbers); every Markdown file is checked; no Bash check for approval fields in `.md` files (T6 pre-commit is the backstop); `MultiEdit` stays.
 
 ### T4. Write gate (Days 6–8)
 
@@ -186,6 +188,8 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 - [ ] **Rule:** `UPDATE` without `WHERE` in the SQL rule.
 - [ ] **Export rules:** `aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host.
 - [ ] **Real block seen** in Claude Code for one command rule and one path rule (rollout doc, test step 8).
+- [ ] **Revisit person-only resolutions** (`DOC_APPROVAL_FIELD` on `Resolved:` lines) with the pilot's false-block numbers. Owner: Shameer.
+- [ ] **Protect developer-written guard overrides** (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/tool-guard.toml`) that are not in the setup manifest, if the pilot shows agents editing them.
 
 ## Open items for later phases
 
