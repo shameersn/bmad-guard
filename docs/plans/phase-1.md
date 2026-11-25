@@ -165,7 +165,7 @@ Phase 2 starts only when all of these are true:
 - [x] The T9 install and upgrade test passes: no edits to upstream skill files.
 - [x] Every override resolves on 6.12.4.
 - [x] The ready-for-dev markup is agreed with the BA team.
-- [ ] A draft Phase 2 plan exists. (Ticked when the Phase 2 plan PR merges.)
+- [x] A draft Phase 2 plan exists (`docs/plans/phase-2.md`).
 
 ## Open items for later phases
 
