@@ -1,0 +1,22 @@
+# bmad-guard team override for bmad-product-brief (BMAD 6.12.4). Installed by scripts/setup_guard.py;
+# do not edit in a project. Project-specific facts: add markdown files under
+# _bmad/custom/project/bmad-product-brief/ (loaded by the last persistent_facts entry).
+
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/guard/references/confidence-scoring.md",
+  "Frontmatter rule (Guarded BMAD): brief.md's frontmatter carries `approval_status` (draft, then review, then approved) plus `confidence`, `confidence_label` and `confidence_rationale`. Add them when you create brief.md, next to BMAD's own fields. `approval_status` is separate from BMAD's `status` (draft/final): never use `status` for approval, and never write `approval_status: approved` yourself — only Warden (agent-approval-grant) does that, after two explicit confirmations.",
+  "Confidence step (Guarded BMAD): at Finalize, after the polish passes and before external handoffs, self-assess confidence as the Confidence Scoring facts describe, write the three confidence fields into brief.md's frontmatter, and tell the user the score and rationale.",
+  "Edit after approval (Guarded BMAD): whenever the brief's content changes during this conversation (before or after Finalize) and brief.md's `approval_status` is 'approved', set it back to 'draft' in the same save. Then log it right away via skill:agent-project-logger with action 'Brief updated via chat: <one-line summary, no content>', event='BRIEF_UPDATED', stage='brief', doc_path=<brief.md path>. One log per change, not batched.",
+  "file:{project-root}/_bmad/custom/project/bmad-product-brief/*.md",
+]
+activation_steps_prepend = [
+  "skill:agent-project-logger with action 'Brief generation started', event='BRIEF_STARTED', stage='brief'",
+]
+on_complete = [
+  "skill:agent-project-logger with action 'Brief generated', event='BRIEF_GENERATED', stage='brief', doc_path=<brief.md path>, doc_status=<brief.md approval_status>",
+  "skill:agent-project-logger with action 'Confidence scored for brief', event='CONFIDENCE_SCORED', stage='brief', doc_path=<brief.md path>, doc_status=<brief.md approval_status>, confidence=<brief.md frontmatter confidence>, confidence_label=<frontmatter confidence_label>, confidence_rationale=<frontmatter confidence_rationale>",
+  "skill:experion-brief-review",
+  "Set brief.md's approval_status frontmatter field to 'review' and save, now that the review report exists.",
+  "skill:agent-approval-grant with doc_type='brief', doc_path=<brief.md path>, doc_label='brief', review_artifact_label='review report', review_skill='experion-brief-review'",
+]

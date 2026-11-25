@@ -109,6 +109,7 @@ Grow `spikes/install-upgrade/setup_guard.py` into `scripts/setup_guard.py`:
 - One shared `confidence-scoring.md` in the module (the 5 copies are identical; see `spikes/skill-diff/REPORT.md`).
 - Confidence step for brief, PRD, architecture, UX, epics: into the 5 `_bmad/custom/<skill>.toml` files (`persistent_facts` / `on_complete`), not into stock skills.
 - Add `confidence`, `confidence_label`, `confidence_rationale` to the 3 custom templates (brief, PRD, architecture spine). Epics have no template key: the toml instruction adds the fields.
+  - *Changed in T6 (25 Nov):* no template overrides. The custom templates were copies of older stock templates (the PRD one already 111 lines behind 6.12.4), i.e. forks. The overrides tell each workflow to add the frontmatter fields instead.
 - Move `bmad-dev-story.toml`, `bmad-quick-dev.toml`, `bmad-create-story.toml` to `bmad-build.toml` (6.12.4 removed those skills).
 - Check every override with `resolve_customization.py` in a 6.12.4 sandbox.
 

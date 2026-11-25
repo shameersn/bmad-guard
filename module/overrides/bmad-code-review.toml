@@ -1,0 +1,12 @@
+# bmad-guard team override for bmad-code-review (BMAD 6.12.4). Installed by scripts/setup_guard.py;
+# do not edit in a project. Project-specific facts (e.g. which context files to load before a review):
+# add markdown files under _bmad/custom/project/bmad-code-review/ (loaded by the last entry below).
+
+[workflow]
+persistent_facts = [
+  "Independent review (Guarded BMAD): this review must run in a fresh session, never the session that generated the code under review, to avoid self-review bias. If this session also generated the code, say so plainly and recommend restarting the review in a fresh session before going on.",
+  "Severity levels (Guarded BMAD): report findings with exactly these levels. CRITICAL: security flaw or data-loss risk; must be fixed before going on; escalate to the Tech Lead. HIGH: plan deviation, unhandled exception or performance risk; must be resolved before developer review. MEDIUM: standards violation, missing log, naming issue; should be fixed, or the developer records why not. LOW: style or minor suggestion; optional.",
+  "Diff-to-plan check (Guarded BMAD): in every review, list every changed file from git diff and compare it with the plan's Impacted Modules & Files. A file in the diff but not in the plan is a finding; a file in the plan but not in the diff is a sign of incomplete work. Put the result of this check in the review output.",
+  "Review confidence (Guarded BMAD): at the Present step, before announcing results, self-assess `confidence` (0-100), `confidence_label` (Low <50, Medium 50-79, High 80+) and `confidence_rationale` (1-2 sentences) for how complete THIS REVIEW was, not how good the code is. Lower it for any entry in {failed_layers}, for {review_mode} = 'no-spec' (acceptance criteria could not be checked), for a diff that was chunked or too large to review whole, and for any finding marked best-effort. Show the score with the summary (in the story's Review Findings section when {spec_file} is set). Then log via skill:agent-project-logger with action 'Confidence scored for code review', event='CONFIDENCE_SCORED', stage='code-review', doc_path=<{spec_file} if set>, confidence=<confidence>, confidence_label=<label>, confidence_rationale=<rationale>.",
+  "file:{project-root}/_bmad/custom/project/bmad-code-review/*.md",
+]

@@ -1,0 +1,13 @@
+# bmad-guard team override for bmad-ux (BMAD 6.12.4). Installed by scripts/setup_guard.py;
+# do not edit in a project. Project-specific facts: add markdown files under
+# _bmad/custom/project/bmad-ux/ (loaded by the last persistent_facts entry).
+
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/guard/references/confidence-scoring.md",
+  "Confidence step (Guarded BMAD): when the open items are triaged at Finalize, self-assess confidence as the Confidence Scoring facts describe and write `confidence`, `confidence_label` and `confidence_rationale` into EXPERIENCE.md's frontmatter only (DESIGN.md's frontmatter keeps its fixed shape). Tell the user the score and rationale.",
+  "file:{project-root}/_bmad/custom/project/bmad-ux/*.md",
+]
+on_complete = [
+  "skill:agent-project-logger with action 'Confidence scored for UX experience spec', event='CONFIDENCE_SCORED', stage='ux', doc_path=<EXPERIENCE.md path>, confidence=<EXPERIENCE.md frontmatter confidence>, confidence_label=<frontmatter confidence_label>, confidence_rationale=<frontmatter confidence_rationale>",
+]

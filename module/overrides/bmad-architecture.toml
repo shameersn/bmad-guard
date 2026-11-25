@@ -1,0 +1,23 @@
+# bmad-guard team override for bmad-architecture (BMAD 6.12.4). Installed by scripts/setup_guard.py;
+# do not edit in a project. Project-specific facts: add markdown files under
+# _bmad/custom/project/bmad-architecture/ (loaded by the last persistent_facts entry).
+
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/guard/references/confidence-scoring.md",
+  "Frontmatter rule (Guarded BMAD): the architecture spine's frontmatter carries `approval_status` (draft, then review, then approved) plus `confidence`, `confidence_label` and `confidence_rationale`. Add them when you create the spine, next to BMAD's own fields. `approval_status` is separate from BMAD's `status` (draft/final): never use `status` for approval, and never write `approval_status: approved` yourself — only Warden (agent-approval-grant) does that, after two explicit confirmations.",
+  "Confidence step (Guarded BMAD): at Finalize, after triage and before renderings and external handoffs, self-assess confidence as the Confidence Scoring facts describe, write the three confidence fields into the spine's frontmatter, and tell the user the score and rationale.",
+  "Review report (Guarded BMAD): whenever the Reviewer Gate's consolidated Validate report is produced (at Finalize or under a standalone Validate intent, including when Warden asks for a fresh review), write it to {doc_workspace}/review-report.md with frontmatter `architecture_version` (the spine's current frontmatter `version`, 0 if absent, plus one) and `date`, ahead of the report body. It replaces the report for any earlier version. The per-lens files under reviews/ are not the canonical report.",
+  "Edit after approval (Guarded BMAD): whenever the spine's content changes during this conversation (before or after Finalize) and its `approval_status` is 'approved', set it back to 'draft' in the same save. Then log it right away via skill:agent-project-logger with action 'Architecture updated via chat: <one-line summary, no content>', event='ARCHITECTURE_UPDATED', stage='architecture', doc_path=<spine path>. One log per change, not batched.",
+  "file:{project-root}/_bmad/custom/project/bmad-architecture/*.md",
+]
+activation_steps_prepend = [
+  "skill:agent-approval-gate-check with doc_type='prd', doc_path=<path to the PRD this architecture is based on>, doc_label='PRD', downstream_label='architecture generation'",
+  "skill:agent-project-logger with action 'Architecture generation started', event='ARCHITECTURE_STARTED', stage='architecture'",
+]
+on_complete = [
+  "skill:agent-project-logger with action 'Architecture generated', event='ARCHITECTURE_GENERATED', stage='architecture', doc_path=<spine path>, doc_status=<spine approval_status>",
+  "skill:agent-project-logger with action 'Confidence scored for architecture spine', event='CONFIDENCE_SCORED', stage='architecture', doc_path=<spine path>, doc_status=<spine approval_status>, confidence=<spine frontmatter confidence>, confidence_label=<frontmatter confidence_label>, confidence_rationale=<frontmatter confidence_rationale>",
+  "Set the spine's approval_status frontmatter field to 'review' and save, now that the review is current.",
+  "skill:agent-approval-grant with doc_type='architecture', doc_path=<spine path>, doc_label='architecture spine'",
+]

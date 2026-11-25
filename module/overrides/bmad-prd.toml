@@ -1,0 +1,23 @@
+# bmad-guard team override for bmad-prd (BMAD 6.12.4). Installed by scripts/setup_guard.py;
+# do not edit in a project. Project-specific facts: add markdown files under
+# _bmad/custom/project/bmad-prd/ (loaded by the last persistent_facts entry).
+
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/guard/references/confidence-scoring.md",
+  "Frontmatter rule (Guarded BMAD): prd.md's frontmatter carries `approval_status` (draft, then review, then approved) plus `confidence`, `confidence_label` and `confidence_rationale`. Add them when you create prd.md, next to BMAD's own fields. `approval_status` is separate from BMAD's `status` (draft/final): never use `status` for approval, and never write `approval_status: approved` yourself — only Warden (agent-approval-grant) does that, after two explicit confirmations.",
+  "Confidence step (Guarded BMAD): at Finalize, after triaging open items and before external handoffs, self-assess confidence as the Confidence Scoring facts describe, write the three confidence fields into prd.md's frontmatter, and tell the user the score and rationale.",
+  "Validation report (Guarded BMAD): when the validation rubric's findings are written to {doc_workspace}/review-rubric.md (at Finalize or under the Validate intent, including when Warden asks for a fresh review), give that file frontmatter `prd_version` (prd.md's current frontmatter `version`, 0 if absent, plus one — the version the PRD will carry once approved), `title` and `date`, ahead of the findings. Warden checks `prd_version` to know the review is current.",
+  "Edit after approval (Guarded BMAD): whenever the PRD's content changes during this conversation (before or after Finalize) and prd.md's `approval_status` is 'approved', set it back to 'draft' in the same save. Then log it right away via skill:agent-project-logger with action 'PRD updated via chat: <one-line summary, no content>', event='PRD_UPDATED', stage='prd', doc_path=<prd.md path>. One log per change, not batched.",
+  "file:{project-root}/_bmad/custom/project/bmad-prd/*.md",
+]
+activation_steps_prepend = [
+  "skill:agent-approval-gate-check with doc_type='brief', doc_path=<path to the brief this PRD is based on>, doc_label='brief', downstream_label='PRD generation'",
+  "skill:agent-project-logger with action 'PRD generation started', event='PRD_STARTED', stage='prd'",
+]
+on_complete = [
+  "skill:agent-project-logger with action 'PRD generated', event='PRD_GENERATED', stage='prd', doc_path=<prd.md path>, doc_status=<prd.md approval_status>",
+  "skill:agent-project-logger with action 'Confidence scored for PRD', event='CONFIDENCE_SCORED', stage='prd', doc_path=<prd.md path>, doc_status=<prd.md approval_status>, confidence=<prd.md frontmatter confidence>, confidence_label=<frontmatter confidence_label>, confidence_rationale=<frontmatter confidence_rationale>",
+  "Set prd.md's approval_status frontmatter field to 'review' and save, now that the review artifact exists.",
+  "skill:agent-approval-grant with doc_type='prd', doc_path=<prd.md path>, doc_label='PRD'",
+]

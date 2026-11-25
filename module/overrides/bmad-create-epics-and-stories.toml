@@ -1,0 +1,14 @@
+# bmad-guard team override for bmad-create-epics-and-stories (BMAD 6.12.4). Installed by
+# scripts/setup_guard.py; do not edit in a project. Project-specific facts: add markdown files under
+# _bmad/custom/project/bmad-create-epics-and-stories/ (loaded by the last persistent_facts entry).
+
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/guard/references/confidence-scoring.md",
+  "Frontmatter rule (Guarded BMAD): epics.md's frontmatter carries `confidence`, `confidence_label` and `confidence_rationale`. Add them if the document has no such fields.",
+  "Confidence step (Guarded BMAD): in final validation, before you complete and save, self-assess confidence as the Confidence Scoring facts describe — for this document weigh unresolved requirement coverage gaps, deferred dependency or independence concerns, and story quality issues raised but not fully resolved. Write the three confidence fields into epics.md's frontmatter and tell the user the score and rationale.",
+  "Per-story file mirror (team preference): whenever a story is approved and appended to epics.md, also write or update a mirror file at {planning_artifacts}/epics/epic-{n}-{epic-slug}/story-{epic}.{story}-{slug}.md with that story's full content (title, As a / I want / So that, acceptance criteria). Create the per-epic folder if needed. epics.md stays the single canonical document that later steps read; say so in epics.md's Overview.",
+  "file:{project-root}/_bmad/custom/project/bmad-create-epics-and-stories/*.md",
+]
+# A single string: this skill's on_complete is not documented to accept a list.
+on_complete = "skill:agent-project-logger with action 'Confidence scored for epics and stories', event='CONFIDENCE_SCORED', stage='stories', doc_path=<epics.md path>, confidence=<epics.md frontmatter confidence>, confidence_label=<frontmatter confidence_label>, confidence_rationale=<frontmatter confidence_rationale>"
