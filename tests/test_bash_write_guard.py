@@ -429,6 +429,11 @@ class GuardScriptsTests(GuardTestCase):
             with self.subTest(command=command):
                 self.assertIn("DOC_GUARD_SCRIPTS", self.mine(command), command)
 
+    def test_shell_writes_to_guard_overrides_are_blocked(self):
+        self.assertIn("DOC_GUARD_SCRIPTS", self.mine("echo 'phi = \"warn\"' > _bmad/custom/prompt-guard.toml"))
+        self.assertIn("DOC_GUARD_SCRIPTS", self.mine("sed -i 's/block/warn/' _bmad/custom/prompt-guard.toml"))
+        self.allows("cat _bmad/custom/prompt-guard.toml", "echo x > _bmad/custom/bmad-prd.toml")
+
     def test_reading_and_running_the_guard_files_is_allowed(self):
         self.allows(
             "cat .claude/settings.json",
