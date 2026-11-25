@@ -31,7 +31,7 @@ Build the guard module in this repo and install it on stock BMAD with zero stock
 
 - Claude Code and git hooks that **enforce** the guards, and managed settings (Phase 2). Phase 1 builds the scripts the hooks will call.
 - Collector, ClickHouse, Grafana deployment (Phase 3).
-- Gateway server hosting (Phase 3 or later). Phase 1 only moves its code.
+- A gateway server: dropped by ADR 0006 (25 Nov). Prompts are checked locally instead (T8).
 - The token-optimiser work on `bmad-token-optimisation` (needs its own decision; see open questions).
 - CI checks in projects; org rollout.
 
@@ -50,7 +50,7 @@ From `experion-bmad` (`main`, plus one fix from `bmad-token-optimisation`):
 | `_bmad/custom/*.toml` + `templates/` | 12 overrides, 4 templates | n/a | 3 target skills that 6.12.4 removed |
 | Confidence-scoring edits in 5 stock skills | 9 edited + 5 added files | n/a | Move to overrides (T1) |
 | `scripts/revert-brief-status.js` (Husky) | Node | none | Port to Python in Phase 2 |
-| `service/prompt-gateway` branch | gateway server | ? | Move to `bmad-guard-gateway` |
+| `service/prompt-gateway` branch | gateway server | ? | Not moved (ADR 0006). Its pattern rules are the starting point for the local check (T8). |
 
 ## Tasks
 
@@ -127,13 +127,23 @@ Grow `spikes/install-upgrade/setup_guard.py` into `scripts/setup_guard.py`:
 
 **Done when:** tests cover pass, each block reason, deleted-question case, generic story, missing epic summary. (Wiring it into `bmad-build` as a hard block is Phase 2.)
 
-### T8. Move the gateway code (Day 9)
+### T8. Local prompt check (Day 9) — replaces "move the gateway code" (ADR 0006)
 
-- Copy the gateway server from `experion-bmad` branch `service/prompt-gateway` into `bmad-guard-gateway`, without history.
-- Remove secrets or client data if found (stop and report first).
-- Add a README and its existing tests, if any.
+New skill `module/skills/prompt-guard/` with `scripts/prompt_check.py`, standard library only. It checks prompt text locally; nothing is sent anywhere.
 
-**Done when:** the gateway repo runs its own tests (or the report says it has none).
+- **Rules**, starting from PromptGateway's pattern validators (read the pattern code only; never copy secrets or client data — stop and report if any are found):
+  - secrets: a vendored subset of gitleaks rules (MIT licence, keep the licence notice) plus an entropy check for random-looking strings;
+  - PII / PHI identifiers with validation: Luhn (cards), mod-11 (NHS numbers), Verhoeff (Aadhaar), and common formats (SSN, email, phone);
+  - prompt injection: patterns, recorded only;
+  - size: token estimate.
+- **Actions per category** from `customize.toml`: secrets block; PHI/PII block when the project is marked HIPAA, else warn; injection recorded.
+- **Project patterns and allow-listed fakes** in `_bmad/custom/project/guard/` (e.g. a client's MRN format; `sk_test_` keys).
+- **Output:** one JSON object (allow / warn / block, category, rule id) and one event with category and rule id — never the matched text.
+- **Hook script** for `UserPromptSubmit` in the same skill (wired into settings in Phase 2), replacing `prompt-gateway-guard`'s hook.
+- Retire `prompt-gateway-guard` (it calls the server): remove it from the module; its event codes stay documented.
+- **Test set:** fake positives and negatives; the test reports false-alarm and miss rates and fails above agreed limits.
+
+**Done when:** tests pass, including the test set limits; no rule file contains a real secret or client identifier; a stub prompt with a fake key is blocked and the event has no key text.
 
 ### T9. End-to-end install test and Gate 1 (Day 10)
 
@@ -159,11 +169,13 @@ Phase 2 starts only when all of these are true:
 
 ## Open items for later phases
 
-1. **Credential storage for developer keys (Phase 3, with ADR 0006).** Two keys arrive in Phase 3: the collector ingest key (`BMAD_GUARD_KEY`) and the gateway API key (`BMAD_GUARD_GATEWAY_KEY`, needed once PromptGateway runs as a shared service with `REQUIRE_API_KEY=true`). Today both come only from environment variables.
+1. **Credential storage for developer keys (Phase 3, with ADR 0007).** The collector ingest key (`BMAD_GUARD_KEY`) arrives in Phase 3. (The gateway key is gone with the gateway, ADR 0006.) Today it comes only from an environment variable.
    - Proposed: a per-user file outside every repo, `~/.config/bmad-guard/credentials` (mode 600), written once by the setup script; scripts read the environment variable first, then this file. Later option: the OS keychain.
    - Not a `.env` file in the project: the AI agent works in that folder and could read the key into its context, and a wrong `.gitignore` commits it.
    - Phase 2 hooks should deny the agent access to `~/.config/bmad-guard/`.
    - Raised by Shameer, 25 Nov. Decide in the Phase 3 plan.
+2. **Semantic prompt check (later phase, after the basic setup).** Catch PHI in free text, which patterns miss. Candidates: a Claude Code hook that asks a small Claude model (same vendor that already gets the prompt, no new BAA — check that this hook type works for prompts), or a small local model (Presidio / GLiNER). Decide by a spike measuring accuracy on the T8 test set, time per prompt and install size. Parked by Shameer, 25 Nov.
+3. **Other leak paths (Phase 2).** Claude Code deny rules in managed settings for sensitive paths (environment files, `*.pem`, data dumps), and a `PreToolUse` hook that blocks sensitive reads and data-export commands. Most sensitive data reaches the model through files and command output, not typed prompts (ADR 0006).
 
 ## Open questions (all decided)
 
@@ -180,7 +192,7 @@ Phase 2 starts only when all of these are true:
 | BA team cannot agree the markup in time | T7 builds the script against the default format; the gate stays advisory until agreed |
 | A harvested skill relies on behaviour 6.12.4 removed (e.g. `bmad-dev-story` steps) | Fix in the override or the guard skill; note it in the PR |
 | Two copies of Ledger differ (`.claude/skills` vs `skills/` vs branch) | Start from the branch fix 75b3099; diff the others and keep any extra fix |
-| Gateway branch holds secrets or client data | Stop, report, copy only clean files |
+| PromptGateway rule files hold secrets or client data | Read pattern code only; stop and report before copying anything |
 | Override append-only limits (T2) block a needed change | Put the behaviour in a guard skill instead; record it |
 
 ## How we work

@@ -1,6 +1,6 @@
 # 0002 — Enforcement layers: local hooks now, CI later
 
-- **Status:** Proposed
+- **Status:** Proposed. Prompt-gateway part superseded by [0006](0006-local-prompt-check.md).
 - **Date:** 2026-11-24
 - **Project:** Other (Experion, Guarded BMAD pilot)
 - **Deciders:** Shameer (architect), Manesh G; team approval by PR
@@ -48,7 +48,7 @@ Fail modes:
 | Destructive-command check (`PreToolUse`, local) | **Fail closed**: block. It runs locally, so it does not depend on the network. |
 | AI write to approval fields (`PreToolUse`, local) | **Fail closed**: block. Only Warden's script, after human confirmation, may set them. |
 | Ready-for-dev gate (ADR 0004) | **Fail closed**: block the move to development. |
-| Prompt gateway (remote) | **Fail open**: allow, log, warn the user. |
+| ~~Prompt gateway (remote)~~ | ~~Fail open~~. Superseded by ADR 0006: a local prompt check that can block. |
 | Event logging (ADR 0003) | Never blocks; events queue locally. |
 
 ## Consequences
