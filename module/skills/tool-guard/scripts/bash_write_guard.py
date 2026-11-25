@@ -5,7 +5,7 @@
 
 The protected places are the ones in document_guard.py, with the same reason codes:
   DOC_APPROVAL_STATE (approval-state.json), DOC_GUARD_RECORD (_bmad-output/guard/**),
-  DOC_GUARD_CONFIG (_bmad/custom/project/guard/**).
+  DOC_GUARD_CONFIG (_bmad/custom/project/guard/**), DOC_GUARD_SCRIPTS (the guard files, see document_guard.py).
 Reading them stays allowed (`cat`, `grep`, `git diff`, `python3 script.py --state-file ...`).
 
 A command writes to a place when it names it as the target of:
@@ -53,6 +53,9 @@ FRAGMENTS = (  # for a target with a variable in it: the part of the path that g
     (dg.STATE_FILE_NAME, "DOC_APPROVAL_STATE"),
     ("_bmad-output/guard", "DOC_GUARD_RECORD"),
     ("_bmad/custom/project/guard", "DOC_GUARD_CONFIG"),
+    (dg.GUARD_DIR_REL, "DOC_GUARD_SCRIPTS"),
+    (".claude/settings", "DOC_GUARD_SCRIPTS"),
+    *((f"/{skill}/", "DOC_GUARD_SCRIPTS") for skill in dg.GUARD_SKILLS),
 )
 COPY_COMMANDS = {"cp", "install", "ln", "rsync", "scp", "mv"}
 REMOVE_COMMANDS = {"rm", "unlink", "rmdir", "shred", "truncate"}

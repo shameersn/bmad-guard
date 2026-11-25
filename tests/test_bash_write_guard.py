@@ -199,8 +199,12 @@ class WriteTests(GuardTestCase):
         self.blocks(
             "DOC_GUARD_CONFIG", f"rm {CONFIG}/tool-rules.json", f"rm -rf {CONFIG}", "rm -r _bmad/custom/project"
         )
-        self.assertEqual(sorted(self.mine("rm -rf _bmad")), ["DOC_APPROVAL_STATE", "DOC_GUARD_CONFIG"])
-        self.assertEqual(sorted(self.mine("rm -rf _bmad/custom")), ["DOC_APPROVAL_STATE", "DOC_GUARD_CONFIG"])
+        self.assertEqual(
+            sorted(self.mine("rm -rf _bmad")), ["DOC_APPROVAL_STATE", "DOC_GUARD_CONFIG", "DOC_GUARD_SCRIPTS"]
+        )
+        self.assertEqual(
+            sorted(self.mine("rm -rf _bmad/custom")), ["DOC_APPROVAL_STATE", "DOC_GUARD_CONFIG", "DOC_GUARD_SCRIPTS"]
+        )
         self.allows(
             "rm docs/old.md",
             "rm -rf tmp/x",
@@ -405,6 +409,34 @@ class MessageAndEventTests(GuardTestCase):
     def test_an_allowed_command_records_nothing(self):
         self.assertEqual(self.entry(json.dumps(self.payload("Bash", {"command": f"cat {STATE}"}))), (0, "", ""))
         self.assertEqual(queue(self.project), [])
+
+
+class GuardScriptsTests(GuardTestCase):
+    mine = WriteTests.mine
+    allows = WriteTests.allows
+
+    def test_shell_writes_to_the_guard_files_are_blocked(self):
+        for command in (
+            "echo x > .claude/settings.json",
+            "echo '{}' >> .claude/settings.local.json",
+            "sed -i 's/a/b/' .claude/skills/tool-guard/scripts/pre_tool_use.py",
+            "cp /dev/null .claude/skills/prompt-guard/scripts/prompt_guard_hook.py",
+            "rm _bmad/custom/guard/hooks/pre-commit",
+            "rm -rf .claude/skills/tool-guard",
+            "tee .agents/skills/tool-guard/customize.toml < x",
+            "mv .claude/settings.json /tmp/x",
+        ):
+            with self.subTest(command=command):
+                self.assertIn("DOC_GUARD_SCRIPTS", self.mine(command), command)
+
+    def test_reading_and_running_the_guard_files_is_allowed(self):
+        self.allows(
+            "cat .claude/settings.json",
+            "python3 .claude/skills/tool-guard/scripts/session_start.py < /dev/null",
+            "git diff .claude/settings.json",
+            "cp .claude/settings.json /tmp/settings-copy.json",
+            "echo x > .claude/skills/my-skill/notes.md",
+        )
 
 
 if __name__ == "__main__":

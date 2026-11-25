@@ -591,5 +591,49 @@ class EventTests(TextGuardCase):
         self.assertEqual(queue(self.project), [])
 
 
+class GuardScriptsTests(TextGuardCase):
+    def test_the_guard_files_are_blocked_for_the_file_tools(self):
+        for rel in (
+            ".claude/settings.json",
+            ".claude/settings.local.json",
+            ".claude/skills/tool-guard/scripts/pre_tool_use.py",
+            ".claude/skills/tool-guard/customize.toml",
+            ".claude/skills/prompt-guard/scripts/prompt_guard_hook.py",
+            ".agents/skills/ready-for-dev-gate/scripts/ready_for_dev.py",
+            ".claude/skills/agent-approval-grant/SKILL.md",
+            "_bmad/custom/guard/hooks/pre-commit",
+            "_bmad/custom/guard/manifest.json",
+        ):
+            with self.subTest(rel=rel):
+                self.assertEqual(self.save(rel, "x"), ["DOC_GUARD_SCRIPTS"])
+        self.assertEqual(
+            self.codes("Edit", {"file_path": ".claude/settings.json", "old_string": "a", "new_string": "b"}),
+            ["DOC_GUARD_SCRIPTS"],
+        )
+
+    def test_files_listed_in_the_setup_manifest_are_blocked(self):
+        manifest = {"version": "1", "files": {"_bmad/custom/bmad-build.toml": "abc", "../outside.txt": "x"}}
+        self.write("_bmad/custom/guard/manifest.json", json.dumps(manifest))
+        self.assertEqual(self.save("_bmad/custom/bmad-build.toml", "x"), ["DOC_GUARD_SCRIPTS"])
+        self.assertEqual(self.save("_bmad/custom/my-own.toml", "x"), [])
+
+    def test_a_broken_manifest_still_protects_the_fixed_list(self):
+        self.write("_bmad/custom/guard/manifest.json", "{broken")
+        self.assertEqual(self.save(".claude/skills/tool-guard/scripts/x.py", "x"), ["DOC_GUARD_SCRIPTS"])
+        self.assertEqual(self.save("_bmad/custom/bmad-build.toml", "x"), [])
+
+    def test_other_skills_and_settings_lookalikes_are_allowed(self):
+        for rel in (
+            ".claude/skills/my-skill/SKILL.md",
+            ".claude/skills/tool-guard-notes.md",
+            ".claude/settings.json.bak",
+            ".claude/commands/x.md",
+            "docs/tool-guard/settings.json",
+            "_bmad/custom/guardian.toml",
+        ):
+            with self.subTest(rel=rel):
+                self.assertEqual(self.save(rel, "x"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

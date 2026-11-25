@@ -9,6 +9,10 @@ Checked on Write, Edit, MultiEdit and NotebookEdit (`file_path` / `notebook_path
   DOC_GUARD_RECORD      _bmad-output/guard/**: the review and build records. Only guard scripts and hooks write them.
   DOC_GUARD_CONFIG      _bmad/custom/project/guard/**: the project's guard rules and tech-stack list. The developer
                         owns them; an agent that can edit them can widen what it is allowed to do.
+  DOC_GUARD_SCRIPTS     the guard itself: _bmad/custom/guard/** (git hooks, manifest), .claude/settings.json and
+                        settings.local.json (hook wiring), the guard skills in .claude/skills and .agents/skills,
+                        and every file the setup script installed (its manifest). An agent that edits them can turn
+                        the guard off. The developer changes them, or re-runs the setup script.
   DOC_APPROVAL_FIELD    a Markdown file: an AI edit adds, removes or changes `status: approved`, `approval_status:
                         approved`, `approved_by`, `approved_at`, a `Resolved:` line or an `[ASSUMPTION-RESOLVED ...]`
                         tag. People and Warden write those.
@@ -31,6 +35,7 @@ The event and the message carry the rule id, never the path or the text.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -47,6 +52,12 @@ TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 PATH_KEY = {"Write": "file_path", "Edit": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 MARKDOWN = (".md", ".markdown")
 STATE_FILE_NAME = "approval-state.json"
+GUARD_DIR_REL = "_bmad/custom/guard"
+MANIFEST_REL = f"{GUARD_DIR_REL}/manifest.json"  # written by scripts/setup_guard.py: {"files": {path: sha256}}
+SETTINGS_FILES = (".claude/settings.json", ".claude/settings.local.json")
+SKILL_DIRS = (".claude/skills", ".agents/skills")
+# Protected even when the manifest is missing or unreadable.
+GUARD_SKILLS = ("tool-guard", "prompt-guard", "ready-for-dev-gate", "agent-approval-grant", "agent-approval-gate-check")
 REASONS = {
     "DOC_APPROVAL_STATE": (
         "approval-state.json is written only by Warden (agent-approval-grant), after the developer confirms twice. "
@@ -59,6 +70,10 @@ REASONS = {
     "DOC_GUARD_CONFIG": (
         "Guard settings in _bmad/custom/project/guard belong to the developer. "
         "Tell the developer which rule or path you need; do not edit them."
+    ),
+    "DOC_GUARD_SCRIPTS": (
+        "The guard's own files (hook scripts, guard skills, git hooks, .claude/settings.json) belong to the developer. "
+        "Tell the developer what needs to change; they edit it or re-run the bmad-guard setup script."
     ),
     "DOC_APPROVAL_FIELD": (
         "This edit changes an approval field (status or approval_status 'approved', approved_by, approved_at) "
@@ -76,6 +91,19 @@ REASONS = {
 class Zone:
     code: str
     folder: str  # lower case, absolute
+
+
+def guard_files(root: Path) -> list[str]:
+    """Project-relative files and folders that make up the guard. The manifest adds what setup installed; a missing
+    or broken manifest leaves the fixed list (the folder that holds the manifest is protected itself)."""
+    found = [GUARD_DIR_REL, *SETTINGS_FILES, *(f"{d}/{s}" for d in SKILL_DIRS for s in GUARD_SKILLS)]
+    try:
+        files = json.loads((root / MANIFEST_REL).read_text(encoding="utf-8")).get("files")
+    except (OSError, ValueError, AttributeError):
+        files = None
+    if isinstance(files, dict):
+        found += [rel for rel in files if isinstance(rel, str) and rel and not os.path.isabs(rel) and ".." not in rel]
+    return list(dict.fromkeys(found))
 
 
 def bad_input(tool: str) -> hc.Verdict:
@@ -98,6 +126,7 @@ class Zones:
                 ("DOC_APPROVAL_STATE", "_bmad/custom/approval-state.json"),  # so `rm -r _bmad` is seen to take it
                 ("DOC_GUARD_RECORD", "_bmad-output/guard"),
                 ("DOC_GUARD_CONFIG", "_bmad/custom/project/guard"),
+                *(("DOC_GUARD_SCRIPTS", rel) for rel in guard_files(root)),
             )
         ]
 
