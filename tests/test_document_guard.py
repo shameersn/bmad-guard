@@ -344,6 +344,15 @@ class TextUnitTests(unittest.TestCase):
         values = dt.field_values(["Status:  'Approved' # done", 'approval_status: "APPROVED"', "approved_by: Priya"])
         self.assertEqual(values, {"status": ["approved"], "approval_status": ["approved"], "approved_by": ["priya"]})
 
+    def test_a_quoted_key_is_still_the_key(self):
+        self.assertEqual(
+            dt.compare("---\nx: 1\n---\n", '---\nx: 1\n"approval_status": approved\n---\n'), ["DOC_APPROVAL_FIELD"]
+        )
+        self.assertEqual(dt.compare("---\nx: 1\n---\n", "---\nx: 1\n'status': approved\n---\n"), ["DOC_APPROVAL_FIELD"])
+        self.assertEqual(
+            dt.compare("---\nx: 1\n---\n", "---\nx: 1\napproval_status:approved\n---\n"), ["DOC_APPROVAL_FIELD"]
+        )
+
     def test_a_key_with_a_prefix_is_not_an_approval_key(self):
         self.assertEqual(
             dt.compare("---\nx: 1\n---\n", "---\nx: 1\nmy_status: approved\nstatus_note: approved\n---\n"), []

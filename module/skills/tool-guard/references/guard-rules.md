@@ -168,6 +168,7 @@ The guard reads the command text. It cannot see what the command text does when 
 - **Approval fields written from Bash.** The shell guard protects the three places above, not Markdown documents. `sed -i 's/pending-approval/approved/' prd.md` is not seen. The pre-commit hook (T6) blocks a commit that changes an approval status without a matching Warden entry.
 - **Warden's script can be run by the agent.** The two confirmations are enforced by Warden's skill text, not by the hook: a model that runs `grant_approval.py` itself is not stopped. The audit is the `APPROVED` event, the `approved_by` entry and the git commit.
 - **Document rules look at one edit.** A person can still change anything by hand; the guard stops the agent. Resolution records and approval fields in files that are not Markdown (a `.yaml` story, a `.txt` plan) are not checked.
+- **Documents that teach the markup** (for example `docs/ready-for-dev-markup.md`, with its example `Resolved:` lines and `[ASSUMPTION ...]` tags) are checked like stories: an agent edit that changes those example lines blocks. The developer edits them by hand.
 - **The approved value is `approved`.** Warden's `approved_value` can be set to something else in `customize.toml`; the guard does not read it.
 - **The matching is by name.** `id_rsa_utils.py` looks like an SSH key to the path guard.
 

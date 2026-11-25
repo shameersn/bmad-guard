@@ -34,7 +34,7 @@ from pathlib import Path
 APPROVED = "approved"
 STATE_KEYS = ("status", "approval_status")  # only the value `approved` matters
 RECORD_KEYS = ("approved_by", "approved_at")  # any change matters
-FIELD_RE = re.compile(r"^(?P<key>[A-Za-z_][\w-]*)[ \t]*:(?P<value>.*)$")
+FIELD_RE = re.compile(r"^(?P<quote>[\"']?)(?P<key>[A-Za-z_][\w-]*)(?P=quote)[ \t]*:(?P<value>.*)$")  # key may be quoted
 COMMENT_RE = re.compile(r"\s+#.*$")
 FENCE_END_RE = re.compile(r"^(---|\.\.\.)[ \t]*$")
 MAYBE_RECORDS_RE = re.compile(r"resolved|assumption|open questions", re.IGNORECASE)
