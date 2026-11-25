@@ -21,11 +21,11 @@ The JSON file cannot hold comments, so this table is the explanation. The test `
 
 ## Read this before rolling out
 
-1. **Fail closed means a project without the module blocks.** Managed settings apply to every project on the machine. The hook commands run `${CLAUDE_PROJECT_DIR}/.claude/skills/tool-guard/scripts/pre_tool_use.py`. In a project where the setup script has not been run, that file does not exist: Python exits with code 2 and **every tool call is blocked**. Roll out only to machines (or a pilot group) whose Claude Code projects all have the module installed, or decide on a machine-level script location first (open question 1).
+1. **Fail closed means a project without the module blocks.** Managed settings apply to every project on the machine. The hook commands run `${CLAUDE_PROJECT_DIR}/.claude/skills/tool-guard/scripts/pre_tool_use.py`. In a project where the setup script has not been run, that file does not exist: Python exits with code 2 and **every tool call is blocked**. Roll out only to pilot machines whose Claude Code projects all have the module installed. The machine-level script location (open question 1) is required before the full rollout. Both are todos in the Phase 2 plan ("Managed settings rollout todos").
 2. **The lock covers the entries, not the scripts.** The scripts live inside each project and can be edited there. Managed settings stop a developer from removing the hook; they do not stop an edit of `pre_tool_use.py`. Git review of `.claude/skills/` and the setup script's `--check` are the control for now.
-3. **`allowManagedHooksOnly` is strict.** It also switches off hooks developers set up for themselves (personal hooks in `~/.claude/settings.json`, plugin hooks). For a softer first step, delete that one line from the file; the hooks and deny rules still apply, and the project wiring still works, but a developer can turn hooks off.
+3. **`allowManagedHooksOnly` is strict, and the pilot keeps it.** It also switches off hooks developers set up for themselves (personal hooks in `~/.claude/settings.json`, plugin hooks). Decision: it stays on in the pilot too, so the guard hooks cannot be turned off. Tell pilot developers before the file goes on.
 4. **Bash is not fully covered by deny rules.** The deny rules reach `Read`, Grep, Glob, Edit, Write and a few analysed Bash commands (`cat`, `head`, redirections). A script that opens a file itself is not covered. The command guard (T2) adds checks; the real limit is an OS sandbox (not in scope).
-5. **Claude Code version.** The `PreToolUse` entry uses `"onFailure": "block"` (Claude Code 2.1.295 or later). Pinned and checked version: 2.1.326.
+5. **Claude Code version: 2.1.295 or later is required.** The `PreToolUse` entry uses `"onFailure": "block"`, added in 2.1.295. How older versions treat the key is unverified, so do not deploy to a machine with an older version. Checked version: 2.1.326.
 
 ## What IT installs, and where
 
@@ -65,7 +65,7 @@ If a bad file is deployed: a managed file that is not valid JSON makes Claude Co
 
 ## Open questions for IT and Shameer
 
-1. **Machine-level scripts.** Install the guard scripts once per machine (for example under the managed folder) and point the hooks there, so the scripts cannot be edited per project and projects without the module are not blocked. Needs a decision and a change to the setup and install test. Recommended before the real rollout.
+1. **Machine-level scripts.** Install the guard scripts once per machine (for example under the managed folder) and point the hooks there, so the scripts cannot be edited per project and projects without the module are not blocked. Needs a decision and a change to the setup and install test. Decision: required before the full IT rollout (Phase 2 plan todo).
 2. **Who owns the file and the pilot group?** (Plan open item 3: after the pilot shows the hooks are stable.)
-3. **SessionStart check under managed settings.** `session_start.py` checks the *project* `.claude/settings.json` for the wiring. On a machine with managed settings and a project that does not commit the wiring, it would warn although the hooks run. If projects stop committing the wiring, extend the check to read the managed file.
+3. **SessionStart check under managed settings (done).** `session_start.py` accepts the wiring from the project `.claude/settings.json` or from the managed file for the OS plus its `managed-settings.d/*.json` drop-ins, read as one. It does not read a macOS configuration profile, the Windows registry or server-managed settings: with those, a project without its own wiring gets a false warning.
 4. **Same hook in both places.** With `allowManagedHooksOnly` the project copy is ignored, so no double run. Without it, whether Claude Code runs an identical command twice is unverified.
