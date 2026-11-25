@@ -204,6 +204,22 @@ class GateTests(Base):
         self.assertEqual((result["result"], result["reason"]), ("blocked", "stale"))
         self.assertEqual(core.get_status(self.brief(), "status"), "draft")
 
+    def test_check_can_leave_a_stale_document_alone(self):
+        # the write gate hook (tool-guard) asks without resetting the plan
+        spec = importlib.util.spec_from_file_location("check_gate_under_test", GATE)
+        check_gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(check_gate)
+        grant(self.project)
+        doc = self.project / "docs/brief.md"
+        doc.write_text(self.brief() + "\nSneaky edit.\n")
+        args = (doc, "brief", state_path(self.project), "status", "draft", "approved")
+        result, _ = check_gate.check(*args, reset_stale=False)
+        self.assertEqual((result["result"], result["reason"]), ("blocked", "stale"))
+        self.assertEqual(core.get_status(doc.read_text(), "status"), "approved")
+        result, _ = check_gate.check(*args)  # the default still resets, as the CLI does
+        self.assertEqual(result["reason"], "stale")
+        self.assertEqual(core.get_status(doc.read_text(), "status"), "draft")
+
     def test_reopened_approval_cannot_be_revived_by_hand(self):
         grant(self.project)
         approved_text = self.brief()
