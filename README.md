@@ -37,7 +37,7 @@ Rules enforced by `tests/test_repo_rules.py`: every Python file under `module/` 
 
 ## Related
 
-- `bmad-guard-gateway`: the prompt gateway server. Each project hosts its own.
+- Prompt checks run locally in the `prompt-guard` skill (ADR 0006); there is no gateway server.
 - `experion-bmad`: the earlier prototype. Read-only; we harvest from it.
 
 ## Working rules

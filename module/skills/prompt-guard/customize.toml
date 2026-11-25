@@ -1,0 +1,43 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for prompt-guard.
+# Team overrides:     {project-root}/_bmad/custom/prompt-guard.toml   (owned by the project; the module
+#                     does not ship one)
+# Personal overrides: {project-root}/_bmad/custom/prompt-guard.user.toml (may only make an action stricter)
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+
+code = "prompt-guard"
+name = "Marshal"
+title = "Local Prompt Check"
+icon = "🛂"
+description = "Checks prompt text locally for secrets, personal or health identifiers, injection and size; allow, warn or block."
+agent_type = "stateless"   # stateless | memory | autonomous
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+activation_steps_prepend = []
+activation_steps_append = []
+persistent_facts = []
+
+# --- Actions per category (ADR 0006): block | warn | record | off ---
+# The scripts read these keys line by line (no TOML library on Python 3.10): keep each on one line,
+# `key = "value"`, inside [agent].
+
+# Key formats, credential assignments, connection strings, high-entropy tokens.
+secrets = "block"
+
+# Card, NHS, Aadhaar and US SSN numbers (checksum-validated), email, phone.
+# HIPAA projects set phi = "block" in their own _bmad/custom/prompt-guard.toml.
+phi = "warn"
+
+# Prompt-injection phrasing. In a user's own prompt the user is not the attacker: record only.
+injection = "record"
+
+# Prompts longer than max_prompt_tokens (estimate: characters / 4).
+size = "warn"
+max_prompt_tokens = 8000
