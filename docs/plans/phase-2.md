@@ -124,7 +124,8 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 - **The ready-for-dev default is `enforce`.** The hook always enforces and reads the skill's own `customize.toml` only (not a project override, which the agent could edit).
 - **Project paths:** `write_gate_allowed_paths` in `tool-rules.json`, add-only, validated; a bad file blocks through the path and command guards and adds nothing to the gate.
 - **Install test:** smoke calls for the hook and the `--check` CLI, and an end-to-end case with a fake plan approved by Warden.
-- **Known limit (for the T4 review):** a story file that is separate from the plan can still get `gate: generic` from the agent; the plan itself cannot (it is hashed). See "Write gate limits".
+- **`gate: generic` is person-only (T4 review):** `DOC_APPROVAL_FIELD` now also blocks an AI edit that adds, removes or changes `gate: generic` in a Markdown frontmatter, so the agent cannot make a story skip ready-for-dev. A person sets it.
+- **T4 review decisions:** `in-review` counts when nothing is in progress; two plans in progress block; the `story` field is a path or an id (`<id>.md`, `<id>-*.md`); the hook always enforces, `mode = advisory` is for the chat skill only; `git checkout <path>` / `git restore <path>` are not gated for now.
 
 ### T5. Content scan on writes and prompt wiring (Days 8–9)
 
@@ -207,7 +208,9 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 ## Write gate todos (from T4)
 
 - [ ] **Subagent session ids.** Check in a real session whether a hook that runs for a subagent's tool call has the parent's `session_id` (`docs/hooks.md`, open check 7). T7 needs the answer before the same-session test means anything. Owner: Shameer.
-- [ ] **`gate: generic` in a separate story file.** The agent can add the marker there; the plan is hashed, the story is not. Decide in the pilot review: protect the marker (add `gate` to `DOC_APPROVAL_FIELD`) or accept the risk (ADR 0004 already asks to review its use). Owner: Shameer.
+- [x] **`gate: generic` in a separate story file.** Done: `gate: generic` is in `DOC_APPROVAL_FIELD` (T4 review).
+- [ ] **`git checkout <path>` / `git restore <path>` through the gate.** Not gated now (false blocks on branch switches). Look again with the pilot's false-block numbers. Owner: Shameer.
+- [ ] **`story` field format.** A path or an id is supported. Check with the pilot BAs that this is how they fill it. Owner: Manesh G.
 - [ ] **Plan outside `_bmad-output/`** (a renamed output folder, or a spec folder elsewhere) is not found, so every source write blocks. Read `implementation_artifacts` from the BMAD config if a pilot project renames it.
 - [ ] **Real block seen** in Claude Code for a `GATE_*` rule and for a Bash write target (rollout doc, test step 8).
 - [ ] **False-block numbers** for the Bash gate (tools that write source through an option, not a redirect, are not seen; tools that use a redirect into source are gated). Measure in the pilot.
