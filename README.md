@@ -17,7 +17,7 @@ Status: Phase 1 (guard module). Not ready for use.
 | `module/skills/` | Guard skills, copied into a project's `.claude/skills/` and `.agents/skills/` |
 | `module/hooks/` | Git hooks (Phase 2) |
 | `module/overrides/` | Files copied into a project's `_bmad/custom/` |
-| `scripts/` | Repo tools: setup script, ready-for-dev gate, install test |
+| `scripts/` | Repo tools: setup script, install test |
 | `tests/` | Unit tests and repo rules |
 | `docs/plans/` | One plan per phase. Each plan is approved by PR before its work starts. |
 | `docs/adr/` | Architecture decision records. |
