@@ -122,7 +122,7 @@ class FileToolTests(GuardTestCase):
         self.assertEqual(self.read("../project/./src/../innocent.txt"), ["PATH_SSH_DIR"])
 
     def test_write_edit_and_notebook_tools_use_the_same_list(self):
-        for tool in ("Write", "Edit"):
+        for tool in ("Write", "Edit", "MultiEdit"):
             with self.subTest(tool=tool):
                 self.assertEqual(self.read(".env", tool), ["PATH_ENV_FILE"])
                 self.assertEqual(self.read(".env.example", tool), [])

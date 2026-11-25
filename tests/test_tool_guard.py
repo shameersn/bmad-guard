@@ -98,6 +98,14 @@ class RunTests(unittest.TestCase):
             [g.name for g in pt.load_guards()], ["command-guard", "path-guard", "document-guard", "bash-write-guard"]
         )
 
+    def test_the_matcher_reaches_every_tool_a_registered_guard_is_for(self):
+        import hook_wiring as hw
+
+        matched = set(hw.PRE_TOOL_MATCHER.split("|"))
+        for guard in pt.load_guards():
+            with self.subTest(guard=guard.name):
+                self.assertLessEqual(set(guard.tools), matched)
+
     def test_malformed_input_blocks(self):
         bad = [
             "",
