@@ -115,7 +115,7 @@ Verified (docs). Shape inside `.claude/settings.json`:
 **Design rule (kept from the plan): session ids are written by hooks, never typed by the model and never trusted from a model-run script.**
 
 - T7's build record: the `PreToolUse` write-gate hook (T4) writes the build session id from its own stdin.
-- T7's review record: a model-run script may *read* `CLAUDE_CODE_SESSION_ID` for convenience, but the pre-push check should compare against ids written by hooks. If a hook cannot write the reviewer id, the review record is weaker proof; say so in the Phase 2 report.
+- T7's review record: the hook writes it (section 14). The review ends with a plain Bash command that the `PreToolUse` hook recognises; the hook writes the record with `session_id` from its own input. The script the model runs writes nothing and reads no session id.
 - A new `SessionStart` hook could also write the id to a file, but `PreToolUse` sees the id on every call, so we do not need a second writer.
 
 ## 7. Settings precedence and locking
@@ -203,7 +203,7 @@ What the gate takes from the hook input and from BMAD:
 | Plan file: `{implementation_artifacts}/spec-{slug}.md`, with frontmatter `status` set to `in-progress` by step 3 and `in-review` by step 4 | Finding the current plan | Verified by reading `bmm-skills/ship/bmad-build` in BMAD 6.12.4 (`step-01` to `step-04`, `spec-template.md`, `module.yaml`); not run |
 | `story`, `approval_status`, `confidence` in the plan's frontmatter | Finding the story and the approval | Our override (`module/overrides/bmad-build.toml`); BMAD's template does not have them |
 
-- **Subagents.** bmad-build hands the code to a subagent. Section 1 lists `agent_id` and `agent_type` for hooks that run inside a subagent, so those calls reach the same `PreToolUse` hook. Whether their `session_id` is the parent's is **Unverified**. The build record then holds whatever id the hook gets; T7 must compare the reviewer's id with it (see open check 7).
+- **Subagents.** bmad-build hands the code to a subagent. Section 1 lists `agent_id` and `agent_type` for hooks that run inside a subagent, so those calls reach the same `PreToolUse` hook. Whether their `session_id` is the parent's is **Unverified**. The build record then holds whatever id the hook gets; the pre-push hook (T7) compares the reviewer's id with it (see open check 7 and section 14).
 - **A block is exit 2 with the reasons on stderr** (section 2), like the other guards. The `--check` command line prints the same lines on stdout and exits 1, so the override can stop before any code is written.
 
 ## 13. What T5 builds (content scan, and a warning that does not block)
@@ -227,6 +227,22 @@ Rules, fail mode, the Bash content design and limits: `module/skills/tool-guard/
 - **Tool input fields the content scan reads** (section 11): Write `content`; Edit `new_string`; MultiEdit `edits[].new_string`; NotebookEdit `new_source`; Bash `command`. Same mark as section 11: strings in the 2.1.326 binary, not run.
 - **`UserPromptSubmit` was already wired** by T1 (`hook_wiring.HOOKS`, the managed-settings template, the setup script and `--check`). T5 changed only the hook script: a crash now blocks in a HIPAA project (JSON `decision: block`, exit 0) and warns elsewhere (section 2).
 
+## 14. What T7 builds (review record and pre-push)
+
+Rules, design choices and limits: `module/skills/tool-guard/references/guard-rules.md` ("Review record") and `module/hooks/README.md` ("pre-push").
+
+**How a review gets a session id the model cannot choose.** The `bmad-code-review` override ends with one plain command: `python3 .../tool-guard/scripts/review_record.py --story <story> --verdict pass|fail`. The `PreToolUse` hook (`review_record.py`, registered in the dispatcher) sees that call, and **the hook writes** `_bmad-output/guard/reviews/<story>.json` with its own `session_id` and the `HEAD` commit. The script writes nothing; it only checks that a fresh record is there. The model cannot give an id (the command has no such argument), and the hook ignores `CLAUDE_CODE_SESSION_ID` and any `VAR=value` in the command.
+
+| Fact | Used for | Status |
+|---|---|---|
+| `session_id` in the `PreToolUse` input | The reviewer session in the record | Verified (docs) for `PreToolUse`; Verified (run) for the events we ran |
+| The hook runs before the command and before the permission prompt | The record exists even if the developer denies the command. It holds the real session and the verdict the reviewer chose, so it is harmless | Read from the docs (a `PreToolUse` decision of `allow`, `ask` or `deny` feeds the permission flow, section 2, so the hook runs first); not run |
+| `agent_id` in the input of a call inside a subagent | The hook refuses the record call from a subagent (`REVIEW_IN_SUBAGENT`) | Verified (docs, section 1); not run. If the field is not sent, the rule never fires and nothing else changes |
+| What `bmad-code-review` does at its end | The override uses `workflow.on_complete`, which BMAD runs "as the final terminal instruction" after step 4 | Verified by reading BMAD 6.12.4 (`bmm-skills/ship/bmad-code-review/steps/step-04-present.md`, "On Complete", and `customize.toml`) |
+
+- **Verdict mapping.** BMAD's step 4 sets the story to `done` when all `decision-needed` and `patch` findings are resolved and no unresolved `high` or `medium` finding remains, and to `in-progress` otherwise. The override records `pass` for the first case and `fail` for the second. The workflow itself writes no verdict file (it writes findings into the story and updates `sprint-status.yaml`), so there is nothing else to read.
+- **Pre-push** reads git's pre-push input, and the review and build records from the pushed tree. It is plain Python in `module/hooks/` and does not use Claude Code.
+
 ## Open checks (to close in T2 or the pilot)
 
 1. Run one real blocked `PreToolUse` call (exit 2, stderr reaches the model) on 2.1.326, and one crash with `onFailure: "block"`. Needs a working model session.
@@ -235,5 +251,5 @@ Rules, fail mode, the Bash content design and limits: `module/skills/tool-guard/
 4. Confirm whether the same hook in managed and project settings runs once or twice (the template sets `allowManagedHooksOnly`, which should make this moot).
 5. See how the terminal UI shows a `SessionStart` `systemMessage`.
 6. Read the remaining third of the hooks page and the full settings reference for anything that changes the above.
-7. Check whether a hook that runs for a subagent's tool call gets the parent's `session_id` or its own (T4 records it as the build session, T7 compares the reviewer's id with it). Needs a real model session.
+7. Check whether a hook that runs for a subagent's tool call gets the parent's `session_id` or its own, and whether `agent_id` is in its input (T4 records it as the build session; the T7 review record and pre-push compare ids). **Known limit until closed:** if a subagent shares the parent's id, a review run by a subagent of the build session cannot be told from the build session (the pre-push hook blocks it, the safe direction); if it has its own id, a subagent could pass as an independent reviewer, and only the `REVIEW_IN_SUBAGENT` rule (needs `agent_id`) stops the record call. Run the review in a fresh top-level session. Needs a real model session.
 8. See a real `PreToolUse` warning (`CONTENT_PHI` in a project that is not HIPAA) in Claude Code: is the `systemMessage` shown to the user, and does the model get the `additionalContext` reminder? Needs a real model session. (T5)

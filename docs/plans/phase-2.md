@@ -180,6 +180,18 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 
 **Done when:** tests cover a valid record, a missing record, the same session, and a stale SHA.
 
+**Built (T7), what differs from the text above:** rules, design choices and limits are in `module/skills/tool-guard/references/guard-rules.md` ("Review record") and `module/hooks/README.md` ("pre-push").
+
+- **The hook writes the review record, not the script.** `review_record.py` (in tool-guard) is a `PreToolUse` guard and a command. When a Bash call is exactly one plain `python3 .../review_record.py --story <story> --verdict pass|fail`, the hook writes `_bmad-output/guard/reviews/<story>.json` = `{"story", "reviewed_sha", "sessions", "verdict", "reviewed_at"}` with `session_id` from its own input and `git rev-parse HEAD`. The command writes nothing and only checks that a fresh record exists. `CLAUDE_CODE_SESSION_ID` and a `VAR=` in the command are ignored, and the command has no session argument. The agent's tool and shell writes to the file are blocked by `DOC_GUARD_RECORD` (T3). This is the "hook writes the id" design the T1 check asked for.
+- **Review record rule ids:** `REVIEW_IN_SUBAGENT`, `REVIEW_NO_SESSION`, `REVIEW_NO_COMMIT`, `REVIEW_RECORD_FAILED` (blocks of the record call); `REVIEW_RECORDED` (allow event).
+- **What stock `bmad-code-review` does at its end (BMAD 6.12.4, read, not run):** step 4 writes findings into the story's `### Review Findings`, sets the story to `done` (all `decision-needed` and `patch` resolved, no unresolved `high` or `medium`) or `in-progress`, syncs `sprint-status.yaml`, then "On Complete" runs `workflow.on_complete` when it is not empty. It writes no verdict file. The override fills `on_complete`: `pass` for the `done` case, `fail` otherwise; the existing facts (fresh session, severity, diff-to-plan, confidence) are unchanged.
+- **Pre-push rule ids:** `PUSH_NO_RECORD`, `PUSH_VERDICT_NOT_PASS`, `PUSH_SAME_SESSION`, `PUSH_RECORD_STALE`, `PUSH_COMMITS_AFTER_REVIEW`, `PUSH_RECORD_UNREADABLE`, `PUSH_BUILD_UNREADABLE`, `PUSH_ERROR`; events `PUSH_ALLOWED`, `PUSH_NOTHING_TO_CHECK`. Files: `module/hooks/pre-push` (launcher) and `guard_pre_push.py`; setup copies and `--check` covers them like pre-commit.
+- **Commits are not mapped to stories.** A review record covers every source commit that is an ancestor of (or equal to) its `reviewed_sha`. A source commit is a pushed commit that changes a file outside the write gate's allowed paths (one definition: `write_gate.source_checker`). The reviewer must not be a session in **any** build record of the pushed tree (the story name in a review record is typed by the model). Only `pass` passes. Records and builds are read from the pushed tree. Only records committed in the push get a reason of their own.
+- **Pushed commits** = `git rev-list <local> --not <remote sha> --remotes=<remote>`; new branch, delete, tag and non-commit objects are handled (tests with a real bare remote).
+- **Subagent session ids stay unverified** (open check 7, todo below). The hook refuses the record call when the input has `agent_id` (a field the docs list; not run by us). Docs say: run the review in a fresh top-level session.
+- **Install test:** `review_record.py --help` smoke, and an end-to-end case: a push with no record is blocked, the hook writes the record from a fresh session, the record is committed through pre-commit, the push goes through, and the queue holds `PUSH_NO_RECORD` and `PUSH_ALLOWED`.
+- **T7 review decisions:** to be filled in at the T7 review.
+
 ### T8. Red-team suite and Gate 2 (Days 13–15)
 
 - `scripts/red_team.py`: in a throwaway sandbox (fresh BMAD 6.12.4 + setup script), drive each case through the real hook entry points with fake data:
@@ -233,13 +245,23 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 
 ## Write gate todos (from T4)
 
-- [ ] **Subagent session ids.** Check in a real session whether a hook that runs for a subagent's tool call has the parent's `session_id` (`docs/hooks.md`, open check 7). T7 needs the answer before the same-session test means anything. Owner: Shameer.
+- [ ] **Subagent session ids.** Check in a real session whether a hook that runs for a subagent's tool call has the parent's `session_id`, and whether `agent_id` is in its input (`docs/hooks.md`, open check 7). T7 is built without the answer and documents the limit: until it is known the same-session check can not tell a subagent from its parent, and the review must run in a fresh top-level session. Owner: Shameer.
 - [x] **`gate: generic` in a separate story file.** Done: `gate: generic` is in `DOC_APPROVAL_FIELD` (T4 review).
 - [ ] **`git checkout <path>` / `git restore <path>` through the gate.** Not gated now (false blocks on branch switches). Look again with the pilot's false-block numbers. Owner: Shameer.
 - [ ] **`story` field format.** A path or an id is supported. Check with the pilot BAs that this is how they fill it. Owner: Manesh G.
 - [ ] **Plan outside `_bmad-output/`** (a renamed output folder, or a spec folder elsewhere) is not found, so every source write blocks. Read `implementation_artifacts` from the BMAD config if a pilot project renames it.
 - [ ] **Real block seen** in Claude Code for a `GATE_*` rule and for a Bash write target (rollout doc, test step 8).
 - [ ] **False-block numbers** for the Bash gate (tools that write source through an option, not a redirect, are not seen; tools that use a redirect into source are gated). Measure in the pilot.
+
+## Review record todos (from T7)
+
+- [ ] **A real review in Claude Code.** Run `bmad-code-review` in a fresh session: does `workflow.on_complete` run the record command as one plain command, does the hook write the record, and is the `REVIEW_RECORDED` event queued? Also: the record exists when the developer denies the permission prompt (the hook runs first). Needs a real model session. Owner: Shameer.
+- [ ] **A real push by a developer** through Claude Code's Bash tool with the hooks path set by the setup script: confirm the block message is shown and the agent does not retry with `--no-verify`. Owner: Shameer.
+- [ ] **Rebase, amend and squash merge.** Every rewrite makes the record stale, so the review is run again. Decide in the pilot whether a "re-review a rewritten branch" shortcut is needed (for example a record that names the tree, not the commit). Owner: Shameer.
+- [ ] **Forged records.** `python -c` or a script file can still write a record (the shell guard is best effort). A cross-check of `REVIEW_RECORDED` events against the committed records fits Phase 3 (collector). Owner: Shameer.
+- [ ] **One review for several stories on one branch.** The record covers every earlier source commit. Check with the pilot teams that this matches how they review. Owner: Manesh G.
+- [ ] **False-block numbers** for pre-push in the pilot (README.md and other root files count as source; add `write_gate_allowed_paths` if needed). Owner: Manesh G.
+- [ ] **Server-side check** (CI or branch protection) for the same record rule, because `git push --no-verify` skips the hook. Later phase (ADR 0002).
 
 ## Content scan todos (from T5)
 
