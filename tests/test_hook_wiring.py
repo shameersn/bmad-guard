@@ -106,6 +106,32 @@ class ExistingSettingsTests(unittest.TestCase):
         deny = full()["permissions"]["deny"]
         self.assertLess(deny.index("Read(.env.*)"), deny.index("Read(!.env.example)"))
 
+    def test_deny_rules_come_from_the_sensitive_path_list(self):
+        ids = [rule_id for rule_id, _, _ in hw.SENSITIVE_PATHS]
+        self.assertEqual(len(ids), len(set(ids)))
+        expected = {f"Read({p})" for _, patterns, _ in hw.SENSITIVE_PATHS for p in patterns}
+        expected |= {f"Read(!{n})" for _, _, carve in hw.SENSITIVE_PATHS for n in carve}
+        self.assertEqual(set(hw.DENY_RULES), expected)
+        self.assertEqual(len(hw.DENY_RULES), len(set(hw.DENY_RULES)))
+
+    def test_deny_rules_cover_every_kind_of_sensitive_path(self):
+        for rule in (
+            "Read(.env)",
+            "Read(.env.*)",
+            "Read(*.pem)",
+            "Read(*.key)",
+            "Read(id_rsa*)",
+            "Read(id_ed25519*)",
+            "Read(*.p12)",
+            "Read(*dump*.sql)",
+            "Read(*.sql.bak)",
+            "Read(~/.aws/**)",
+            "Read(~/.ssh/**)",
+            "Read(~/.config/bmad-guard/**)",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, hw.DENY_RULES)
+
     def test_wrong_timeout_is_updated_to_one_copy(self):
         settings = full()
         settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 99
