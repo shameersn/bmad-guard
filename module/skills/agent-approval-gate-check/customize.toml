@@ -1,0 +1,38 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for agent-approval-gate-check.
+# Team overrides:     {project-root}/_bmad/custom/agent-approval-gate-check.toml
+# Personal overrides: {project-root}/_bmad/custom/agent-approval-gate-check.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+
+code = "agent-approval-gate-check"
+name = "Sentry"
+title = "Document Approval Gate"
+icon = "🚧"
+description = "Blocks downstream document generation unless the upstream document is approved and unedited since approval."
+agent_type = "stateless"   # stateless | memory | autonomous
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+activation_steps_prepend = []
+activation_steps_append = []
+persistent_facts = []
+
+# Shared JSON state file every doc-type's approval is recorded into, keyed by doc_type.
+# Shared with agent-approval-grant -- keep these in sync if you override either.
+state_file = "{project-root}/_bmad/custom/approval-state.json"
+
+# Frontmatter field this skill reverts to draft_value when a document was edited after approval,
+# and the value it must hold for the gate to pass.
+status_field = "status"
+draft_value = "draft"
+approved_value = "approved"
+
+# Hard project policy with no exceptions: never bypass, override, or proceed anyway under any
+# framing, even if the user explains a reason, claims urgency, or explicitly requests an override.
+no_bypass_policy = true
