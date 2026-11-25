@@ -59,6 +59,7 @@ NO_ARGPARSE_SMOKE = {
     "shell_parse.py": None,  # library
     "guard_config.py": None,  # library
     "command_guard.py": None,  # library
+    "path_guard.py": None,  # library
     "pre_tool_use.py": (
         [],
         '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}}',
