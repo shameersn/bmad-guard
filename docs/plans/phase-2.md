@@ -170,6 +170,7 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 - **Events:** local queue only, never sent (a collector in the environment is ignored). Rule id, check, file count and a detail (rule ids, a count, an error type). Approval events also carry the file path and SHA-256. No paths of scanned files, no matched text, no package names.
 - **Setup and install test:** `setup_guard.py` copies every hook file, makes it executable and `--check` reports one that is not. The install test commits through the installed hook in the sandbox (block: fake key, hand-set approved status; allow: plain file, draft document, Warden's own approval commit).
 - **Repo rules:** `tests/test_repo_rules.py` checks the hook launcher (no `.py` name) like a script: shebang, PEP 723 header, stdlib only, executable. `ruff.toml` lints it with `extend-include`.
+- **T6 review decisions:** keep the `---` block on `tech-stack.toml` for now (Warden change is a todo); `COMMIT_GATE_GENERIC` and `COMMIT_QUESTION_REMOVED` warn in the pilot; `approved` back to any other value needs no Warden entry; lock files are skipped by the scan; a crash (`COMMIT_ERROR`) blocks in every project; `COMMIT_NO_TECH_STACK` is logged only when a dependency file changed; a list that is not approved blocks only commits that add a dependency.
 
 ### T7. Independent review record and pre-push (Days 11–13)
 
