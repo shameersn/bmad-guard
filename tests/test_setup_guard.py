@@ -9,6 +9,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -252,6 +253,198 @@ class HooksPathTests(Base):
         code, out, _ = run(self.project, self.module, "--check")
         self.assertEqual(code, 1)
         self.assertIn("set      core.hooksPath", out)
+
+
+class SettingsWiringTests(Base):
+    """T1: hook entries and deny rules merged into .claude/settings.json."""
+
+    STALE = "python3 .claude/skills/tool-guard/scripts/pre_tool_use.py"
+
+    def setUp(self):
+        super().setUp()
+        shutil.copytree(ROOT / "module/skills/tool-guard", self.module / "module/skills/tool-guard")
+        wiring = ROOT / "module/skills/tool-guard/scripts/hook_wiring.py"
+        self.hw = sg.load_wiring(ROOT)
+        self.assertEqual(Path(self.hw.__file__), wiring)
+        self.settings_path = self.project / sg.SETTINGS_REL
+
+    def settings(self) -> dict:
+        return json.loads(self.settings_path.read_text())
+
+    def pre_commands(self) -> list[str]:
+        return [h["command"] for g in self.settings()["hooks"]["PreToolUse"] for h in g["hooks"]]
+
+    def write_stale(self) -> None:
+        stale = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": self.STALE}]}]}}
+        write(self.settings_path, json.dumps(stale))
+
+    def test_constants_match_the_wiring_module(self):
+        self.assertEqual(sg.SETTINGS_REL, self.hw.SETTINGS_REL)
+        self.assertEqual(sg.HOOKS_REL, self.hw.HOOKS_REL)
+        self.assertIn(sg.WIRING_TRIGGER, self.hw.script_paths())
+
+    def test_fresh_install_creates_settings_with_hooks_and_deny_rules(self):
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 0, out)
+        self.assertIn("create   .claude/settings.json (add hook PreToolUse pre_tool_use.py)", out)
+        self.assertEqual(self.settings()["hooks"], self.hw.desired_hooks())
+        self.assertEqual(self.settings()["permissions"]["deny"], list(self.hw.DENY_RULES))
+        self.assertTrue(self.settings_path.read_text().endswith("}\n"))
+        self.assertTrue((self.project / ".claude/skills/tool-guard/scripts/pre_tool_use.py").is_file())
+
+    def test_settings_file_is_not_recorded_in_the_manifest(self):
+        run(self.project, self.module)
+        self.assertNotIn(sg.SETTINGS_REL, self.manifest()["files"])
+
+    def test_projects_own_entries_and_keys_are_kept(self):
+        own = {"matcher": "Bash", "hooks": [{"type": "command", "command": "./my-check.sh"}]}
+        existing = {
+            "model": "m",
+            "hooks": {"PreToolUse": [own]},
+            "permissions": {"allow": ["Bash(ls)"], "deny": ["Read(x)"]},
+        }
+        write(self.settings_path, json.dumps(existing))
+        write(self.project / ".claude/settings.local.json", '{"local": true}')
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 0, out)
+        self.assertIn("update   .claude/settings.json", out)
+        data = self.settings()
+        self.assertEqual(data["model"], "m")
+        self.assertEqual(data["hooks"]["PreToolUse"][0], own)
+        self.assertEqual(len(data["hooks"]["PreToolUse"]), 2)
+        self.assertEqual(data["permissions"]["allow"], ["Bash(ls)"])
+        self.assertEqual(data["permissions"]["deny"][0], "Read(x)")
+        self.assertEqual((self.project / ".claude/settings.local.json").read_text(), '{"local": true}')
+
+    def test_second_run_changes_nothing_and_check_passes(self):
+        run(self.project, self.module)
+        before = self.settings_path.read_bytes()
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 0)
+        self.assertIn("0 change(s), 0 conflict(s)", out)
+        self.assertEqual(self.settings_path.read_bytes(), before)
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 0, out)
+
+    def test_dry_run_shows_the_diff_and_writes_nothing(self):
+        code, out, _ = run(self.project, self.module, "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("+++ b/.claude/settings.json", out)
+        self.assertIn('+        "matcher": "Bash|Read|Grep|Glob|Write|Edit|NotebookEdit",', out)
+        self.assertIn("dry run: nothing changed", out)
+        self.assertFalse(self.settings_path.exists())
+
+    def test_dry_run_on_existing_settings_diffs_against_them(self):
+        write(self.settings_path, json.dumps({"model": "m"}, indent=2) + "\n")
+        before = self.settings_path.read_text()
+        _, out, _ = run(self.project, self.module, "--dry-run")
+        self.assertIn("--- a/.claude/settings.json", out)
+        self.assertIn('+  "hooks": {', out)
+        self.assertIn('+  "model": "m",', out)  # only the comma changes on the project's own line
+        self.assertEqual(self.settings_path.read_text(), before)
+
+    def test_check_reports_missing_wiring_and_changes_nothing(self):
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("add hook SessionStart session_start.py", out)
+        self.assertIn("NOT up to date", out)
+        self.assertFalse(self.settings_path.exists())
+
+    def test_check_reports_a_hook_that_went_missing_after_install(self):
+        run(self.project, self.module)
+        data = self.settings()
+        del data["hooks"]["PreToolUse"]
+        self.settings_path.write_text(json.dumps(data))
+        before = self.settings_path.read_bytes()
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("add hook PreToolUse pre_tool_use.py", out)
+        self.assertEqual(self.settings_path.read_bytes(), before)
+
+    def test_check_reports_a_missing_deny_rule(self):
+        run(self.project, self.module)
+        data = self.settings()
+        data["permissions"]["deny"].remove(self.hw.DENY_RULES[3])
+        self.settings_path.write_text(json.dumps(data))
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn(f"add deny rule {self.hw.DENY_RULES[3]}", out)
+
+    def test_edited_copy_of_our_hook_is_updated_without_force(self):
+        run(self.project, self.module)
+        data = self.settings()
+        data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 999
+        self.settings_path.write_text(json.dumps(data))
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.settings()["hooks"]["PreToolUse"], self.hw.desired_hooks()["PreToolUse"])
+
+    def test_lookalike_hook_is_a_conflict_and_left_alone(self):
+        self.write_stale()
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 1)
+        self.assertIn("conflict .claude/settings.json", out)
+        self.assertIn("done with conflicts", out)
+        self.assertIn(self.STALE, self.pre_commands())
+        self.assertIn(self.hw.command("tool-guard", "pre_tool_use.py"), self.pre_commands())  # rest still added
+
+    def test_check_fails_on_a_conflict(self):
+        self.write_stale()
+        run(self.project, self.module)
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("conflict .claude/settings.json", out)
+
+    def test_force_replaces_the_lookalike(self):
+        self.write_stale()
+        code, out, _ = run(self.project, self.module, "--force")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.pre_commands(), [self.hw.command("tool-guard", "pre_tool_use.py")])
+
+    def test_disable_all_hooks_is_a_conflict_until_forced(self):
+        write(self.settings_path, json.dumps({"disableAllHooks": True}))
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 1)
+        self.assertIn("disableAllHooks is true", out)
+        self.assertTrue(self.settings()["disableAllHooks"])
+        code, _, _ = run(self.project, self.module, "--force")
+        self.assertEqual(code, 0)
+        self.assertNotIn("disableAllHooks", self.settings())
+
+    def test_invalid_settings_json_stops_with_a_clear_error_and_changes_nothing(self):
+        write(self.settings_path, "{not json")
+        code, _, err = run(self.project, self.module)
+        self.assertEqual(code, 2)
+        self.assertIn(".claude/settings.json: settings.json is not valid JSON", err)
+        self.assertEqual(self.settings_path.read_text(), "{not json")
+        self.assertFalse((self.project / sg.MANIFEST_REL).exists())
+
+    def test_no_claude_skills_folder_means_no_wiring(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = make_project(Path(tmp), tools=(".agents/skills",))
+            code, out, _ = run(proj, self.module)
+            self.assertEqual(code, 0, out)
+            self.assertIn("skip     .claude/settings.json", out)
+            self.assertFalse((proj / ".claude").exists())
+            code, _, _ = run(proj, self.module, "--check")
+            self.assertEqual(code, 0)
+
+    def test_module_without_tool_guard_leaves_settings_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "m").mkdir()
+            (Path(tmp) / "p").mkdir()
+            mod = make_module(Path(tmp) / "m")
+            proj = make_project(Path(tmp) / "p")
+            code, out, _ = run(proj, mod)
+            self.assertEqual(code, 0, out)
+            self.assertFalse((proj / sg.SETTINGS_REL).exists())
+
+    def test_wiring_survives_a_module_update(self):
+        run(self.project, self.module)
+        write(self.module / "module/skills/guard-a/SKILL.md", "skill a v2")
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.settings()["hooks"], self.hw.desired_hooks())
 
 
 class ManifestAndVersionTests(Base):

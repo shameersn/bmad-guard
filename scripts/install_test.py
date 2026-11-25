@@ -4,7 +4,8 @@
 """End-to-end install test for bmad-guard (Phase 1, T9, Gate 1).
 
 Builds throwaway BMAD projects in a new temp folder and checks that the guard module installs,
-survives BMAD quick-update, full update and a 6.11.0 -> 6.12.4 upgrade, and still works:
+survives BMAD quick-update, full update and a 6.11.0 -> 6.12.4 upgrade, and still works (Phase 2, T1: the Claude Code
+hook wiring in .claude/settings.json is checked after setup and after every BMAD run):
 
   fresh    BMAD 6.12.4 -> setup_guard.py -> quick-update -> update; overrides resolve; guard scripts run.
   upgrade  BMAD 6.11.0 -> setup_guard.py -> install 6.12.4 over it; guard files untouched; overrides resolve.
@@ -53,6 +54,13 @@ NO_ARGPARSE_SMOKE = {
     "approval_core.py": None,  # library: imported, not run
     "prompt_rules.py": None,  # library: imported, not run
     "prompt_guard_hook.py": ([], "{}"),  # empty prompt: exits 0 at once, nothing recorded
+    "hook_common.py": None,  # library
+    "hook_wiring.py": None,  # library
+    "pre_tool_use.py": (
+        [],
+        '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}',
+    ),  # no guards yet
+    "session_start.py": ([], "{}"),  # silent and exit 0 when hooksPath and the wiring are in place
 }
 
 
@@ -77,7 +85,7 @@ def classify(path: str, guard_skills: set[str]) -> str:
     """'generated', 'guard' (our skill folders, _bmad/custom/) or 'stock' (everything else)."""
     if is_generated(path):
         return "generated"
-    if path.startswith("_bmad/custom/"):
+    if path.startswith("_bmad/custom/") or path == setup_guard.SETTINGS_REL:
         return "guard"
     for tool_dir in setup_guard.TOOL_SKILL_DIRS:
         if path.startswith(tool_dir + "/") and path[len(tool_dir) + 1 :].split("/")[0] in guard_skills:
@@ -124,6 +132,21 @@ def missing_keys(expected, resolved, prefix: str = "") -> list[str]:
             return [prefix]
         return [f"{prefix}[{i}]" for i, item in enumerate(expected) if item not in resolved]
     return [] if expected == resolved else [prefix]
+
+
+def wiring_problems(sandbox: Path) -> list[str]:
+    """What is missing from the Claude Code hook wiring in `sandbox` (empty list = all in place)."""
+    wiring = setup_guard.load_wiring(REPO)
+    try:
+        settings = wiring.load_settings(sandbox / wiring.SETTINGS_REL)
+    except ValueError as err:
+        return [str(err)]
+    if settings is None:
+        return [f"{wiring.SETTINGS_REL} is missing"]
+    result = wiring.merge(settings)
+    problems = [*result.changes, *result.conflicts]
+    problems += [f"{rel} is missing" for rel in wiring.script_paths() if not (sandbox / rel).is_file()]
+    return problems
 
 
 def short_list(paths: list[str], limit: int = SHOW_PATHS) -> str:
@@ -176,7 +199,8 @@ class Runner:
     def __init__(self, log: Path) -> None:
         self.log = log
         self.checks: list[Check] = []
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("BMAD_GUARD_")}
+        # No collector, and no project dir from an outer Claude Code session: the hooks must use the sandbox.
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
 
     def run(self, cmd: list[str], cwd: Path, stdin: str | None = None, timeout: int = 300):
         start = time.monotonic()
@@ -254,7 +278,15 @@ def step_setup(runner: Runner, stage: str, sandbox: Path) -> str | None:
     runner.add(stage, "setup_guard.py installs, no conflicts", ok, " / ".join(last) or tail(proc), took)
     hooks = git(runner, sandbox, "config", "--local", "core.hooksPath").stdout.strip()
     runner.add(stage, "core.hooksPath set", hooks == setup_guard.HOOKS_REL, hooks or "not set")
+    check_wiring(runner, stage, sandbox)
     return commit(runner, sandbox, "bmad-guard setup") if ok else None
+
+
+def check_wiring(runner: Runner, stage: str, sandbox: Path) -> None:
+    problems = wiring_problems(sandbox)
+    runner.add(
+        stage, "Claude Code hook wiring in place", not problems, short_list(problems) or "hooks, deny rules, scripts"
+    )
 
 
 def check_untouched(runner: Runner, stage: str, sandbox: Path, ref: str, guard_skills: set[str], strict: bool) -> None:
@@ -264,6 +296,7 @@ def check_untouched(runner: Runner, stage: str, sandbox: Path, ref: str, guard_s
     runner.add(stage, "guard files untouched", not groups["guard"], short_list(groups["guard"]) or gen)
     hooks = git(runner, sandbox, "config", "--local", "core.hooksPath").stdout.strip()
     runner.add(stage, "core.hooksPath kept", hooks == setup_guard.HOOKS_REL, hooks or "not set")
+    check_wiring(runner, stage, sandbox)
     if strict:
         runner.add(stage, "only generated files changed", not groups["stock"], short_list(groups["stock"]) or gen)
     else:

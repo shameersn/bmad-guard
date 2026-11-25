@@ -150,12 +150,31 @@ Phase 3 starts only when all of these are true:
 - [ ] The Phase 1 install test still passes, with the hook wiring surviving a BMAD update.
 - [ ] The managed-settings template and rollout doc exist.
 - [ ] A draft Phase 3 plan exists.
+- [ ] Every item in "Managed settings rollout todos" below has an owner and a date.
+
+## Managed settings rollout todos (from T1)
+
+From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None of these can be skipped: the managed file applies to **every** project on a machine, and the `PreToolUse` hook fails closed.
+
+**Before the managed file goes on any pilot machine:**
+
+- [ ] **Pilot machine check.** Every Claude Code project on the machine has the module installed and `setup_guard.py --check` says `up to date`. A project without it blocks every tool call. Keep a list of pilot machines and their projects. Owner: Shameer with IT.
+- [ ] **Claude Code 2.1.295 or later** on every pilot machine (`onFailure: "block"` needs it). Checked version: 2.1.326. Owner: IT.
+- [ ] **Keep `allowManagedHooksOnly: true` in the pilot.** Tell pilot developers first: it turns off their personal and plugin hooks. Owner: Shameer.
+- [ ] **Run the rollout doc test** ("How to test", steps 1–7) on one machine and record the results. Owner: Shameer.
+- [ ] **Rollback tested** on that machine (delete the file, `/status` no longer shows it).
+
+**Before the full IT rollout (open item 3):**
+
+- [ ] **Machine-level script location.** Install the guard scripts once per machine and point the managed hooks there, so projects without the module are not blocked and the scripts cannot be edited per project. Needs an ADR, a setup script change, a template change and an install-test case. Owner: Shameer. Phase 3 at the latest.
+- [ ] **Uninstall for the wiring** in the setup script (rollback is by hand today).
+- [ ] **Open `PreToolUse` checks** from `docs/hooks.md` closed: a real block and a crash with `onFailure` seen in Claude Code, the `.env.example` carve-out, a double run when the same hook is in managed and project settings.
 
 ## Open items for later phases
 
 1. **Jira / ADO MCP not connecting (Phase 4, spike).** Sometimes the Jira or ADO MCP does not connect and the agent creates documents without the ticket data. Candidate: a `SessionStart` or `PreToolUse` check that the MCP is reachable before BMAD planning skills run. Owner: Shameer. From the rollout doc, 25 Nov.
 2. **`epic.md` source (Phase 4, investigate).** An `epic.md` already exists; how it was created, and whether it differs from the ADO data, is unknown. Owner: Manesh G with one BA lead. From the rollout doc, 25 Nov.
-3. **Managed settings rollout by IT / MDM** (after the pilot shows the hooks are stable).
+3. **Managed settings rollout by IT / MDM** (after the pilot shows the hooks are stable). Blocked by the "Before the full IT rollout" todos above.
 4. **Copilot / Cursor hooks** when they offer blocking hooks.
 5. **Credential storage** (Phase 3, ADR 0007; see Phase 1 open item 1). Phase 2 already denies the agent access to `~/.config/bmad-guard/`.
 

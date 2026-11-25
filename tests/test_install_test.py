@@ -11,7 +11,9 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -64,6 +66,10 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(it.classify(".github/agents/bmad-agent-pm.agent.md", GUARDS), "stock")
         self.assertEqual(it.classify("_bmad/customx/a.toml", GUARDS), "stock")
 
+    def test_claude_settings_file_is_guard_so_a_change_by_bmad_is_caught(self):
+        self.assertEqual(it.classify(".claude/settings.json", GUARDS), "guard")
+        self.assertEqual(it.classify(".claude/settings.local.json", GUARDS), "stock")
+
     def test_generated_wins(self):
         self.assertEqual(it.classify("_bmad/_config/manifest.yaml", GUARDS), "generated")
 
@@ -92,6 +98,57 @@ class ClassifyTests(unittest.TestCase):
     def test_split_z(self):
         self.assertEqual(it.split_z("a b.md\0_bmad/x\0"), ["a b.md", "_bmad/x"])
         self.assertEqual(it.split_z(""), [])
+
+
+class WiringProblemsTests(unittest.TestCase):
+    """wiring_problems(): the check that the hook wiring survives setup and every BMAD run."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.sandbox = Path(self._tmp.name)
+        self.wiring = it.setup_guard.load_wiring(ROOT)
+        self.settings = self.sandbox / self.wiring.SETTINGS_REL
+
+    def install(self, settings: dict | None = None, scripts: bool = True) -> None:
+        self.settings.parent.mkdir(parents=True, exist_ok=True)
+        self.settings.write_text(json.dumps(settings if settings is not None else self.wiring.merge(None).settings))
+        if scripts:
+            for rel in self.wiring.script_paths():
+                (self.sandbox / rel).parent.mkdir(parents=True, exist_ok=True)
+                (self.sandbox / rel).write_text("# fake\n")
+
+    def test_complete_wiring_has_no_problems(self):
+        self.install()
+        self.assertEqual(it.wiring_problems(self.sandbox), [])
+
+    def test_missing_settings_file(self):
+        self.assertEqual(it.wiring_problems(self.sandbox), [".claude/settings.json is missing"])
+
+    def test_invalid_json(self):
+        self.settings.parent.mkdir(parents=True)
+        self.settings.write_text("{nope")
+        self.assertIn("not valid JSON", it.wiring_problems(self.sandbox)[0])
+
+    def test_removed_hook_and_deny_rule_are_named(self):
+        data = self.wiring.merge(None).settings
+        del data["hooks"]["PreToolUse"]
+        data["permissions"]["deny"].pop()
+        self.install(data)
+        self.assertEqual(
+            it.wiring_problems(self.sandbox),
+            ["add hook PreToolUse pre_tool_use.py", f"add deny rule {self.wiring.DENY_RULES[-1]}"],
+        )
+
+    def test_hooks_pointing_at_scripts_that_are_gone(self):
+        self.install(scripts=False)
+        problems = it.wiring_problems(self.sandbox)
+        self.assertEqual(len(problems), 3)
+        self.assertIn(".claude/skills/tool-guard/scripts/pre_tool_use.py is missing", problems)
+
+    def test_conflict_is_reported(self):
+        self.install({"disableAllHooks": True})
+        self.assertIn("disableAllHooks is true: no hook would run", it.wiring_problems(self.sandbox))
 
 
 class ResolverJsonTests(unittest.TestCase):

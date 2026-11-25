@@ -1,0 +1,25 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for tool-guard.
+# Team overrides:     {project-root}/_bmad/custom/tool-guard.toml   (owned by the project; the module
+#                     does not ship one)
+# Personal overrides: {project-root}/_bmad/custom/tool-guard.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+
+code = "tool-guard"
+name = "Turnstile"
+title = "Claude Code Hook Dispatcher"
+icon = "🚧"
+description = "Runs the Claude Code SessionStart and PreToolUse hooks: warns about missing setup and routes tool calls to the guards."
+agent_type = "stateless"   # stateless | memory | autonomous
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+activation_steps_prepend = []
+activation_steps_append = []
+persistent_facts = []
