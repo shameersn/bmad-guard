@@ -258,6 +258,16 @@ class ExtensionTests(GuardTestCase):
             "scratch root": {"scratch_folders": ["/"]},
             "scratch short absolute": {"scratch_folders": ["/usr"]},
             "scratch home": {"scratch_folders": ["~/x"]},
+            "write paths not a list": {"write_gate_allowed_paths": "tools"},
+            "write path empty": {"write_gate_allowed_paths": [""]},
+            "write path dot": {"write_gate_allowed_paths": ["."]},
+            "write path dotdot": {"write_gate_allowed_paths": ["tools/../src"]},
+            "write path absolute": {"write_gate_allowed_paths": ["/etc"]},
+            "write path home": {"write_gate_allowed_paths": ["~/x"]},
+            "write path wildcard": {"write_gate_allowed_paths": ["src/*"]},
+            "write path everything": {"write_gate_allowed_paths": ["**"]},
+            "write path not text": {"write_gate_allowed_paths": [1]},
+            "write path too long": {"write_gate_allowed_paths": ["a" * 300]},
         }
         for label, data in bad.items():
             with self.subTest(label=label):
@@ -266,6 +276,13 @@ class ExtensionTests(GuardTestCase):
                 self.assertEqual([v.code for v in verdicts], ["EXT_BAD_FILE"])
                 self.assertIn("tool-rules.json", verdicts[0].reason)
                 self.assertIn("Fix the file by hand", verdicts[0].reason)
+
+    def test_a_project_adds_write_gate_paths_and_cannot_remove_any(self):
+        self.assertEqual(gc.load(self.project).write_allowed, ())
+        self.extension({"write_gate_allowed_paths": ["tools/dev", "README.md", "**/fixtures"]})
+        self.assertEqual(gc.load(self.project).write_allowed, ("tools/dev", "README.md", "**/fixtures"))
+        self.assertEqual(gc.load_extension(self.project)[3], ["tools/dev", "README.md", "**/fixtures"])
+        self.assertEqual(self.bash("ls"), [])  # the new key is not an error for the other guards
 
     def test_a_bad_extension_is_one_reason_for_bash_not_two(self):
         self.extension("{ bad")

@@ -13,9 +13,11 @@ A project adds rules in `_bmad/custom/project/guard/tool-rules.json` (JSON, like
       "command_rules": [{"id": "no-terraform-destroy", "command": "terraform", "words": ["destroy"],
                          "reason": "Destroy is run by the platform team."}],
       "sensitive_paths": [{"id": "payroll", "pattern": "payroll*.csv", "reason": "Payroll data."}],
-      "scratch_folders": ["_work/cache"]
+      "scratch_folders": ["_work/cache"],
+      "write_gate_allowed_paths": ["scripts/dev-tools", "**/fixtures"]
     }
 
+`write_gate_allowed_paths` (T4): project folders or files where the write gate does not ask for an approved plan.
 It can only add. A bad extension file does not get skipped: `load()` raises `ExtensionError` and the guard blocks.
 Python 3.10 has no TOML parser, so `parse_toml()` reads the small subset our own `customize.toml` uses.
 """
@@ -36,7 +38,8 @@ COMMAND_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
 FLAG_RE = re.compile(r"-{1,2}[A-Za-z0-9][A-Za-z0-9-]*(\|-{1,2}[A-Za-z0-9][A-Za-z0-9-]*)*")
 BUILTIN_KEYS = {"id", "reason", "check", "command", "subcommand", "words", "flag_sets", "unless_flags", "arg_prefixes"}
 PROJECT_KEYS = BUILTIN_KEYS - {"check"}
-EXTENSION_KEYS = {"command_rules", "sensitive_paths", "scratch_folders"}
+EXTENSION_KEYS = {"command_rules", "sensitive_paths", "scratch_folders", "write_gate_allowed_paths"}
+WILDCARDS = "*?[]"
 MAX_ENTRIES = 200
 MAX_REASON = 200
 
@@ -176,6 +179,7 @@ class Rules:
     scratch: tuple[str, ...]  # folders where recursive delete is allowed (built-in, then the project's)
     local_hosts: tuple[str, ...]
     project_paths: tuple[tuple[str, str, str], ...]  # (reason code, pattern, reason)
+    write_allowed: tuple[str, ...] = ()  # the project's write gate paths (the built-in ones are in write_gate.py)
 
 
 def load_builtin() -> tuple[list[dict], list[str], list[str]]:
@@ -206,13 +210,28 @@ def _scratch_entry(entry: str, where: str) -> str:
     return entry
 
 
-def load_extension(root: Path) -> tuple[list[dict], list[tuple[str, str, str]], list[str]]:
-    """(command rules, sensitive paths, scratch folders) from the project's extension file; empty without the file.
-    Raises ExtensionError for anything wrong with it."""
+def _allowed_entry(entry: str, where: str) -> str:
+    """A write gate path: a project folder or file such as `tools/dev` or `README.md`, or `**/name` for any depth.
+    No wildcard but the leading `**/`, no `..`, nothing outside the project."""
+    anywhere = entry.startswith("**/")
+    parts = [p for p in (entry[3:] if anywhere else entry).split("/") if p]
+    if (
+        not parts
+        or entry.startswith(("/", "~"))
+        or any(p in (".", "..") or any(c in p for c in WILDCARDS) for p in parts)
+        or len(entry) > 200
+    ):
+        raise ExtensionError(f"{where}: an allowed path is a folder or file inside the project, such as tools/dev")
+    return entry
+
+
+def load_extension(root: Path) -> tuple[list[dict], list[tuple[str, str, str]], list[str], list[str]]:
+    """(command rules, sensitive paths, scratch folders, write gate paths) from the project's extension file; empty
+    without the file. Raises ExtensionError for anything wrong with it."""
     path = root / EXTENSION_REL
     name = EXTENSION_REL.name
     if not path.is_file():
-        return [], [], []
+        return [], [], [], []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as err:
@@ -268,10 +287,16 @@ def load_extension(root: Path) -> tuple[list[dict], list[tuple[str, str, str]], 
         _scratch_entry(s, f"{name}: scratch_folders[{i}]")
         for i, s in enumerate(_text_list(data.get("scratch_folders", []), f"{name}: 'scratch_folders'", ExtensionError))
     ]
+    allowed = [
+        _allowed_entry(a, f"{name}: write_gate_allowed_paths[{i}]")
+        for i, a in enumerate(
+            _text_list(data.get("write_gate_allowed_paths", []), f"{name}: 'write_gate_allowed_paths'", ExtensionError)
+        )
+    ]
     codes = [r["code"] for r in commands] + [p[0] for p in paths]
     if len(codes) != len(set(codes)):
         raise ExtensionError(f"{name}: an id is used twice")
-    return commands, paths, scratch
+    return commands, paths, scratch, allowed
 
 
 def load(root: Path) -> Rules:
@@ -279,5 +304,7 @@ def load(root: Path) -> Rules:
     rules, scratch, hosts = load_builtin()
     for rule in rules:
         rule["code"] = rule["id"]
-    ext_commands, ext_paths, ext_scratch = load_extension(root)
-    return Rules(tuple(rules + ext_commands), tuple(scratch + ext_scratch), tuple(hosts), tuple(ext_paths))
+    ext_commands, ext_paths, ext_scratch, ext_allowed = load_extension(root)
+    return Rules(
+        tuple(rules + ext_commands), tuple(scratch + ext_scratch), tuple(hosts), tuple(ext_paths), tuple(ext_allowed)
+    )
