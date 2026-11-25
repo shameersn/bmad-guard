@@ -1,16 +1,18 @@
 ---
 name: guard-rules
-description: The command and path rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
+description: The command, path and document rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
 ---
 
 # Guard rules
 
-`pre_tool_use.py` runs two guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer.
+`pre_tool_use.py` runs four guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer.
 
 | Guard | Tools | Rules |
 |---|---|---|
 | `command-guard` | Bash | destructive commands, data export, commands it cannot read |
-| `path-guard` | Read, Edit, Write, NotebookEdit, Grep, Glob, and the paths inside Bash | sensitive files and folders |
+| `path-guard` | Read, Edit, MultiEdit, Write, NotebookEdit, Grep, Glob, and the paths inside Bash | sensitive files and folders |
+| `document-guard` | Write, Edit, MultiEdit, NotebookEdit | approval state, guard records, guard config, approval fields, removed questions (see "Document rules") |
+| `bash-write-guard` | Bash | the same protected files, written from the shell |
 
 Each rule has a stable id. The id is the reason code in the message and in the event. Events carry the rule id, the guard name, the tool name and the session id. They never carry the command text, a file path or file content.
 
@@ -70,10 +72,60 @@ Local hosts are `localhost`, `127.0.0.1`, `::1`, any `127.x.x.x`, and a path to 
 
 Names match at any depth, ignoring case. A path is also checked after `~`, `$HOME` and `${HOME}` are expanded, with `..` resolved, and after a symlink is followed. A name with a wildcard (`**/.env*`, `*.pem`) is blocked when it can only mean a sensitive file; a broad pattern such as `*` or `**/*.sql` is not.
 
-- **Read, Edit, Write, NotebookEdit:** `file_path` or `notebook_path`. These match the Read deny rules, which also block Edit and Write.
+- **Read, Edit, MultiEdit, Write, NotebookEdit:** `file_path` or `notebook_path`. These match the Read deny rules, which also block Edit and Write.
 - **Grep:** `path` and `glob`. The search text (`pattern`) is text, not a path. Searching a whole folder is allowed (see the limits below); the deny rules apply to Grep best effort.
 - **Glob:** `pattern` and `path`.
 - **Bash:** every word and redirect target of every command, also inside `sh -c`, `$(...)`, pipes and `sudo`. The text of `echo` and `printf`, the search pattern of `grep` / `rg`, and git messages and search strings (`-m`, `-S`, `-G`, `--grep`, `git grep`) are not paths.
+
+## Document rules
+
+Written for the document guard (file tools) and the Bash write guard (shell). The reason codes are the same for both.
+
+| Rule id | Blocks | Close-but-safe |
+|---|---|---|
+| `DOC_APPROVAL_STATE` | any write to a file named `approval-state.json` (any folder, any spelling of the case), also through a link or `..` | reading it; `python3 .../grant_approval.py --state-file ...` (Warden's own script) |
+| `DOC_GUARD_RECORD` | any write to `_bmad-output/guard/**` (review and build records) | `_bmad-output/planning-artifacts/**`, `_bmad-output/guard.md` |
+| `DOC_GUARD_CONFIG` | any write to `_bmad/custom/project/guard/**` (`tool-rules.json`, `tech-stack.toml`) | `_bmad/custom/project/bmad-build/**`, `_bmad/custom/tool-guard.toml` |
+| `DOC_GUARD_SCRIPTS` | any write to the guard itself: `_bmad/custom/guard/**` (git hooks, manifest), `.claude/settings.json`, `.claude/settings.local.json`, the guard skills (`tool-guard`, `prompt-guard`, `ready-for-dev-gate`, `agent-approval-grant`, `agent-approval-gate-check`) in `.claude/skills` and `.agents/skills`, and every file listed in the setup manifest | reading or running them; other skills (`.claude/skills/my-skill/**`); `_bmad/custom/*.toml` not in the manifest |
+| `DOC_APPROVAL_FIELD` | in a Markdown file: adding, removing or changing `status: approved` or `approval_status: approved` in the frontmatter, any `approved_by` or `approved_at` line there, any `Resolved:` line, any `[ASSUMPTION-RESOLVED ...]` tag | other values (`status: ready-for-dev`, `approval_status: pending-approval`), any edit elsewhere in an approved document |
+| `DOC_QUESTION_REMOVED` | in a Markdown file: an open question (`Q-n` under `## Open questions`) or an open `[ASSUMPTION ...]` that is gone from the new text, with no record for it there | rewording an item that stays open, moving it, adding items |
+
+Each message says the human path: ask the developer to approve or reopen with Warden, to write the answer, or to change the guard settings.
+
+### Design choices
+
+- **Which files.** The two Markdown rules apply to every `.md` and `.markdown` file in the project, not to a list of folders. BMAD's output folders can be renamed, and the lines checked are narrow, so a silent gap is the bigger risk than a false block. Other file types (`.json`, `.txt`, notebooks) are not documents; `NotebookEdit` is checked for the three protected places only.
+- **Only the frontmatter counts for the approval fields.** A line `status: approved` in the body of a document is text. A frontmatter block that never closes counts as all frontmatter, so a half-written block cannot hide a line.
+- **`status` and `approval_status` are about the value `approved`.** BMAD's own phase values (`draft`, `ready-for-dev`, `in-progress`, `done`) and `pending-approval` are ordinary edits: `bmad-build` writes its plan with `approval_status: pending-approval`, and Sentry resets a stale approval through its script. Adding `approved`, removing it, or changing it to anything else blocks. Case, quotes and a trailing `# comment` do not matter. `approved_by` and `approved_at` are blocked for any change, because only Warden's record should say who and when.
+- **Write compares with the disk.** The new content is compared with the file now on disk; a new file compares with nothing, so a new file that already says `status: approved` blocks. **Edit** applies `old_string` to the file on disk (all matches with `replace_all`, the first one otherwise) and compares the whole text before and after. **MultiEdit** applies its edits one after the other. Line endings are compared as `\n`.
+- **When Claude Code would fail the edit, the guard allows.** The file is missing, or `old_string` is empty on a file that has text: Claude Code stops the call itself. One exception: the file exists but `old_string` is not in it as typed (Claude Code also matches curly quotes and line endings loosely). Then the guard compares the lines of `old_string` and `new_string` on their own and blocks an approval line or resolution that changed there. Question removal is not checked in that case (no headings to go by).
+- **Who writes a resolution.** The plan says an AI edit must not add, change or remove a `Resolved:` line or an `[ASSUMPTION-RESOLVED ...]` tag. So an edit cannot turn an open item into a resolved one: `DOC_APPROVAL_FIELD` blocks it. Questions are answered by a person, who types the line with name and date. The question check (`DOC_QUESTION_REMOVED`) therefore finds what is left: an item that is simply gone.
+- **How a removed item is found.** Items are parsed by the ready-for-dev gate's own parser (`ready_for_dev.py`, the sibling skill), so the two cannot disagree. Open ids (`Q-1`, `A-1`) of the old text must all still be in the new text, open or resolved. A renamed id is a delete and an add. Items with no id cannot be followed, so only their count is compared (a new id makes up for one item that got its id). If the parser skill is not installed, the call is blocked (`GUARD_ERROR`) when the text mentions questions, assumptions or `Resolved`; a document without those words never loads it.
+- **Name-based for the state file.** `approval-state.json` is protected by its name in any folder, so a changed `state_file` path or a link does not get past the guard. A test fixture with that name needs a hand edit.
+- **A `.md` file inside a protected folder** gets the folder's reason only.
+- **The guard protects itself (`DOC_GUARD_SCRIPTS`, T3 review).** Without it an agent could edit `pre_tool_use.py` or remove the hook wiring and turn every rule off. The fixed list always applies; the setup manifest (`_bmad/custom/guard/manifest.json`) adds what setup installed, such as the BMAD overrides. A broken or missing manifest leaves the fixed list, and the manifest folder is protected itself. Side effect: the agent cannot edit `.claude/settings.json` for any reason (for example to add a permission). The developer does it by hand; the setup script still updates the wiring, because it runs outside Claude Code's tools.
+- **Decisions from the T3 review.** Resolutions stay person-only in the pilot (look again after the false-block numbers). Every Markdown file is checked, not a folder list. No Bash check for approval fields in `.md` files (`sed -i`); T6 pre-commit is the backstop. `MultiEdit` stays in the matcher.
+
+### Bash writes (best effort)
+
+`bash-write-guard` reads the command like the other Bash guards (pipes, `sh -c`, `$(...)`, `sudo`, quotes) and blocks a command that names a protected place as the target of:
+
+- a redirect: `>`, `>>`, `>|`, `&>`, `<>`, `>& file` (not `2>&1`), also with a here-document;
+- `tee`, `dd of=`, `curl -o`, `wget -O`, `patch`;
+- `cp`, `install`, `ln`, `rsync`, `scp`: the destination, or `-t DIR`; with a folder destination, the source name inside it;
+- `mv`: the destination and every source (the file is moved away);
+- `sed -i` and `perl -i` (also `-i.bak`, `-ni`, `--in-place`);
+- `rm`, `unlink`, `rmdir`, `shred`, `truncate`, `git rm`; with `rm -r` or `git rm -r` also a folder inside the project that holds a protected place (`rm -r _bmad`);
+- `find ... -delete` or `-exec` with a protected start folder;
+- `git checkout` and `git restore` of a protected path, `git mv`.
+
+Reading stays allowed: `cat`, `grep`, `jq`, `git diff`, `git show`, `cp` from the protected file, `git add` and `git commit` of it.
+
+- **A `cd` is followed.** `cd _bmad-output/guard && echo x > a.json` is caught: the targets of one command are also tried from every folder a `cd` or `pushd` in it moves to (the guard does not track subshell scope, so it may be over-cautious).
+- **A variable in the target** (`> "$DIR/approval-state.json"`) is blocked when the text spells a protected name. `> $FILE` is not: nothing in the text says where it points.
+- **A glob** is checked by the folder part and by the file name for the state file (`rm _bmad/custom/approval-*.json`). A wildcard in a folder part is not followed.
+- **Warden and Sentry stay allowed.** The agent starts them as `python3 <skill>/scripts/grant_approval.py --state-file ...`. The state file is an argument of `python3`, not a write target, so the call passes; tests run the exact commands from the Warden and Sentry guides through every guard. The script writes the file itself, after the developer confirmed twice.
+- **`find . -name x -delete`** and `rm -rf .` are not this guard's: the command guard blocks them outside the scratch folders, and a folder above the project is never counted as holding a protected place.
 
 ## Project extensions
 
@@ -112,10 +164,15 @@ The guard reads the command text. It cannot see what the command text does when 
 - **Globs:** `cat .e*` is not caught; `cat .env*` is. A glob in a folder part (`*/node_modules`) is treated as not provable for `rm`.
 - **Search inside folders:** Grep and `grep -r` over a folder can read a sensitive file inside it. Name-based rules cannot see that.
 - **Other tools and MCP servers** are not routed to these guards.
-- **Writes that change the guard's own inputs:** an edit of `.git/config` or `.git/hooks` is not a `core.hooksPath` change by name. Editing the guard scripts or `.claude/settings.json` is the job of the document guard and the write gate (T3, T4), and of git review.
+- **Writes that change the guard's own inputs:** an edit of `.git/config` or `.git/hooks` is not a `core.hooksPath` change by name. Edits of the guard scripts, the guard skills and `.claude/settings.json` are blocked by `DOC_GUARD_SCRIPTS`; a write from `python -c` or a script file is not seen. `_bmad/custom/prompt-guard.toml` and other override files that the developer wrote (not in the manifest) are not protected.
 - **`aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host** are not export rules yet.
 - **`UPDATE` without `WHERE`** is not in the SQL rule. `git checkout .` and `git restore .` (throw away changes) are not rules yet. Both are todos in the Phase 2 plan.
-- **The extension file can be edited by the agent** until T3 blocks agent writes to `_bmad/custom/project/guard/`.
+- **The extension file** (`_bmad/custom/project/guard/`) is protected from the file tools and from the shell commands listed above. A script the agent writes and runs (`python3 -c`, a script file, `node -e`) can still write it; so can `awk -i inplace`, `ed`, `tar -x`, an editor started from Bash and a path built from variables.
+- **Approval fields written from Bash.** The shell guard protects the three places above, not Markdown documents. `sed -i 's/pending-approval/approved/' prd.md` is not seen. The pre-commit hook (T6) blocks a commit that changes an approval status without a matching Warden entry.
+- **Warden's script can be run by the agent.** The two confirmations are enforced by Warden's skill text, not by the hook: a model that runs `grant_approval.py` itself is not stopped. The audit is the `APPROVED` event, the `approved_by` entry and the git commit.
+- **Document rules look at one edit.** A person can still change anything by hand; the guard stops the agent. Resolution records and approval fields in files that are not Markdown (a `.yaml` story, a `.txt` plan) are not checked.
+- **Documents that teach the markup** (for example `docs/ready-for-dev-markup.md`, with its example `Resolved:` lines and `[ASSUMPTION ...]` tags) are checked like stories: an agent edit that changes those example lines blocks. The developer edits them by hand.
+- **The approved value is `approved`.** Warden's `approved_value` can be set to something else in `customize.toml`; the guard does not read it.
 - **The matching is by name.** `id_rsa_utils.py` looks like an SSH key to the path guard.
 
 The real limit is an OS sandbox, which is not in scope for Phase 2. The `permissions.deny` rules are the second layer for file tools.

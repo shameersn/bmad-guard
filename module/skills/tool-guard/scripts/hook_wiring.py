@@ -24,7 +24,7 @@ HOOKS_REL = "_bmad/custom/guard/hooks"  # git hooks folder (core.hooksPath); sam
 SKILLS_REL = ".claude/skills"
 
 # Tools that reach the PreToolUse dispatcher. A guard added later for another tool needs this list changed.
-PRE_TOOL_MATCHER = "Bash|Read|Grep|Glob|Write|Edit|NotebookEdit"
+PRE_TOOL_MATCHER = "Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit"
 
 # (event, matcher or None for all, skill folder, script, extra hook fields).
 # PreToolUse: "onFailure": "block" turns a crash or timeout of the hook (exit 1, no exit 2) into a block.

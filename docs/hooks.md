@@ -79,7 +79,7 @@ Verified (docs):
 - Only letters, digits, `_`, `-`, space, `,`, `|`: an exact name or a list, e.g. `Edit|Write`.
 - Anything else: an unanchored JavaScript regular expression, e.g. `^Notebook`, `mcp__memory__.*`.
 - On tool events the matcher filters `tool_name`. MCP tools are `mcp__<server>__<tool>`; a bare `mcp__memory` matches nothing.
-- Our `PreToolUse` matcher: `Bash|Read|Grep|Glob|Write|Edit|NotebookEdit` (exact names). A guard for another tool needs this string changed and the setup script re-run (`--check` reports the old one as out of date).
+- Our `PreToolUse` matcher: `Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit` (exact names). `MultiEdit` was added in T3 (section 11). A guard for another tool needs this string changed and the setup script re-run (`--check` reports the old one as out of date).
 
 ## 5. Hook entry, timeouts
 
@@ -172,6 +172,23 @@ What the hook payloads give the guards (all Verified (docs), see section 1):
 Limits that matter for the rollout (full list in the rules doc): the guards read command text only. Text built at run time (`$CMD`, `eval "$x"`, `base64 | sh`), script files, `python -c` and remote commands (`ssh`, `kubectl exec`) are not seen. The `permissions.deny` rules and code review are the other layers; an OS sandbox is the real limit and is not in scope.
 
 Not yet seen in a real Claude Code session (same reason as section 2: no model session in our test environment): a `PreToolUse` block by these guards, and how the model reacts to the multi-line stderr message.
+
+## 11. What T3 builds (document guard)
+
+Rules, reason codes, design choices and limits: `module/skills/tool-guard/references/guard-rules.md`.
+
+The hook input of the file-writing tools. The hooks page we read only shows the Bash input, so these field names come from the **strings in the Claude Code 2.1.326 binary** (its tool schemas, permission code and diff code). Mark: **Verified (binary strings), not run.** A change in a later version shows as a failing guard test only if we re-run the check; re-read the fields when the pinned version changes.
+
+| Tool | `tool_input` fields the guard reads |
+|---|---|
+| `Write` | `file_path`, `content` |
+| `Edit` | `file_path`, `old_string`, `new_string`, `replace_all` (optional, default false) |
+| `MultiEdit` | `file_path`, `edits`: a list of `{old_string, new_string, replace_all}`, applied in order |
+| `NotebookEdit` | `notebook_path`, `new_source`, `edit_mode` (replace, insert, delete), `cell_id`, `cell_type`. The guard reads the path only. |
+
+- **`MultiEdit` exists in 2.1.326.** The binary lists it with Write, Edit and NotebookEdit as a file-writing tool and in the permission rules. Whether the model is offered it by default is **Unverified**. We added it to the matcher and to the path guard and document guard anyway: a missing tool in the matcher would let one call get past every write guard, and an unused matcher entry costs nothing. After this change `setup_guard.py --check` reports the old matcher as out of date until the setup script is run again.
+- **How Claude Code applies an edit** (binary): the `old_string` is replaced in the file text, once, or everywhere with `replace_all`; `MultiEdit` repeats that for each edit on the result of the one before. An `old_string` that is not in the file, or is not unique without `replace_all`, fails the edit. An edit with an empty `old_string` on a file that does not exist creates it. The guard does the same replacement on the file on disk to get the whole text before and after.
+- **Paths.** The tool schemas ask for an absolute path. The guard also accepts a relative path (resolved from `cwd`) and `~`.
 
 ## Open checks (to close in T2 or the pilot)
 

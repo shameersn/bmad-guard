@@ -15,7 +15,8 @@ Fails closed (ADR 0002): bad input, a guard that raises, a guard module that can
 error in this script blocks the call and records a GUARD_ERROR / BAD_HOOK_INPUT event. A crash that exits 1
 (for example a Python syntax error) would not block by itself; the hook entry sets "onFailure": "block" for that.
 
-Each guard is a module with `GUARDS = [Guard(...)]`, listed by name in GUARD_MODULES (T2: command_guard, path_guard).
+Each guard is a module with `GUARDS = [Guard(...)]`, listed by name in GUARD_MODULES
+(T2: command_guard, path_guard; T3: document_guard, bash_write_guard).
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import hook_common as hc  # noqa: E402 - sibling module, found through the line above
 
-GUARD_MODULES: tuple[str, ...] = ("command_guard", "path_guard")  # module names next to this file
+GUARD_MODULES: tuple[str, ...] = ("command_guard", "path_guard", "document_guard", "bash_write_guard")
+# module names next to this file
 STAGE = "tool"
 AGENT = f"{hc.GUARD}/PreToolUse"
 BAD_INPUT = hc.Verdict(

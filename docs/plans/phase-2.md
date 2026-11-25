@@ -47,7 +47,7 @@ From the grill session on 25 Nov (Shameer):
 | L1 | `UserPromptSubmit` | prompt-guard (Phase 1) | Secrets; PHI in HIPAA projects |
 | L1 | `PreToolUse` Bash | command guard | Destructive commands, data-export commands, `--no-verify` |
 | L1 | `PreToolUse` Read / Grep / Glob / Bash | sensitive-path guard | Environment files, keys, dumps, `~/.config/bmad-guard/` |
-| L1 | `PreToolUse` Write / Edit | document guard | AI writes to approval fields and `approval-state.json`; removal of an unresolved question or assumption |
+| L1 | `PreToolUse` Write / Edit / MultiEdit / NotebookEdit, and Bash | document guard | AI writes to approval fields, `approval-state.json`, guard records and guard config; removal of an unresolved question or assumption |
 | L1 | `PreToolUse` Write / Edit | content scan | Secrets; PHI in HIPAA projects |
 | L1 | `PreToolUse` Write / Edit | write gate | Source writes without an approved, unchanged plan, or with a story that is not ready for dev |
 | L2 | `pre-commit` | scan, brief status, tech stack | Same scan on staged files; brief status changes not made by Warden; dependency not on the list (only when a list exists) |
@@ -82,12 +82,22 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 
 ### T3. Document guard (Days 4–6)
 
-- **Approval fields:** block an AI Write / Edit that changes `_bmad/custom/approval-state.json`, or that changes `status: approved`, `approval_status`, `approved_by`, `approved_at` or a `Resolved:` / `[ASSUMPTION-RESOLVED: …]` line in a planning document. Bash redirections to the same files are blocked by T2's path check. Warden's own script is not a tool write, so it still works after human confirmation.
+- **Approval fields:** block an AI Write / Edit that changes `_bmad/custom/approval-state.json`, or that changes `status: approved`, `approval_status`, `approved_by`, `approved_at` or a `Resolved:` / `[ASSUMPTION-RESOLVED: …]` line in a planning document. Bash writes to the same files are blocked by a separate shell check (`bash_write_guard.py`: redirects, `tee`, `cp` / `mv` / `ln`, `sed -i`, `rm`, `git checkout` / `restore`; best effort). T2's path check does not cover them: its list is secrets only. Warden's own script is not a tool write or a shell write to that file (the state file is only an argument of `python3`), so it still works after human confirmation.
 - **Guard records:** block AI Write / Edit to the review and build records of T7 (`_bmad-output/guard/`); only the guard scripts and hooks write them.
 - **Guard config:** block AI Write / Edit (and Bash writes, best effort) to `_bmad/custom/project/guard/` (for example `tool-rules.json`). Otherwise the agent can add a scratch folder and widen `rm -r`. From the T2 review.
 - **Question delete:** on an edit to a story, plan or PRD, compare old and new text with the ready-for-dev markup (`docs/ready-for-dev-markup.md`). Removing an open question or `[ASSUMPTION: …]` that has no resolution record blocks.
 
 **Done when:** tests cover each field, a legitimate edit that keeps the item, and a delete with and without a resolution.
+
+**Built (T3), what differs from the text above:** rules and limits are in `module/skills/tool-guard/references/guard-rules.md`.
+
+- The Markdown rules apply to every `.md` / `.markdown` file, not to a folder list (BMAD output folders can be renamed). Only the frontmatter counts for the approval fields.
+- `status` and `approval_status` block only for the value `approved` (added, removed or changed). `pending-approval` and BMAD's phase values are ordinary edits, because `bmad-build` writes them.
+- An AI edit cannot add, change or remove a `Resolved:` line or `[ASSUMPTION-RESOLVED ...]` tag (`DOC_APPROVAL_FIELD`), so a question is answered by a person. `DOC_QUESTION_REMOVED` finds the item that is simply gone; an id still present, open or resolved, is not removed.
+- `MultiEdit` is in the matcher (it exists in 2.1.326; `docs/hooks.md` section 11). Run the setup script again to update a project's wiring.
+- New rule ids: `DOC_APPROVAL_FIELD`, `DOC_APPROVAL_STATE`, `DOC_GUARD_RECORD`, `DOC_GUARD_CONFIG`, `DOC_GUARD_SCRIPTS`, `DOC_QUESTION_REMOVED`.
+- **Guard protects itself** (`DOC_GUARD_SCRIPTS`, from the T3 review): agent writes to `_bmad/custom/guard/**`, `.claude/settings.json` / `settings.local.json`, the guard skills and every file in the setup manifest are blocked, for file tools and shell writes.
+- **T3 review decisions:** resolutions stay person-only in the pilot (revisit after the false-block numbers); every Markdown file is checked; no Bash check for approval fields in `.md` files (T6 pre-commit is the backstop); `MultiEdit` stays.
 
 ### T4. Write gate (Days 6–8)
 
@@ -173,11 +183,13 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 
 ## Command guard todos (from T2)
 
-- [ ] **T3:** block agent writes to `_bmad/custom/project/guard/` (see T3, "Guard config").
+- [x] **T3:** block agent writes to `_bmad/custom/project/guard/` (see T3, "Guard config"). Done: `DOC_GUARD_CONFIG`, file tools and best-effort shell writes.
 - [ ] **Rule:** `git checkout .` / `git checkout -- .` and `git restore .` (throw away uncommitted work). Needs a close-but-safe allow test (`git checkout -- file`).
 - [ ] **Rule:** `UPDATE` without `WHERE` in the SQL rule.
 - [ ] **Export rules:** `aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host.
 - [ ] **Real block seen** in Claude Code for one command rule and one path rule (rollout doc, test step 8).
+- [ ] **Revisit person-only resolutions** (`DOC_APPROVAL_FIELD` on `Resolved:` lines) with the pilot's false-block numbers. Owner: Shameer.
+- [ ] **Protect developer-written guard overrides** (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/tool-guard.toml`) that are not in the setup manifest, if the pilot shows agents editing them.
 
 ## Open items for later phases
 

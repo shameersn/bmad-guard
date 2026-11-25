@@ -60,6 +60,9 @@ NO_ARGPARSE_SMOKE = {
     "guard_config.py": None,  # library
     "command_guard.py": None,  # library
     "path_guard.py": None,  # library
+    "document_guard.py": None,  # library
+    "bash_write_guard.py": None,  # library
+    "document_text.py": None,  # library
     "pre_tool_use.py": (
         [],
         '{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}}',
@@ -493,6 +496,35 @@ PRE_TOOL_SMOKE = (
     ("allows git push", "Bash", {"command": "git push origin main"}, 0, ""),
     ("blocks a read of the env file", "Read", {"file_path": "{sandbox}/.env"}, 2, "PATH_ENV_FILE"),
     ("allows a read of the env example", "Read", {"file_path": "{sandbox}/.env.example"}, 0, ""),
+    (
+        "blocks a write to the approval state",
+        "Write",
+        {"file_path": "{sandbox}/_bmad/custom/approval-state.json", "content": "{}"},
+        2,
+        "DOC_APPROVAL_STATE",
+    ),
+    (
+        "blocks a new document that says approved",
+        "Write",
+        {"file_path": "{sandbox}/docs/prd.md", "content": "---\napproval_status: approved\n---\n# PRD\n"},
+        2,
+        "DOC_APPROVAL_FIELD",
+    ),
+    (
+        "blocks a shell write to the approval state",
+        "Bash",
+        {"command": "echo {} > _bmad/custom/approval-state.json"},
+        2,
+        "DOC_APPROVAL_STATE",
+    ),
+    ("allows a shell read of the approval state", "Bash", {"command": "cat _bmad/custom/approval-state.json"}, 0, ""),
+    (
+        "allows a new document that waits for approval",
+        "Write",
+        {"file_path": "{sandbox}/docs/prd.md", "content": "---\napproval_status: pending-approval\n---\n# PRD\n"},
+        0,
+        "",
+    ),
 )
 
 

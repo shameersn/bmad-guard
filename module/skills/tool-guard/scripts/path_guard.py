@@ -6,7 +6,7 @@
 The list is `SENSITIVE_PATHS` in hook_wiring.py: the same patterns that go into `permissions.deny`. A project can add
 patterns in _bmad/custom/project/guard/tool-rules.json (`sensitive_paths`); it cannot remove one. Checked on:
 
-  Read, Edit, Write, NotebookEdit   file_path / notebook_path
+  Read, Edit, MultiEdit, Write, NotebookEdit   file_path / notebook_path
   Grep                              path and glob (not the search pattern, which is text)
   Glob                              pattern and path
   Bash                              every word and redirect target of every command, also inside `sh -c`, `$(...)`,
@@ -38,6 +38,7 @@ GUARD = "path-guard"
 FILE_KEYS = {
     "Read": ("file_path",),
     "Edit": ("file_path",),
+    "MultiEdit": ("file_path",),
     "Write": ("file_path",),
     "NotebookEdit": ("notebook_path",),
     "Grep": ("path", "glob"),

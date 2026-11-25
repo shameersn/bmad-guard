@@ -90,11 +90,21 @@ class RunTests(unittest.TestCase):
 
     def test_registered_guards_allow_a_harmless_call(self):
         self.assertEqual(
-            pt.GUARD_MODULES, ("command_guard", "path_guard")
-        )  # T2 registers its guards here; T3-T5 add modules
+            pt.GUARD_MODULES, ("command_guard", "path_guard", "document_guard", "bash_write_guard")
+        )  # T2 and T3 register their guards here; T4-T5 add modules
         self.assertEqual(self.run_call(CALL, [])[1], [])
         self.assertEqual(self.run_call(CALL, pt.load_guards())[1], [])
-        self.assertEqual([g.name for g in pt.load_guards()], ["command-guard", "path-guard"])
+        self.assertEqual(
+            [g.name for g in pt.load_guards()], ["command-guard", "path-guard", "document-guard", "bash-write-guard"]
+        )
+
+    def test_the_matcher_reaches_every_tool_a_registered_guard_is_for(self):
+        import hook_wiring as hw
+
+        matched = set(hw.PRE_TOOL_MATCHER.split("|"))
+        for guard in pt.load_guards():
+            with self.subTest(guard=guard.name):
+                self.assertLessEqual(set(guard.tools), matched)
 
     def test_malformed_input_blocks(self):
         bad = [

@@ -330,7 +330,7 @@ class SettingsWiringTests(Base):
         code, out, _ = run(self.project, self.module, "--dry-run")
         self.assertEqual(code, 0)
         self.assertIn("+++ b/.claude/settings.json", out)
-        self.assertIn('+        "matcher": "Bash|Read|Grep|Glob|Write|Edit|NotebookEdit",', out)
+        self.assertIn('+        "matcher": "Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit",', out)
         self.assertIn("dry run: nothing changed", out)
         self.assertFalse(self.settings_path.exists())
 
