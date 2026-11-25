@@ -22,7 +22,7 @@ Status: Phase 1 (guard module). Not ready for use.
 | `tests/` | Unit tests and repo rules |
 | `docs/plans/` | One plan per phase. Each plan is approved by PR before its work starts. |
 | `docs/adr/` | Architecture decision records. |
-| `docs/hooks.md` | How Claude Code hooks behave in the pinned version, with sources. `docs/managed-settings-rollout.md`: what IT installs. Command and path guard rules and limits: `module/skills/tool-guard/references/guard-rules.md`. |
+| `docs/hooks.md` | How Claude Code hooks behave in the pinned version, with sources. `docs/managed-settings-rollout.md`: what IT installs. Command, path and document guard rules and limits: `module/skills/tool-guard/references/guard-rules.md`. |
 | `spikes/` | Throwaway experiments from Phase 0. Each has a `REPORT.md`. Not linted. |
 
 ## Checks
