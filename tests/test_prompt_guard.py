@@ -464,23 +464,59 @@ class HookTests(Project):
             with self.subTest(stdin=stdin):
                 self.assertEqual(self.run_hook(stdin)[:2], (0, None))
 
-    def test_internal_error_fails_open_with_warning_and_event(self):
-        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(self.payload("anything")).encode()))
+    def crash(self, prompt: str = "anything") -> dict:
+        """Run the hook in this process with a check that raises; return the JSON it printed."""
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(self.payload(prompt)).encode()))
         out = io.StringIO()
         with (
-            mock.patch.object(hook.pc, "check", side_effect=RuntimeError("boom")),
+            mock.patch.object(hook.pc, "check", side_effect=RuntimeError(f"boom {MARKER}")),
             mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.project)}),
             mock.patch.object(sys, "stdin", stdin),
             contextlib.redirect_stdout(out),
         ):
             self.assertEqual(hook.entry(), 0)
-        answer = json.loads(out.getvalue())
+        self.assertNotIn(MARKER, out.getvalue())
+        self.assertNotIn(MARKER, self.queue())
+        return json.loads(out.getvalue())
+
+    def test_internal_error_fails_open_with_warning_and_event(self):
+        answer = self.crash()
         self.assertNotIn("decision", answer)
         self.assertIn("NOT checked", answer["systemMessage"])
         (event,) = self.events()
         self.assertEqual(
             (event["reason_code"], event["verdict"], event["error"]), ("GUARD_ERROR", "warn", "RuntimeError")
         )
+
+    def test_internal_error_blocks_in_a_hipaa_project(self):
+        self.write("_bmad/custom/prompt-guard.toml", '[agent]\nphi = "block"\n')
+        answer = self.crash(f"call {FAKE['phone-us']} {MARKER}")
+        self.assertEqual(answer["decision"], "block")
+        self.assertIn("HIPAA", answer["reason"])
+        self.assertIn("RuntimeError", answer["reason"])
+        self.assertNotIn(FAKE["phone-us"], json.dumps(answer))
+        (event,) = self.events()
+        self.assertEqual(
+            (event["reason_code"], event["verdict"], event["error"]), ("GUARD_ERROR", "block", "RuntimeError")
+        )
+
+    def test_internal_error_blocks_when_the_hipaa_setting_cannot_be_read(self):
+        path = self.project / "_bmad/custom/prompt-guard.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xff\xfe[agent]\nphi = \xff\n")  # not valid UTF-8
+        self.assertEqual(self.crash()["decision"], "block")
+        self.assertEqual([e["verdict"] for e in self.events()], ["block"])
+
+    def test_events_hold_rule_ids_and_no_matched_text(self):
+        for config in ("", '[agent]\nphi = "block"\n'):
+            self.write("_bmad/custom/prompt-guard.toml", config)
+            self.run_hook(self.payload(f"call {FAKE['phone-us']} {MARKER} with {FAKE['github-token']}"))
+        events = self.events()
+        self.assertEqual(len(events), 2)
+        blob = json.dumps(events)
+        for text in (FAKE["phone-us"], FAKE["github-token"], MARKER):
+            self.assertNotIn(text, blob)
+        self.assertIn("phi.phone-us", events[0]["rule_ids"])
 
 
 if __name__ == "__main__":

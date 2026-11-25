@@ -3,7 +3,7 @@
 # ///
 """Claude Code UserPromptSubmit hook: check every prompt locally before Claude sees it (ADR 0006).
 
-Wired into Claude Code settings in Phase 2 (managed settings), as:
+Wired into the project's `.claude/settings.json` by the setup script (and the managed-settings template) as:
     python3 "${CLAUDE_PROJECT_DIR}/.claude/skills/prompt-guard/scripts/prompt_guard_hook.py"
 
 Reads the hook JSON ({"prompt", "session_id", "cwd", ...}) from stdin and answers:
@@ -12,10 +12,15 @@ Reads the hook JSON ({"prompt", "session_id", "cwd", ...}) from stdin and answer
   warn  -> the prompt goes through; a warning is shown and added to Claude's context.
   allow -> no output (record-only findings are still recorded as an event).
 
-Decisions fail closed: a "block" blocks. An internal error in the guard itself fails OPEN: the prompt
-goes through with a warning, and a GUARD_ERROR event records that it was not checked. Reason: a bug in
-this script must not stop all work in Claude Code; the error is visible to the user and in the events.
-(Review question for the team: fail closed instead for HIPAA projects?)
+Decisions fail closed: a "block" blocks. An internal error in the guard itself (Phase 2, T5) depends on the project:
+  HIPAA project (`phi = "block"`, or the setting cannot be read) -> the prompt is BLOCKED: it was not checked, and
+                         unchecked PHI must not reach the model. A GUARD_ERROR block event records it.
+  other projects      -> the prompt goes through with a warning, and a GUARD_ERROR warn event records that it was
+                         not checked. A bug in this script must not stop all work in Claude Code.
+The same rule is used by the content scan on file writes (tool-guard `content_scan.py`). A prompt hook that
+gets input it cannot read (not JSON, no prompt text) has nothing to check and lets it through, as before.
+
+The warning, the block reason and the events carry rule ids and the error type only, never any part of the prompt.
 """
 
 from __future__ import annotations
@@ -82,20 +87,39 @@ def main() -> int:
     return 0  # the decision travels in the JSON
 
 
-def fail_open(err: Exception) -> None:
-    """Internal error: let the prompt through with a warning and record GUARD_ERROR. Never raises."""
-    print(json.dumps({"systemMessage": f"{TAG} Guard error ({type(err).__name__}); this prompt was NOT checked."}))
+def fail(err: Exception) -> None:
+    """Internal error: block in a HIPAA project, else let the prompt through with a warning. Records GUARD_ERROR.
+    Never raises."""
+    name = type(err).__name__
+    root = None
     try:
-        pc.emit("warn", "GUARD_ERROR", pc.project_root(), AGENT, error=type(err).__name__)
-    except Exception:  # noqa: S110 - the warning above is already shown; nothing else to do
+        root = pc.project_root()
+        hipaa = pc.is_hipaa(root)
+    except Exception:  # cannot tell: treat as HIPAA
+        hipaa = True
+    if hipaa:
+        print(
+            json.dumps(
+                {
+                    "decision": "block",
+                    "reason": f"Prompt blocked by prompt-guard: the check failed ({name}) and this project is "
+                    "marked HIPAA, so the prompt was not checked and was not sent. Tell the developer.",
+                }
+            )
+        )
+    else:
+        print(json.dumps({"systemMessage": f"{TAG} Guard error ({name}); this prompt was NOT checked."}))
+    try:
+        pc.emit("block" if hipaa else "warn", "GUARD_ERROR", root or Path.cwd(), AGENT, error=name)
+    except Exception:  # noqa: S110 - the answer above is already printed; nothing else to do
         pass
 
 
 def entry() -> int:
     try:
         return main()
-    except Exception as err:  # fail open on a bug in the guard itself
-        fail_open(err)
+    except Exception as err:  # a bug in the guard itself: the fail mode depends on the project (see top)
+        fail(err)
         return 0
 
 
