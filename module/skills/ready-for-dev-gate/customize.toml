@@ -1,0 +1,39 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for ready-for-dev-gate.
+# Team overrides:     {project-root}/_bmad/custom/ready-for-dev-gate.toml
+# Personal overrides: {project-root}/_bmad/custom/ready-for-dev-gate.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+
+code = "ready-for-dev-gate"
+name = "Gatekeeper"
+title = "Ready-for-Dev Gate"
+icon = "🚦"
+description = "Blocks a story from development while questions or assumptions are open, items were deleted, or confidence is low."
+agent_type = "stateless"   # stateless | memory | autonomous
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+activation_steps_prepend = []
+activation_steps_append = []
+persistent_facts = []
+
+# advisory: report a block and let the user decide (logged). enforce: a block is a hard stop.
+# Stays advisory until the BA team agrees the markup (docs/ready-for-dev-markup.md in bmad-guard).
+mode = "advisory"
+
+# Lowest confidence (0-100) that may pass the gate (ADR 0004).
+min_confidence = 80
+
+# Folder with one epic-<n>/epic-summary.md per epic. Used when a story has frontmatter `epic: <n>`
+# and no `epic_summary:` link.
+epics_dir = "{project-root}/_bmad-output/planning-artifacts/epics"
+
+# Git ref to compare question and assumption ids against; ids present there but gone now count as
+# deleted. Empty = only id gaps are checked (and the story need not be in git).
+baseline = "HEAD"
