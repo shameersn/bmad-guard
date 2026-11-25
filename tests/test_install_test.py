@@ -12,6 +12,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -232,6 +234,30 @@ class ScriptCoverageTests(unittest.TestCase):
             with self.subTest(script=script.name):
                 has_help = "ArgumentParser" in script.read_text(encoding="utf-8")
                 self.assertTrue(has_help or script.name in it.NO_ARGPARSE_SMOKE)
+
+
+class PreToolSmokeTests(unittest.TestCase):
+    """The install test's PreToolUse smoke table must match what the real hook does (checked here without BMAD)."""
+
+    def test_the_smoke_table_matches_the_hook(self):
+        script = ROOT / "module/skills/tool-guard/scripts/pre_tool_use.py"
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
+        with tempfile.TemporaryDirectory() as tmp:
+            sandbox = Path(tmp).resolve()
+            for label, tool, tool_input, want_exit, want_code in it.PRE_TOOL_SMOKE:
+                with self.subTest(label=label):
+                    tool_input = {k: v.replace("{sandbox}", str(sandbox)) for k, v in tool_input.items()}
+                    payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input}
+                    proc = subprocess.run(
+                        [sys.executable, str(script)],
+                        input=json.dumps({**payload, "cwd": str(sandbox)}),
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                        cwd=sandbox,
+                    )
+                    self.assertEqual(proc.returncode, want_exit, proc.stderr)
+                    self.assertIn(want_code, proc.stderr)
 
 
 class MainTests(unittest.TestCase):

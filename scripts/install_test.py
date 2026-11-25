@@ -483,6 +483,29 @@ def check_smokes(runner: Runner, stage: str, sandbox: Path) -> None:
     ok = isinstance(result.get("confidence"), int)
     runner.add(stage, "confidence_score scores a file", ok, err or f"confidence {result.get('confidence')}")
 
+    check_pre_tool_use(runner, stage, sandbox)
+
+
+# (label, tool, tool input, expected exit code, expected reason code or "") for the PreToolUse hook as Claude Code
+# runs it. "{sandbox}" in a value is replaced by the sandbox path.
+PRE_TOOL_SMOKE = (
+    ("blocks git push --force", "Bash", {"command": "git push --force origin main"}, 2, "CMD_GIT_FORCE_PUSH"),
+    ("allows git push", "Bash", {"command": "git push origin main"}, 0, ""),
+    ("blocks a read of the env file", "Read", {"file_path": "{sandbox}/.env"}, 2, "PATH_ENV_FILE"),
+    ("allows a read of the env example", "Read", {"file_path": "{sandbox}/.env.example"}, 0, ""),
+)
+
+
+def check_pre_tool_use(runner: Runner, stage: str, sandbox: Path) -> None:
+    """The tool-guard hook blocks a destructive command and a sensitive read, and lets close-but-safe calls pass."""
+    script = sandbox / ".claude/skills/tool-guard/scripts/pre_tool_use.py"
+    for label, tool, tool_input, want_exit, want_code in PRE_TOOL_SMOKE:
+        tool_input = {k: v.replace("{sandbox}", str(sandbox)) for k, v in tool_input.items()}
+        payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, "cwd": str(sandbox)}
+        proc, took = runner.run([sys.executable, str(script)], sandbox, stdin=json.dumps(payload))
+        ok = proc.returncode == want_exit and want_code in proc.stderr
+        runner.add(stage, f"tool-guard PreToolUse {label}", ok, "" if ok else tail(proc), took)
+
 
 # ---------------------------------------------------------------- stages
 
