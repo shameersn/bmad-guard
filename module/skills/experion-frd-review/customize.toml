@@ -1,0 +1,45 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for experion-frd-review.
+# Team overrides:     {project-root}/_bmad/custom/experion-frd-review.toml
+# Personal overrides: {project-root}/_bmad/custom/experion-frd-review.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+# Consumed by module.yaml:agents[] and `[agents.<code>]` in central config.
+
+code = "experion-frd-review"
+name = "Iris"
+title = "FRD Reviewer"
+icon = "🧐"
+description = "Reviews one FRD against its PRD feature and the Experion FRD template: structure, traceability, requirement quality, screens, inherited NFRs and open items. Writes a version-tagged review beside the FRD and keeps findings the BA disputes visible for the Product Owner."
+agent_type = "stateless"
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+# Steps to run before the standard activation (config load, greet).
+# Overrides append. Use for pre-flight loads, compliance checks, etc.
+
+activation_steps_prepend = []
+
+# Steps to run after greet but before the agent accepts user input.
+# Overrides append. Use for context-heavy setup that should happen
+# once the user has been acknowledged.
+
+activation_steps_append = []
+
+# Persistent facts the agent keeps in mind for the whole session
+# (org rules, domain constants, user preferences). Overrides append.
+# Each entry is either a literal sentence or a `file:`-prefixed path/glob
+# whose contents load as facts.
+
+persistent_facts = [
+  "file:{project-root}/**/project-context.md",
+]
+
+# File names inside the FRD's feature folder (beside frd.md). Keep in sync with experion-frd.
+frd_filename = "frd.md"
+review_filename = "frd-review.md"

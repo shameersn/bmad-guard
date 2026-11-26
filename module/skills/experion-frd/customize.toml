@@ -13,7 +13,7 @@ code = "experion-frd"
 name = "Fenn"
 title = "Functional Requirements Writer"
 icon = "📐"
-description = "Writes one Functional Requirements Document (FRD) per epic from the approved PRD, UX, architecture and the epic's stories, in the Experion 14-section format, and validates it before approval."
+description = "Writes one Functional Requirements Document (FRD) per PRD feature from the approved PRD, in the Experion 13-section format, with stable requirement ids and the NFRs the feature inherits."
 agent_type = "stateless"
 
 # --- Configurable below. Overrides merge per BMad structural rules: ---
@@ -33,17 +33,20 @@ persistent_facts = [
   "file:{project-root}/**/project-context.md",
 ]
 
-# Steps to run after an FRD is written or validated. Overrides append.
+# Steps to run after an FRD is written or updated. Overrides append.
 on_complete = []
 
 # The FRD template. Bare paths resolve from the skill root. Override wins.
 frd_template = "assets/frd-template.md"
 
-# Folder with one epic-<n>/ folder per epic. The FRD is written to epic-<n>/frd.md, beside the
-# epic's epic-summary.md, where the ready-for-dev gate looks for it. Keep in sync with
-# ready-for-dev-gate's epics_dir.
-epics_dir = "{project-root}/_bmad-output/planning-artifacts/epics"
+# A team's own copy of the template. When this file exists it is used instead of frd_template, so a team
+# can change the template without touching the installed skill (setup_guard.py never writes here).
+project_template = "{project-root}/_bmad/custom/templates/frd-template.md"
 
-# File names inside the epic folder.
+# Folder with one F-<nnn>/ folder per PRD feature. The FRD is written to F-<nnn>/frd.md, where the
+# ready-for-dev gate looks for it. Keep in sync with ready-for-dev-gate's frds_dir.
+frds_dir = "{project-root}/_bmad-output/planning-artifacts/frds"
+
+# File names inside the feature folder. The review is written by experion-frd-review.
 frd_filename = "frd.md"
 review_filename = "frd-review.md"
