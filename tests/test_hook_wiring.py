@@ -438,6 +438,87 @@ class ManagedTemplateTests(unittest.TestCase):
         self.assertNotIn("/Users/", text)
         self.assertNotRegex(text, r"(?i)api[_-]?key|token|password")
 
+    def test_the_project_form_template_has_the_same_telemetry_as_the_machine_form(self):
+        self.assertEqual(self.template["env"], hw.TELEMETRY_ENV)
+
+
+class MachineTemplatesTests(unittest.TestCase):
+    """One managed template per OS (ADR 0008), written from hook_wiring.py by `install_machine.py --print-template`.
+    They must equal what `managed_settings(base)` gives, so there is one definition."""
+
+    FILES = {
+        "macos": ("managed-settings.macos.json", MAC),
+        "linux": ("managed-settings.linux.json", LINUX),
+    }
+
+    def load(self, os_name: str) -> tuple[str, dict, str]:
+        name, base = self.FILES[os_name]
+        text = (ROOT / "module/managed-settings" / name).read_text()
+        return text, json.loads(text), base
+
+    def test_each_file_is_exactly_what_hook_wiring_writes(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                text, _, base = self.load(os_name)
+                self.assertEqual(text, hw.render(hw.managed_settings(base)))
+
+    def test_each_file_matches_the_wiring_piece_by_piece(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                _, data, base = self.load(os_name)
+                self.assertEqual(data["hooks"], hw.desired_hooks(base))
+                self.assertEqual(data["permissions"]["deny"], list(hw.DENY_RULES))
+                self.assertEqual(data["env"], hw.TELEMETRY_ENV)
+                self.assertEqual(data["otelHeadersHelper"], f'python3 "{base}/otel_headers.py"')
+                self.assertIs(data["allowManagedHooksOnly"], True)
+                self.assertNotIn("disableAllHooks", data)
+
+    def test_the_base_is_the_managed_folder_of_the_os(self):
+        for os_name, platform in (("macos", "darwin"), ("linux", "linux")):
+            self.assertEqual(self.FILES[os_name][1], hw.machine_base(platform))
+
+    def test_no_script_path_uses_the_project_dir_and_every_one_is_absolute(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                text, data, base = self.load(os_name)
+                self.assertNotIn("CLAUDE_PROJECT_DIR", text)
+                commands = [h["command"] for groups in data["hooks"].values() for g in groups for h in g["hooks"]]
+                self.assertEqual(len(commands), 3)
+                for command in commands + [data["otelHeadersHelper"]]:
+                    self.assertTrue(command.startswith(f'python3 "{base}/'), command)
+
+    def test_the_macos_file_has_the_space_quoted(self):
+        text, data, _ = self.load("macos")
+        self.assertIn("Application Support/ClaudeCode/bmad-guard/skills/tool-guard/scripts/pre_tool_use.py", text)
+        command = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertEqual(command.count('"'), 2)
+
+    def test_the_machine_files_differ_from_the_project_form_file_only_in_the_three_commands(self):
+        old = json.loads((ROOT / "module/managed-settings/managed-settings.json").read_text())
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                _, data, base = self.load(os_name)
+                self.assertEqual(
+                    {k: v for k, v in data.items() if k != "hooks"},
+                    {k: v for k, v in old.items() if k != "hooks"} | {"otelHeadersHelper": data["otelHeadersHelper"]},
+                )
+                self.assertEqual(data["hooks"], hw.desired_hooks(base))
+
+    def test_no_secrets_or_real_paths(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                text, _, _ = self.load(os_name)
+                self.assertNotIn("/Users/", text)
+                self.assertNotRegex(text, r"(?i)api[_-]?key|token|password")
+                self.assertIn(hw.ENDPOINT_PLACEHOLDER, text)  # IT replaces it; never a real host
+
+    def test_a_machine_file_is_wired_for_session_start_in_its_own_managed_folder(self):
+        """A file written for a base counts as wired when the managed folder is the base's parent."""
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                _, data, base = self.load(os_name)
+                self.assertTrue(hw.merge(data, base=base).ok, hw.merge(data, base=base).changes)
+
 
 if __name__ == "__main__":
     unittest.main()
