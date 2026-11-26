@@ -1,0 +1,23 @@
+# bmad-guard team override for experion-frd (Fenn). Installed by scripts/setup_guard.py; do not edit in
+# a project. Project-specific facts: add markdown files under _bmad/custom/project/experion-frd/
+# (loaded by the last persistent_facts entry).
+#
+# One FRD per epic, approved by Warden under doc_type 'frd-epic-<n>' (the state file keeps one entry
+# per doc_type). The review skill, label and file name are passed to Warden as arguments, so Warden's
+# own defaults need no FRD entry.
+
+[agent]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/guard/references/confidence-scoring.md",
+  "Approval (Guarded BMAD): the FRD's doc_type is 'frd-epic-<n>', where <n> is the epic number in the FRD's front matter `epic`. Use exactly that string for Sentry, Warden and every log call that takes a doc_type.",
+  "file:{project-root}/_bmad/custom/project/experion-frd/*.md",
+]
+activation_steps_prepend = [
+  "skill:agent-approval-gate-check with doc_type='prd', doc_path=<path to the PRD the epics were built from>, doc_label='PRD', downstream_label='FRD generation'",
+  "skill:agent-project-logger with action 'FRD session started', event='FRD_STARTED', stage='frd'",
+]
+on_complete = [
+  "Only after the Create or Update flow (skip every step below after the Validate flow): skill:agent-project-logger with action 'FRD generated', event='FRD_GENERATED', stage='frd', doc_path=<FRD path>, doc_status=<FRD approval_status>",
+  "Only after the Create or Update flow: skill:agent-project-logger with action 'Confidence scored for FRD', event='CONFIDENCE_SCORED', stage='frd', doc_path=<FRD path>, doc_status=<FRD approval_status>, confidence=<FRD frontmatter confidence>, confidence_label=<frontmatter confidence_label>, confidence_rationale=<frontmatter confidence_rationale>",
+  "Only after the Create or Update flow, and only when the user says the FRD is ready for approval now (ask once; on anything but a clear yes, stop here and tell them to run Warden later): set the FRD's approval_status front matter field to 'review' and save, then run skill:agent-approval-grant with doc_type='frd-epic-<n>', doc_path=<FRD path>, doc_label='FRD for epic <n>', review_skill='experion-frd', review_artifact_label='FRD review', review_artifact_filename='frd-review.md'",
+]

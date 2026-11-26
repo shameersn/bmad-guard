@@ -3,7 +3,7 @@ name: check-ready
 description: Count open questions, open assumptions, unrecorded resolutions, deleted items, confidence and the epic summary, and allow or block a story's move to development
 code: READY
 added: 2026-11-25
-updated: 2026-11-25
+updated: 2026-11-26
 type: script-backed
 ---
 
@@ -18,6 +18,7 @@ A story moves to planning or coding only when the script says `allow`. On `block
 - Frontmatter: `confidence: <0-100>`; optional `gate: generic` for setup and chore stories (skips the gate); `epic_summary: <path from project root>` or `epic: <n>`.
 - Open questions: list items under `## Open questions`, each starting with an id `Q-1`, `Q-2`, ... Resolved when the item has a line `Resolved: <answer> — <name>, <YYYY-MM-DD>`.
 - Assumptions: inline `[ASSUMPTION A-1: ...]`; resolved as `[ASSUMPTION-RESOLVED A-1: ... — <name>, <YYYY-MM-DD>]`.
+- Epic FRD: when the epic folder (beside `epic-summary.md`) holds `frd.md`, the FRD is the functional part. It must have `approval_status: approved` (`FRD_UNAPPROVED`) and no open question, open assumption, unrecorded resolution, id gap or duplicate id (`FRD_OPEN_ITEMS`). The summary then needs only its technical part.
 - Ids are never reused or removed. A missing id (a gap, or an id present in the baseline version) counts as open.
 - `--` may be typed instead of `—`.
 
@@ -47,7 +48,7 @@ If the output is not one JSON object with a `result` field (a traceback, `python
 - **`allow`** — tell the user in one line that the story passed (confidence and counts; or "generic story, gate skipped" when `gate` is `generic`). Let the caller continue.
 - **`block`** — list every reason as `CODE: detail`. Then handle the block.
 
-Reason codes: `OPEN_QUESTIONS`, `OPEN_ASSUMPTIONS`, `RESOLUTION_MISSING_WHO_OR_WHEN`, `DELETED_ITEMS`, `DUPLICATE_IDS`, `LOW_CONFIDENCE`, `MISSING_CONFIDENCE`, `MALFORMED_FRONTMATTER`, `MISSING_EPIC_SUMMARY`, `EPIC_SUMMARY_INCOMPLETE`, and (exit code 2) `UNREADABLE_STORY`, `BASELINE_UNAVAILABLE`.
+Reason codes: `OPEN_QUESTIONS`, `OPEN_ASSUMPTIONS`, `RESOLUTION_MISSING_WHO_OR_WHEN`, `DELETED_ITEMS`, `DUPLICATE_IDS`, `LOW_CONFIDENCE`, `MISSING_CONFIDENCE`, `MALFORMED_FRONTMATTER`, `MISSING_EPIC_SUMMARY`, `EPIC_SUMMARY_INCOMPLETE`, `FRD_UNAPPROVED`, `FRD_OPEN_ITEMS`, and (exit code 2) `UNREADABLE_STORY`, `BASELINE_UNAVAILABLE`.
 
 ### Handle a block
 

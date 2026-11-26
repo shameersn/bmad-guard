@@ -1,6 +1,6 @@
 ---
 name: ready-for-dev-gate
-description: Blocks a story or plan from moving to development while it has open questions, open assumptions, unrecorded resolutions, deleted items, low confidence or no complete epic summary. Use as a pre-flight check before planning or coding a story in bmad-build.
+description: Blocks a story or plan from moving to development while it has open questions, open assumptions, unrecorded resolutions, deleted items, low confidence, no complete epic summary, or an epic FRD that is unapproved or has open items. Use as a pre-flight check before planning or coding a story in bmad-build.
 ---
 
 # Gatekeeper

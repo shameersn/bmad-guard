@@ -10,6 +10,7 @@ Guides for the people who use Guarded BMAD in the pilot (GUARD-3, T0). Start wit
 | [reviewer.md](reviewer.md) | Reviewers | Review in a fresh session, the review record, pre-push rules. |
 | [windows-check.md](windows-check.md) | One BA on Windows, with a helper | The manual check for Windows (GUARD-3 T9): 11 steps, a results table. Not run yet. |
 | [trial-run.md](trial-run.md) | Shameer | The clinic-booking trial: set-up, about 20 try-this / expect-that steps, a results table. |
+| [demo-run.md](demo-run.md) | Shameer | The 45-minute live demo for senior review: prepare, rehearse and tag, live steps, Grafana close. Kit in [`demo/`](../../demo/README.md). |
 | [../architecture.md](../architecture.md) | Everyone who wants to know how it works | Layers, guards, process flow, events and privacy, fail-closed behaviour, limits. |
 
 Deck: [Guarded BMAD pilot briefing](https://claude.ai/artifact/GZAHhyHojnMoc6Hn2hktkD) (10 slides, a Claude artifact; private until Shameer shares it; exports to .pptx or PDF). Built from these docs: if they change, update the deck.

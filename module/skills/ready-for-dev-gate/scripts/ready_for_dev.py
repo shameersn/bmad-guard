@@ -5,7 +5,9 @@
 
 Blocks unless the story has zero open questions, zero open assumptions, confidence at or above the
 minimum, a who-and-when record on every resolution, no deleted question or assumption ids, and an
-epic summary with a functional and a technical part. Markup: docs/ready-for-dev-markup.md.
+epic summary with a functional and a technical part. When the epic folder holds an FRD (`frd.md`, written
+by experion-frd), the FRD is the functional part: it must be approved and have no open question or
+assumption, or every story of that epic is blocked. Markup: docs/ready-for-dev-markup.md.
 
 Usage:
   python3 ready_for_dev.py <story> [--epic-summary FILE] [--epics-dir DIR] [--min-confidence 80]
@@ -40,7 +42,7 @@ FRONTMATTER_OPEN_RE = re.compile(r"\A---\r?\n")
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n?---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 KEY_RE = re.compile(r"^([A-Za-z_][\w-]*)\s*:(.*)$")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
-OPEN_QUESTIONS_RE = re.compile(r"^open questions$", re.IGNORECASE)
+OPEN_QUESTIONS_RE = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?open questions$", re.IGNORECASE)  # "12. Open Questions" too
 ITEM_RE = re.compile(r"^ ?[-*+]\s+(.*)$")  # top-level only; indented items belong to the item above
 QUESTION_ID_RE = re.compile(r"^(?:\*\*)?(Q-(\d+))\b")
 RESOLVED_RE = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?resolved:(?:\*\*)?\s*(.*)$", re.IGNORECASE)
@@ -49,6 +51,8 @@ ASSUMPTION_RE = re.compile(r"\[ASSUMPTION(?P<resolved>-RESOLVED)?(?:\s+(?P<id>A-
 ANY_ASSUMPTION_RE = re.compile(r"\[ASSUMPTION")
 WHO_WHEN_RE = re.compile(r"(?:—|--)\s*(?P<who>[^,—]+?)\s*,\s*(?P<when>\d{4}-\d{2}-\d{2})\s*$")
 EPIC_PARTS = ("functional", "technical")
+FRD_NAME = "frd.md"  # the epic's FRD, beside epic-summary.md
+APPROVED = "approved"
 
 
 class GateError(Exception):
@@ -229,8 +233,8 @@ def epic_summary_path(story: Path, fields: dict, explicit: str | None, epics_dir
     return None
 
 
-def epic_summary_missing_parts(text: str) -> list[str]:
-    """Parts ('functional', 'technical') that have no heading or no text under the heading."""
+def epic_summary_missing_parts(text: str, parts: tuple[str, ...] = EPIC_PARTS) -> list[str]:
+    """Parts (of 'functional', 'technical') that have no heading or no text under the heading."""
     _, body, _ = parse_frontmatter(text)
     filled: dict[str, bool] = {}
     current = None
@@ -242,21 +246,68 @@ def epic_summary_missing_parts(text: str) -> list[str]:
             continue
         if current and line.strip():
             filled[current] = True
-    return [part for part in EPIC_PARTS if not filled.get(part)]
+    return [part for part in parts if not filled.get(part)]
 
 
-def check_epic_summary(path: Path | None) -> list[dict]:
+def check_epic_summary(path: Path | None, has_frd: bool = False) -> list[dict]:
+    """The summary's parts. With an FRD in the epic folder, the FRD is the functional part."""
     if path is None:
         return [{"code": "MISSING_EPIC_SUMMARY", "detail": "no epic summary given or linked (epic_summary or epic)"}]
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return [{"code": "MISSING_EPIC_SUMMARY", "detail": f"cannot read {path.name} at the given path"}]
-    missing = epic_summary_missing_parts(text)
+    missing = epic_summary_missing_parts(text, ("technical",) if has_frd else EPIC_PARTS)
     if missing:
         detail = "no " + " and no ".join(f"'## {p.capitalize()}' part with text" for p in missing)
         return [{"code": "EPIC_SUMMARY_INCOMPLETE", "detail": detail}]
     return []
+
+
+def check_frd(path: Path) -> tuple[list[dict], int | None]:
+    """Reasons from the epic's FRD, and its open item count (None when there is no FRD)."""
+    if not path.is_file():
+        return [], None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as err:
+        return [{"code": "FRD_UNAPPROVED", "detail": f"cannot read {path.name} ({type(err).__name__})"}], 0
+    fields, body, fm_error = parse_frontmatter(text)
+    reasons = []
+    status = fields.get("approval_status", "")
+    if fm_error:
+        reasons.append({"code": "FRD_UNAPPROVED", "detail": f"{path.name}: {fm_error}"})
+    elif status.lower() != APPROVED:
+        detail = f"{path.name} approval_status is '{status or 'missing'}', not approved"
+        reasons.append({"code": "FRD_UNAPPROVED", "detail": detail})
+    questions = parse_questions(body)
+    assumptions, malformed = parse_assumptions(body)
+    items = questions + assumptions
+    open_ids = [i["id"] for i in items if not i["resolved"] and i["id"]]
+    no_id = sum(1 for i in items if not i["resolved"] and not i["id"]) + malformed
+    unrecorded = [i["id"] or "an item without an id" for i in items if i["resolved"] and not i["recorded"]]
+    gaps = id_gaps(questions, "Q") + id_gaps(assumptions, "A")
+    seen, dupes = set(), set()
+    for item in items:
+        if item["id"] in seen:
+            dupes.add(item["id"])
+        if item["id"]:
+            seen.add(item["id"])
+    parts = []
+    if open_ids or no_id:
+        extra = f" (+{no_id} without an id or not in the agreed format)" if no_id else ""
+        listed = ", ".join(sort_ids(open_ids)) + extra
+        parts.append(f"open: {listed.strip()}")
+    if unrecorded:
+        parts.append("no '— <name>, <YYYY-MM-DD>' on: " + ", ".join(unrecorded))
+    if gaps:
+        parts.append("ids missing (deleted items count as open): " + ", ".join(sort_ids(gaps)))
+    if dupes:
+        parts.append("ids used more than once: " + ", ".join(sort_ids(dupes)))
+    total = len(open_ids) + no_id + len(unrecorded) + len(gaps) + len(dupes)
+    if parts:
+        reasons.append({"code": "FRD_OPEN_ITEMS", "detail": f"{path.name}: " + "; ".join(parts)})
+    return reasons, total
 
 
 # --- the gate --------------------------------------------------------------------------------------
@@ -337,7 +388,10 @@ def evaluate(
                     {"code": "LOW_CONFIDENCE", "detail": f"confidence {confidence} is below {min_confidence}"}
                 )
 
-    reasons.extend(check_epic_summary(epic_summary_path(story, fields, epic_summary, epics_dir)))
+    summary_path = epic_summary_path(story, fields, epic_summary, epics_dir)
+    frd_reasons, frd_open = check_frd(summary_path.parent / FRD_NAME) if summary_path else ([], None)
+    reasons.extend(check_epic_summary(summary_path, has_frd=frd_open is not None))
+    reasons.extend(frd_reasons)
 
     counts = {
         "open_questions": len(open_q),
@@ -348,6 +402,7 @@ def evaluate(
         "deleted_items": len(deleted),
         "confidence": confidence,
         "min_confidence": min_confidence,
+        "frd_open_items": frd_open,
     }
     return {"result": "block" if reasons else "allow", "reasons": reasons, "counts": counts}
 
