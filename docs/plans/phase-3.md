@@ -122,6 +122,15 @@ Move the spike config (`spikes/collector/`) into `deploy/collector/` with pinned
 
 **Done when:** the stack runs from the repo config in local Docker; the spike tests 1–5 (happy path, user stamping, bad key, server down, insert-only) pass again against the hardened config, and the result is in a report; the hosting plan is written.
 
+**Built (T2), 2026-11-26** (branch `feature/GUARD-3-collector`; not yet reviewed):
+
+- `deploy/collector/`: stack with exact image tags (README table), ports on `127.0.0.1`, bcrypt hashes, `keys.py` (add, rotate, remove, init), 180-day TTL, `otel_writer` insert-only, `grafana_reader` with `readonly = 2`, Grafana plugin updates off and plugins pinned, `backup.sh` (backup, verify, restore), README with the upgrade steps, and `HOSTING.md` with the open items and owners.
+- bcrypt: the pinned collector 0.165.0 accepts `$2y$`. Python has no bcrypt, so `keys.py` uses `htpasswd` from a pinned `httpd` image through `docker run`; the key goes in on stdin and is never written.
+- Grafana: `preinstall_auto_update`, `plugin_admin_enabled` and `check_for_plugin_updates` set to false; checked in `defaults.ini` and in the running Grafana. Finding: Grafana also downloads its own default apps at the latest version, so all six plugins are pinned.
+- Report: `docs/reports/phase-3-collector.md` (spike tests 1-5 pass again; rotation, hardening and dashboard checks pass). Not tested: TLS, a real sender, Claude Code telemetry through the new stack.
+- Tests: `tests/test_collector_keys.py` (24, no Docker). The live script is `deploy/collector/run_live_tests.py`.
+- Open: IT contact, compliance approval of 180 days, key rotation period (see `HOSTING.md`).
+
 ### T3. Sender, credentials and queue (weeks 1–2)
 
 - Ledger's sender reads the endpoint, user and key from `BMAD_GUARD_ENDPOINT` / `BMAD_GUARD_USER` / `BMAD_GUARD_KEY`, then the credential file (ADR 0007, D5). No endpoint: queue only.
