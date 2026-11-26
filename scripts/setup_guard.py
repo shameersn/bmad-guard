@@ -89,12 +89,6 @@ GITIGNORE_LINE = ".bmad-guard/"
 GITIGNORE_COMMENT = "# bmad-guard local event queue"
 # Keep the files setup installs LF in a clone with core.autocrlf=true (Windows): the manifest holds hashes of the bytes.
 GITATTRIBUTES_COMMENT = "# bmad-guard: keep the installed files LF (their hashes are in the manifest)"
-GITATTRIBUTES_LINES = (
-    ".claude/skills/** text eol=lf",
-    ".agents/skills/** text eol=lf",
-    "_bmad/custom/guard/** text eol=lf",
-    "_bmad/custom/*.toml text eol=lf",
-)
 MIN_PYTHON = (3, 10)
 # Uninstall only removes files under these folders (what setup installs); a manifest cannot point anywhere else.
 UNINSTALL_PREFIXES = (*(f"{d}/" for d in TOOL_SKILL_DIRS), "_bmad/custom/")
@@ -146,6 +140,22 @@ class Plan:
             and not self.gitattributes_missing
             and self.version == self.version_now
         )
+
+
+def gitattributes_lines(paths) -> list[str]:
+    """One .gitattributes line per place setup installs into: each guard skill folder in each tool folder, the guard
+    folder, and each override file. Never a stock BMAD file: a broad `.claude/skills/**` line would change the line
+    endings of BMAD's own files and show them as modified (found by the install test)."""
+    found = {f"{GUARD_DIR}/**"}  # the manifest lives here
+    for rel in paths:
+        parts = rel.split("/")
+        if len(parts) > 3 and f"{parts[0]}/{parts[1]}" in TOOL_SKILL_DIRS:
+            found.add("/".join(parts[:3]) + "/**")  # .claude/skills/<guard skill>/**
+        elif rel.startswith(GUARD_DIR + "/"):
+            found.add(f"{GUARD_DIR}/**")
+        else:
+            found.add(rel)  # an override: _bmad/custom/<name>.toml
+    return [f"{path} text eol=lf" for path in sorted(found)]
 
 
 def on_windows() -> bool:
@@ -314,7 +324,8 @@ def make_plan(project_dir: Path, module_dir: Path, force: bool = False) -> Plan:
     plan.gitignore_ok = GITIGNORE_LINE in (line.strip() for line in lines)
     gitattributes = project_dir / ".gitattributes"
     present = gitattributes.read_text(encoding="utf-8").splitlines() if gitattributes.is_file() else []
-    plan.gitattributes_missing = [line for line in GITATTRIBUTES_LINES if line not in (p.strip() for p in present)]
+    wanted = gitattributes_lines(plan.files)
+    plan.gitattributes_missing = [line for line in wanted if line not in (p.strip() for p in present)]
     return plan
 
 
@@ -524,12 +535,13 @@ def plan_removal_gitignore(removal: Removal, project_dir: Path, force: bool) -> 
         removal.actions[-1] = Action("remove", ".gitignore", f"nothing else in it; remove {GITIGNORE_LINE}")
 
 
-def plan_removal_gitattributes(removal: Removal, project_dir: Path, force: bool) -> None:
-    """Remove the comment setup wrote and the lines right after it that are ours. The same lines without that comment
-    were the project's own: kept, unless --force."""
+def plan_removal_gitattributes(removal: Removal, project_dir: Path, installed: dict[str, str], force: bool) -> None:
+    """Remove the comment setup wrote and the lines right after it that are ours (worked out from the manifest). The
+    same lines without that comment were the project's own: kept, unless --force."""
     path = project_dir / ".gitattributes"
     if not path.is_file():
         return
+    ours = set(gitattributes_lines(installed))
     lines = path.read_text(encoding="utf-8").splitlines()
     drop: set[int] = set()
     for i, line in enumerate(lines):
@@ -537,10 +549,10 @@ def plan_removal_gitattributes(removal: Removal, project_dir: Path, force: bool)
             continue
         drop.add(i)
         j = i + 1
-        while j < len(lines) and lines[j].strip() in GITATTRIBUTES_LINES:
+        while j < len(lines) and lines[j].strip() in ours:
             drop.add(j)
             j += 1
-    own = {i for i, line in enumerate(lines) if line.strip() in GITATTRIBUTES_LINES}
+    own = {i for i, line in enumerate(lines) if line.strip() in ours}
     if own - drop and not force:
         removal.notes.append(
             "keep     .gitattributes: lines like ours are there without setup's comment line, so they are yours "
@@ -568,7 +580,8 @@ def make_removal(project_dir: Path, module_dir: Path, force: bool = False) -> Re
             "to uninstall. Remove what you want by hand (docs/guides/install.md, 'Roll back by hand')."
         )
     removal = Removal()
-    plan_removal_files(removal, project_dir, read_manifest(project_dir)["files"], force)
+    installed = read_manifest(project_dir)["files"]
+    plan_removal_files(removal, project_dir, installed, force)
     plan_removal_settings(removal, project_dir, load_wiring(module_dir), force)
     hooks_now = git(["config", "--local", "core.hooksPath"], project_dir).stdout.strip() or None
     if hooks_now == HOOKS_REL:
@@ -577,7 +590,7 @@ def make_removal(project_dir: Path, module_dir: Path, force: bool = False) -> Re
     elif hooks_now is not None:
         removal.notes.append(f"keep     core.hooksPath is '{hooks_now}': not ours, left as it is")
     plan_removal_gitignore(removal, project_dir, force)
-    plan_removal_gitattributes(removal, project_dir, force)
+    plan_removal_gitattributes(removal, project_dir, installed, force)
     if (project_dir / ".bmad-guard").exists():
         removal.notes.append(
             "keep     .bmad-guard/ (the local event queue; setup did not create it). Delete it by hand if you want."

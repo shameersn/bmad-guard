@@ -1318,7 +1318,8 @@ def check_windows_setup(runner: Runner, stage: str, root: Path) -> Path:
     )
     attributes = project / ".gitattributes"
     text = attributes.read_text(encoding="utf-8") if attributes.is_file() else ""
-    missing = [line for line in setup_guard.GITATTRIBUTES_LINES if line not in text.splitlines()]
+    wanted = setup_guard.gitattributes_lines(setup_guard.module_files(REPO, project))
+    missing = [line for line in wanted if line not in text.splitlines()]
     runner.add(stage, "W-I3 setup wrote the .gitattributes lines", bool(text) and not missing, ", ".join(missing))
     settings = json.loads((project / ".claude/settings.json").read_text(encoding="utf-8"))
     matcher = settings["hooks"]["PreToolUse"][0]["matcher"].split("|")

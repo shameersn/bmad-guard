@@ -345,9 +345,6 @@ class WindowsCredentialsTests(t.FakeHomeMixin, unittest.TestCase):
         self.assertNotIn("acl ", out.getvalue())
 
 
-FILES = sg.GITATTRIBUTES_LINES
-
-
 class GitattributesTests(t.Base):
     """Setup keeps the files it installs LF in a clone with core.autocrlf=true, so the manifest hashes match."""
 
@@ -358,6 +355,37 @@ class GitattributesTests(t.Base):
         super().setUp()
         # The fake skill files have no line end, so CRLF could not change them: give the module one that has.
         t.write(self.module / "module/skills/guard-a/references/notes.md", "line one\nline two\n")
+        self.lines = sg.gitattributes_lines(sg.module_files(self.module, self.project))
+
+    def test_the_lines_cover_only_what_setup_installs(self):
+        self.assertEqual(
+            self.lines,
+            [
+                ".agents/skills/guard-a/** text eol=lf",
+                ".claude/skills/guard-a/** text eol=lf",
+                "_bmad/custom/bmad-prd.toml text eol=lf",
+                "_bmad/custom/guard/** text eol=lf",
+            ],
+        )
+
+    def test_a_stock_file_next_to_the_guard_skills_is_not_touched(self):
+        """Found by the install test: a broad `.claude/skills/**` line made git see BMAD's own CRLF files as modified.
+        Real git: a CRLF stock file is committed first; setup must not change how git sees it."""
+        stock = self.project / ".claude/skills/bmad-stock/assets/methods.csv"
+        stock.parent.mkdir(parents=True)
+        stock.write_bytes(b"a,b\r\n1,2\r\n")
+        ident = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        t.git(self.project, *ident, "add", "-A")
+        t.git(self.project, *ident, "commit", "-qm", "BMAD")
+        t.run(self.project, self.module)
+        status = t.git(self.project, "status", "--porcelain", "--", ".claude/skills/bmad-stock")
+        self.assertEqual(status, "")
+        attrs = t.git(self.project, "check-attr", "text", "eol", "--", ".claude/skills/bmad-stock/assets/methods.csv")
+        self.assertNotIn(": lf", attrs)
+        self.assertNotIn("text: set", attrs)
+        ours = t.git(self.project, "check-attr", "text", "eol", "--", ".claude/skills/guard-a/SKILL.md")
+        self.assertIn("text: set", ours)
+        self.assertIn("eol: lf", ours)
 
     def commit_and_clone(self, drop: str | None = None) -> Path:
         """Commit the project (without the .gitattributes lines that contain `drop`; no .gitattributes at all for
@@ -385,7 +413,7 @@ class GitattributesTests(t.Base):
         code, out, _ = t.run(self.project, self.module)
         self.assertEqual(code, 0, out)
         text = self.attributes()
-        for line in FILES:
+        for line in self.lines:
             self.assertIn(line + "\n", text)
         self.assertEqual(text.splitlines()[0], sg.GITATTRIBUTES_COMMENT)
         self.assertNotIn("\r", text)
@@ -394,12 +422,13 @@ class GitattributesTests(t.Base):
         self.assertEqual(t.run(self.project, self.module, "--check")[0], 0)
 
     def test_existing_lines_stay_and_only_missing_lines_are_added(self):
-        (self.project / ".gitattributes").write_text("*.png binary\n" + FILES[0], encoding="utf-8")  # no final newline
+        first = self.lines[0]
+        (self.project / ".gitattributes").write_text("*.png binary\n" + first, encoding="utf-8")  # no final newline
         t.run(self.project, self.module)
         lines = self.attributes().splitlines()
-        self.assertEqual(lines[:2], ["*.png binary", FILES[0]])
-        self.assertEqual([line for line in lines if line in FILES], list(FILES))  # each once
-        self.assertEqual(lines.count(FILES[0]), 1)
+        self.assertEqual(lines[:2], ["*.png binary", first])
+        self.assertEqual([line for line in lines if line in self.lines], self.lines)  # each once
+        self.assertEqual(lines.count(first), 1)
 
     def test_a_dry_run_names_it_and_writes_nothing(self):
         code, out, _ = t.run(self.project, self.module, "--dry-run")
@@ -449,7 +478,7 @@ class GitattributesTests(t.Base):
 
     def test_the_override_files_need_their_line_too(self):
         t.run(self.project, self.module)
-        clone = self.commit_and_clone(drop="*.toml")
+        clone = self.commit_and_clone(drop="bmad-prd.toml")
         code, out, _ = t.run(clone, self.module, "--check")
         self.assertEqual(code, 1, out)
         self.assertIn("_bmad/custom/bmad-prd.toml (changed since install)", out)
@@ -474,13 +503,14 @@ class GitattributesTests(t.Base):
         self.assertEqual(self.attributes(), before)
 
     def test_lines_without_our_comment_are_the_projects_own_until_force(self):
-        (self.project / ".gitattributes").write_text(FILES[0] + "\n", encoding="utf-8")
+        first = self.lines[0]
+        (self.project / ".gitattributes").write_text(first + "\n", encoding="utf-8")
         t.run(self.project, self.module)
         text = self.attributes()
-        # Setup added the other three lines (the first was already there), under its comment.
-        self.assertEqual(text.count(FILES[0]), 1)
+        # Setup added the other lines (the first was already there), under its comment.
+        self.assertEqual(text.count(first), 1)
         out = t.run(self.project, self.module, "--uninstall")[1]
-        self.assertEqual(self.attributes(), FILES[0] + "\n")
+        self.assertEqual(self.attributes(), first + "\n")
         self.assertIn("keep     .gitattributes", out)
         t.run(self.project, self.module)
         t.run(self.project, self.module, "--uninstall", "--force")
