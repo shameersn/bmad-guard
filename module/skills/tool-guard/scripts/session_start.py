@@ -17,6 +17,13 @@ At the start it also sends the event queue once (hook_common.flush): the git hoo
 means no network and no message; a collector that is down costs at most the sender's 3 s timeout, then 5 minutes
 of backoff.
 One `warn` event records it (code SETUP_INCOMPLETE, field `missing`). It always exits 0, even on an error.
+
+The unguarded-project rule comes first (ADR 0008): no `_bmad/` in the project means silence (no output, no event, no
+file written); `_bmad/` without `_bmad/custom/guard/manifest.json` means one line ("bmad-guard is not installed here,
+the guards are off") and nothing else. Only a project with the manifest gets the checks above.
+When this script runs from the machine folder (ADR 0008) and its `VERSION` differs from the version in the project's
+manifest, it records one `info` event MACHINE_VERSION_SKEW (fields machine_version and project_version; no message),
+so a report can list stale projects.
 """
 
 from __future__ import annotations
@@ -35,6 +42,10 @@ import hook_wiring as hw  # noqa: E402
 STAGE = "session"
 AGENT = f"{hc.GUARD}/SessionStart"
 TAG = "[tool-guard]"
+NOT_INSTALLED = (
+    f"{TAG} BMAD found, bmad-guard is not installed here, so the guards are off. "
+    "Run scripts/setup_guard.py --project . to turn them on."
+)
 FIXES = {
     "hooks_path": f"git config core.hooksPath is not {hw.HOOKS_REL}, so the git hooks will not run",
     "hook_wiring": (
@@ -46,12 +57,6 @@ FIXES = {
         "(open to others, not yours, a link or unreadable), so events only queue. Fix: chmod 600 on the file and "
         "chmod 700 on its folder; run setup_guard.py --check for details"
     ),
-}
-# Managed settings folder per OS (docs/managed-settings-rollout.md). WSL reports linux.
-MANAGED_DIRS = {
-    "darwin": "/Library/Application Support/ClaudeCode",
-    "linux": "/etc/claude-code",
-    "win32": "C:\\Program Files\\ClaudeCode",
 }
 
 
@@ -67,7 +72,7 @@ def hooks_path_ok(root: Path) -> bool:
 
 
 def managed_dir() -> Path | None:
-    value = MANAGED_DIRS.get(sys.platform)
+    value = hw.MANAGED_DIRS.get(sys.platform)  # defined once, in hook_wiring.py
     return Path(value) if value else None
 
 
@@ -94,17 +99,25 @@ def managed_settings(base: Path | None) -> dict | None:
     return combined or None
 
 
-def _wired(load) -> bool:
+def _wired(load, base: str | None = None) -> bool:
     try:
         settings = load()
-    except (ValueError, OSError):
+        return settings is not None and hw.merge(settings, base=base).ok
+    except (ValueError, OSError):  # an unusable file, or a managed folder that is not a POSIX path (Windows)
         return False
-    return settings is not None and hw.merge(settings).ok
 
 
 def wiring_ok(root: Path) -> bool:
-    """True when the project settings or the managed settings hold the full wiring."""
-    return _wired(lambda: hw.load_settings(root / hw.SETTINGS_REL)) or _wired(lambda: managed_settings(managed_dir()))
+    """True when the project settings or the managed settings hold the full wiring. The managed file may hold the
+    project form of the commands (the first template) or the machine form (ADR 0008): its scripts are in the
+    `bmad-guard` folder next to the managed file."""
+    managed = managed_dir()
+    machine = str(managed / hw.MACHINE_DIR_NAME) if managed is not None else None
+    return (
+        _wired(lambda: hw.load_settings(root / hw.SETTINGS_REL))
+        or _wired(lambda: managed_settings(managed))
+        or (machine is not None and _wired(lambda: managed_settings(managed), machine))
+    )
 
 
 def credential_ok(root: Path) -> bool:
@@ -128,19 +141,55 @@ def problems(root: Path) -> list[str]:
     return found
 
 
+def machine_version() -> str | None:
+    """The version of the machine folder this script runs from, or None when it runs from a project (ADR 0008)."""
+    folder = HERE.parents[2]
+    version = folder / "VERSION"
+    if not (version.is_file() and (folder / "manifest.json").is_file()):
+        return None
+    return version.read_text(encoding="utf-8").strip() or None
+
+
+def project_version(root: Path) -> str | None:
+    try:
+        data = json.loads((root / hc.GUARD_MANIFEST_REL).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = data.get("version") if isinstance(data, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
 def main() -> int:
     raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
         payload = hc.read_payload(raw or "{}")
     except ValueError:
         payload = {}
+    state = hc.project_state(payload)
+    if state == hc.UNGUARDED:
+        return 0
+    if state == hc.NO_MANIFEST:
+        print(json.dumps({"systemMessage": NOT_INSTALLED}))
+        return 0
     cwd = payload.get("cwd")
     root = hc.project_root(cwd if isinstance(cwd, str) and cwd else None)
     hc.flush(root)  # send what the git hooks queued (they never send); best effort, backoff and 3 s timeout apply
+    session_id = payload.get("session_id")
+    machine, project = machine_version(), project_version(root)
+    if machine and project and machine != project:
+        hc.emit(
+            STAGE,
+            "info",
+            "MACHINE_VERSION_SKEW",
+            root,
+            AGENT,
+            machine_version=machine,
+            project_version=project,
+            session_id=session_id if isinstance(session_id, str) else "",
+        )
     found = problems(root)
     if not found:
         return 0
-    session_id = payload.get("session_id")
     hc.emit(
         STAGE,
         "warn",

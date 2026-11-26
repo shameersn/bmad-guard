@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.guard_harness import GuardTestCase, pt, queue
+from tests.guarded import mark_guarded
 from tests.prompt_guard_fakes import Fakes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -299,7 +300,7 @@ class CrashTests(ScanCase):
 
     def test_an_unreadable_hipaa_setting_fails_closed(self):
         path = self.project / CONFIG_REL
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"\xff\xfe\x00[agent]\nphi = \xff\n")  # not valid UTF-8
         code, _, err = self.hook("Write", {"file_path": self.target(), "content": "clean"})
         self.assertEqual(code, 2)
@@ -435,6 +436,7 @@ class ProcessTests(unittest.TestCase):
     def test_block_and_warn_as_claude_code_sees_them(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(os.path.realpath(tmp))
+            mark_guarded(project)
             put = {"file_path": str(project / "docs/app.py")}  # docs/ is not gated by the write gate
             proc = self.run_hook(project, {**put, "content": f"k = '{KEY}'"})
             self.assertEqual(proc.returncode, 2)
@@ -443,7 +445,7 @@ class ProcessTests(unittest.TestCase):
             proc = self.run_hook(project, {**put, "content": f"phone {PHONE}"})
             self.assertEqual((proc.returncode, proc.stderr), (0, ""))
             self.assertIn("CONTENT_PHI", json.loads(proc.stdout)["systemMessage"])
-            (project / "_bmad/custom").mkdir(parents=True)
+            (project / "_bmad/custom").mkdir(parents=True, exist_ok=True)
             (project / CONFIG_REL).write_text(HIPAA)
             proc = self.run_hook(project, {**put, "content": f"phone {PHONE}"})
             self.assertEqual(proc.returncode, 2)

@@ -26,6 +26,7 @@ from unittest import mock
 
 from tests import guard_harness  # noqa: F401 - puts module/skills/tool-guard/scripts on sys.path
 from tests.fake_home import isolated_env
+from tests.guarded import mark_guarded
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("red_team", ROOT / "scripts" / "red_team.py")
@@ -105,6 +106,14 @@ class CaseTableTests(unittest.TestCase):
         for s in rt.SPECS:
             with self.subTest(case=s.id):
                 self.assertTrue(s.id in stateless or f'"{s.id}"' in source, "no record() call for this case")
+
+    def test_mach_1_edit_still_finds_its_line_and_switches_the_rule_off_in_a_project_copy(self):
+        """MACH-1 edits one line of the project copy of customize.toml; if the line moves, the case must say so."""
+        text = (ROOT / "module/skills/tool-guard/customize.toml").read_text(encoding="utf-8")
+        flags = 'flag_sets = [["-f|--force|--force-with-lease|--force-if-includes"]]'
+        self.assertEqual(text.count(flags), 1)
+        source = (ROOT / "scripts/red_team.py").read_text(encoding="utf-8")
+        self.assertIn(flags, source)
 
     def test_stateless_calls_all_have_a_row(self):
         for call in rt.stateless_calls(Path("/x")):
@@ -322,6 +331,7 @@ class OfflineHookTests(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.sb = Path(os.path.realpath(cls._tmp.name))
+        mark_guarded(cls.sb)
         cls.script = ROOT / "module/skills/tool-guard/scripts/pre_tool_use.py"
         cls.env = isolated_env()
 

@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.fake_home import isolated_env
+from tests.guarded import mark_guarded
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("install_test", ROOT / "scripts" / "install_test.py")
@@ -246,6 +247,7 @@ class PreToolSmokeTests(unittest.TestCase):
         env = isolated_env()
         with tempfile.TemporaryDirectory() as tmp:
             sandbox = Path(tmp).resolve()
+            mark_guarded(sandbox)
             for label, tool, tool_input, want_exit, want_code in it.PRE_TOOL_SMOKE:
                 with self.subTest(label=label):
                     tool_input = {k: v.replace("{sandbox}", str(sandbox)) for k, v in tool_input.items()}
@@ -260,6 +262,21 @@ class PreToolSmokeTests(unittest.TestCase):
                     )
                     self.assertEqual(proc.returncode, want_exit, proc.stderr)
                     self.assertIn(want_code, proc.stderr)
+
+
+class MachineStageTests(unittest.TestCase):
+    """The install test's machine stage (M-I1 to M-I9, ADR 0008) needs no BMAD and no network, so it runs here too."""
+
+    def test_every_check_of_the_machine_stage_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(os.path.realpath(tmp))
+            runner = it.Runner(root / "commands.log")
+            it.stage_machine(runner, root)
+        failed = [f"{c.name}: {c.detail}" for c in runner.checks if not c.ok]
+        self.assertEqual(failed, [])
+        names = " ".join(c.name for c in runner.checks)
+        for case in ("M-I1", "M-I2", "M-I3", "M-I4", "M-I5", "M-I6", "M-I7", "M-I8", "M-I9", "rollback"):
+            self.assertIn(case, names)
 
 
 class RunnerTests(unittest.TestCase):

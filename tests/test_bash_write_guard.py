@@ -370,7 +370,7 @@ class FailClosedTests(GuardTestCase):
 
     def test_the_working_directory_decides_what_a_relative_target_means(self):
         sub = self.project / "_bmad/custom"
-        sub.mkdir(parents=True)
+        sub.mkdir(parents=True, exist_ok=True)
         self.assertEqual(self.bash("echo x > approval-state.json", cwd=str(sub)), ["DOC_APPROVAL_STATE"])
         self.assertEqual(self.bash("echo x > project/guard/tool-rules.json", cwd=str(sub)), ["DOC_GUARD_CONFIG"])
         self.assertEqual(self.bash("echo x > project.json", cwd=str(sub)), [])

@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.guarded import mark_guarded
 from tests.prompt_guard_fakes import Fakes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,7 @@ class HookTestCase(unittest.TestCase):
         for path in (self.project / HOOKS_REL).iterdir():
             path.chmod(0o755)
         self.git("config", "core.hooksPath", HOOKS_REL)
+        mark_guarded(self.project)  # a project that ran setup: the Claude Code hook entries guard it (ADR 0008)
 
     # --- the repository -----------------------------------------------------------------------------------------
 

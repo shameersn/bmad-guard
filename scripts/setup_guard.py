@@ -32,8 +32,23 @@ Per-user credential file (ADR 0007, optional: without it events only queue):
 - `--check` also notes a missing file, reports a file that is too open (with the fix), and warns on Windows
   (not supported yet, D10). These lines do not change the exit code.
 
+Uninstall (`--uninstall`, GUARD-3 T5): takes out what setup added and nothing else, using the manifest. Run
+`--uninstall --dry-run` first. It removes the files the manifest lists (skill copies, overrides, git hooks) that are
+unchanged since install, our entries and deny rules in .claude/settings.json (the file goes when nothing else is in it),
+core.hooksPath when it is ours, our .gitignore lines, and _bmad/custom/guard/ when it is empty. It never touches stock
+BMAD files, the project's own files, or paths the setup script does not install. A file changed since install, a link,
+or a hook entry that only looks like ours is a conflict: with any conflict nothing is changed (`--force` removes
+changed files and lookalike hook entries; a link or a path outside setup's folders is never removed). The local event
+queue `.bmad-guard/` is left (setup did not create it). A project with the manifest is guarded by the hooks (ADR 0008),
+so uninstall also turns the L1 guards off for this project.
+
+Machine folder (ADR 0008): `--check` also compares the manifest's version with `VERSION` in the machine folder
+(`install_machine.py`; the OS default, or `--machine-dir`) and prints a warning line when they differ, or a note when
+there is no machine folder. These lines do not change the exit code.
+
 Usage:
     python3 scripts/setup_guard.py --project <dir> [--module <dir>] [--dry-run | --check] [--force]
+    python3 scripts/setup_guard.py --project <dir> --uninstall [--dry-run] [--force]
     python3 scripts/setup_guard.py --credentials --endpoint <url> --user <id> [--force]
 """
 
@@ -63,6 +78,12 @@ WIRING_TRIGGER = ".claude/skills/tool-guard/scripts/pre_tool_use.py"  # installe
 EVENTS_REL = "module/skills/agent-project-logger/scripts/guard_events.py"  # Ledger's sender: reads the credential file
 CREDENTIALS_REL = ".config/bmad-guard/credentials"  # under HOME; ADR 0007
 GITIGNORE_LINE = ".bmad-guard/"
+GITIGNORE_COMMENT = "# bmad-guard local event queue"
+# Uninstall only removes files under these folders (what setup installs); a manifest cannot point anywhere else.
+UNINSTALL_PREFIXES = (*(f"{d}/" for d in TOOL_SKILL_DIRS), "_bmad/custom/")
+# Folders that uninstall never removes, even when empty: they belong to BMAD and the tools, not to setup.
+KEEP_DIRS = ("", ".claude", ".agents", "_bmad", "_bmad/custom", *TOOL_SKILL_DIRS)
+VERSION_NAME = "VERSION"  # in the machine folder (scripts/install_machine.py)
 SKIP_NAMES = {"__pycache__", "tests", ".DS_Store"}
 DEFAULT_MODULE = Path(__file__).resolve().parents[1]
 
@@ -332,6 +353,244 @@ def describe(plan: Plan) -> list[str]:
     return lines
 
 
+# ---------------------------------------------------------------- uninstall (GUARD-3 T5)
+
+
+@dataclass
+class Removal:
+    """What `--uninstall` would do. Every action is a line the developer reads before anything changes."""
+
+    actions: list[Action] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)  # manifest files to delete (project-relative)
+    hard: set[str] = field(default_factory=set)  # conflict paths that --force never overrides
+    settings_new: str | None = None  # new text for .claude/settings.json
+    settings_delete: bool = False
+    unset_hooks_path: bool = False
+    gitignore_new: str | None = None
+    gitignore_delete: bool = False
+    notes: list[str] = field(default_factory=list)
+
+    def conflicts(self) -> list[Action]:
+        return [a for a in self.actions if a.kind == "conflict"]
+
+    def changes(self) -> list[Action]:
+        return [a for a in self.actions if a.kind != "conflict"]
+
+
+def _under_setup_folders(rel: str) -> bool:
+    """True for a project-relative path inside a folder that setup installs into, with no `..` and not absolute."""
+    parts = Path(rel).parts
+    return not Path(rel).is_absolute() and ".." not in parts and "\\" not in rel and rel.startswith(UNINSTALL_PREFIXES)
+
+
+def _inside(path: Path, roots: list[Path]) -> bool:
+    """True when `path` (its folder, with links resolved) is inside one of `roots` (resolved)."""
+    try:
+        folder = path.parent.resolve()
+    except (OSError, RuntimeError):
+        return False
+    return any(folder == root or root in folder.parents for root in roots)
+
+
+def plan_removal_files(removal: Removal, project_dir: Path, installed: dict[str, str], force: bool) -> None:
+    """One action per manifest file. A file that changed since install is a conflict (removed with --force); a path that
+    is not under setup's folders, a link and a folder are hard conflicts (never removed)."""
+    roots = [project_dir.resolve(), *(project_dir / d for d in TOOL_SKILL_DIRS)]
+    roots = [r.resolve() for r in roots]
+    for rel, recorded in sorted(installed.items()):
+        dest = project_dir / rel
+        if not _under_setup_folders(rel) or not _inside(dest, roots):
+            removal.actions.append(Action("conflict", rel, "not a path setup installs, never removed"))
+            removal.hard.add(rel)
+        elif dest.is_symlink() or (dest.exists() and not dest.is_file()):
+            removal.actions.append(Action("conflict", rel, "is a link or a folder, never removed"))
+            removal.hard.add(rel)
+        elif not dest.exists():
+            continue  # already gone (an earlier run stopped half way)
+        elif sha256(dest) == recorded:
+            removal.actions.append(Action("remove", rel))
+            removal.files.append(rel)
+        elif force:
+            removal.actions.append(Action("remove", rel, "changed since install, forced"))
+            removal.files.append(rel)
+        else:
+            removal.actions.append(Action("conflict", rel, "changed since install"))
+
+
+def plan_removal_settings(removal: Removal, project_dir: Path, wiring, force: bool) -> None:
+    if wiring is None:
+        removal.notes.append(f"skip     {SETTINGS_REL}: this module does not ship hook_wiring.py")
+        return
+    try:
+        current = wiring.load_settings(project_dir / SETTINGS_REL)
+    except ValueError as err:
+        raise SetupError(f"{SETTINGS_REL}: {err}") from err
+    if current is None:
+        return
+    result = wiring.unmerge(current, force)
+    removal.actions += [Action("conflict", SETTINGS_REL, why) for why in result.conflicts]
+    if not result.changes:
+        return
+    hooks = sum(1 for change in result.changes if change.startswith("remove hook "))
+    rules = sum(1 for change in result.changes if change.startswith("remove deny rule "))
+    what = f"{hooks} hook entries and {rules} deny rules"
+    if result.settings:
+        removal.actions.append(Action("update", SETTINGS_REL, f"remove {what}; the rest stays"))
+        removal.settings_new = wiring.render(result.settings)
+    else:
+        removal.actions.append(Action("remove", SETTINGS_REL, f"{what} were all that was in it"))
+        removal.settings_delete = True
+
+
+def plan_removal_gitignore(removal: Removal, project_dir: Path, force: bool) -> None:
+    """Remove our line with the comment setup wrote above it. The same line without that comment was the project's own:
+    kept, unless --force."""
+    path = project_dir / ".gitignore"
+    if not path.is_file():
+        return
+    text = path.read_text()
+    lines = text.splitlines()
+    drop: set[int] = set()
+    for i, line in enumerate(lines):
+        if line.strip() != GITIGNORE_LINE:
+            continue
+        if i > 0 and lines[i - 1].strip() == GITIGNORE_COMMENT:
+            drop |= {i - 1, i}
+        elif force:
+            drop.add(i)
+        else:
+            removal.notes.append(
+                f"keep     .gitignore: {GITIGNORE_LINE} is there without setup's comment line, so it is yours "
+                "(--force removes it)"
+            )
+    if not drop:
+        return
+    kept = [line for i, line in enumerate(lines) if i not in drop]
+    removal.actions.append(Action("update", ".gitignore", f"remove {GITIGNORE_LINE}"))
+    if any(line.strip() for line in kept):
+        removal.gitignore_new = "\n".join(kept) + "\n"
+    else:
+        removal.gitignore_delete = True
+        removal.actions[-1] = Action("remove", ".gitignore", f"nothing else in it; remove {GITIGNORE_LINE}")
+
+
+def make_removal(project_dir: Path, module_dir: Path, force: bool = False) -> Removal:
+    check_project(project_dir, module_dir)
+    path = project_dir / MANIFEST_REL
+    if not path.is_file():
+        raise SetupError(
+            f"no manifest ({MANIFEST_REL}): setup was not run in this project, or the manifest was deleted. Nothing "
+            "to uninstall. Remove what you want by hand (docs/guides/install.md, 'Roll back by hand')."
+        )
+    removal = Removal()
+    plan_removal_files(removal, project_dir, read_manifest(project_dir)["files"], force)
+    plan_removal_settings(removal, project_dir, load_wiring(module_dir), force)
+    hooks_now = git(["config", "--local", "core.hooksPath"], project_dir).stdout.strip() or None
+    if hooks_now == HOOKS_REL:
+        removal.unset_hooks_path = True
+        removal.actions.append(Action("unset", "core.hooksPath", f"it is {HOOKS_REL}, which setup set"))
+    elif hooks_now is not None:
+        removal.notes.append(f"keep     core.hooksPath is '{hooks_now}': not ours, left as it is")
+    plan_removal_gitignore(removal, project_dir, force)
+    if (project_dir / ".bmad-guard").exists():
+        removal.notes.append(
+            "keep     .bmad-guard/ (the local event queue; setup did not create it). Delete it by hand if you want."
+        )
+    removal.actions.append(Action("remove", MANIFEST_REL, "last, so a stopped run can be run again"))
+    return removal
+
+
+def describe_removal(removal: Removal) -> list[str]:
+    lines = []
+    for action in removal.actions:
+        reason = f" ({action.reason})" if action.reason else ""
+        lines.append(f"{action.kind:8} {action.path}{reason}")
+    lines += removal.notes
+    lines.append(f"{len(removal.changes())} change(s), {len(removal.conflicts())} conflict(s)")
+    return lines
+
+
+def _prune_dirs(folder: Path, project_dir: Path) -> None:
+    """Remove `folder` and its parents while they are empty, but never a folder that belongs to BMAD or the tool."""
+    keep = {(project_dir / rel).resolve() for rel in KEEP_DIRS}
+    while folder.resolve() not in keep and folder.is_dir() and not any(folder.iterdir()):
+        folder.rmdir()
+        folder = folder.parent
+
+
+def apply_removal(removal: Removal, project_dir: Path) -> None:
+    for rel in removal.files:
+        dest = project_dir / rel
+        dest.unlink()
+        _prune_dirs(dest.parent, project_dir)
+    settings = project_dir / SETTINGS_REL
+    if removal.settings_delete:
+        settings.unlink()
+    elif removal.settings_new is not None:
+        settings.write_text(removal.settings_new, encoding="utf-8")
+    if removal.unset_hooks_path:
+        result = git(["config", "--local", "--unset", "core.hooksPath"], project_dir)
+        if result.returncode != 0:
+            raise SetupError(f"could not unset core.hooksPath: {result.stderr.strip()}")
+    gitignore = project_dir / ".gitignore"
+    if removal.gitignore_delete:
+        gitignore.unlink()
+    elif removal.gitignore_new is not None:
+        gitignore.write_text(removal.gitignore_new)
+    manifest = project_dir / MANIFEST_REL
+    manifest.unlink()
+    _prune_dirs(manifest.parent, project_dir)
+
+
+def uninstall_main(project_dir: Path, module_dir: Path, dry_run: bool, force: bool) -> int:
+    try:
+        removal = make_removal(project_dir, module_dir, force)
+    except SetupError as err:
+        print(f"bmad-guard setup: {err}", file=sys.stderr)
+        return 2
+    for line in describe_removal(removal):
+        print(line)
+    if dry_run:
+        print("dry run: nothing changed")
+        return 0
+    if removal.conflicts():
+        print(
+            "uninstall stopped, nothing was changed. Fix the conflicts, or use --force (it removes changed files and "
+            "lookalike hook entries; a link or a path setup does not install is never removed)."
+        )
+        return 1
+    apply_removal(removal, project_dir)
+    print("done: bmad-guard is removed from this project. The guard hooks no longer run here.")
+    return 0
+
+
+# ---------------------------------------------------------------- machine folder (ADR 0008)
+
+
+def machine_report(module_dir: Path, version_now: str | None, machine_dir: Path | None) -> list[str]:
+    """Lines for `--check`: the machine folder's VERSION against this project's installed version. They are only
+    compared for equality (both are `git describe` output). None of these lines changes the exit code: the developer
+    cannot fix a machine folder."""
+    if machine_dir is None:
+        wiring = load_wiring(module_dir)
+        base = wiring.machine_base(sys.platform) if wiring is not None else None
+        if base is None:
+            return []
+        machine_dir = Path(base)
+    try:
+        machine = (machine_dir / VERSION_NAME).read_text(encoding="utf-8").strip()
+    except OSError:
+        machine = ""
+    if not machine:
+        return ["note     machine scripts: none (fine unless managed settings point to them)"]
+    if machine == version_now:
+        return []
+    return [
+        f"warning  machine scripts: {machine}; this project's module: {version_now or 'none'}. They differ "
+        "(update the machine folder first, then the projects)"
+    ]
+
+
 def load_events(module_dir: Path):
     """The module's Ledger sender (guard_events), loaded by path, or None when the module does not ship it."""
     path = module_dir / EVENTS_REL
@@ -455,6 +714,13 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--check", action="store_true", help="exit 1 unless the project is up to date")
     parser.add_argument("--force", action="store_true", help="overwrite conflicts and replace core.hooksPath")
     parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="take out what setup added, using the manifest (run with --dry-run first); a conflict stops it "
+        "unless --force",
+    )
+    parser.add_argument("--machine-dir", type=Path, help="with --check: machine folder (default: the OS path)")
+    parser.add_argument(
         "--credentials",
         action="store_true",
         help="write the per-user file ~/.config/bmad-guard/credentials (needs --endpoint and --user; "
@@ -474,8 +740,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the following arguments are required: --project")
     if args.endpoint or args.user:
         parser.error("--endpoint and --user need --credentials")
+    if args.uninstall and args.check:
+        parser.error("--uninstall cannot be used with --check")
+    if args.machine_dir and not args.check:
+        parser.error("--machine-dir needs --check")
 
     project_dir, module_dir = args.project.resolve(), args.module.resolve()
+    if args.uninstall:
+        return uninstall_main(project_dir, module_dir, args.dry_run, args.force)
     try:
         plan = make_plan(project_dir, module_dir, force=args.force)
     except SetupError as err:
@@ -487,6 +759,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         for line in credential_report(module_dir):
+            print(line)
+        for line in machine_report(module_dir, plan.version_now, args.machine_dir):
             print(line)
         print("up to date" if plan.up_to_date() else "NOT up to date: run setup_guard.py without --check")
         return 0 if plan.up_to_date() else 1

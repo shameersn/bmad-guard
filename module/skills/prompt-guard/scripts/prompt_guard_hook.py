@@ -20,6 +20,10 @@ Decisions fail closed: a "block" blocks. An internal error in the guard itself (
 The same rule is used by the content scan on file writes (tool-guard `content_scan.py`). A prompt hook that
 gets input it cannot read (not JSON, no prompt text) has nothing to check and lets it through, as before.
 
+The unguarded-project rule comes first (ADR 0008): a project with no `_bmad/`, or with `_bmad/` and no setup manifest
+(`_bmad/custom/guard/manifest.json`), is allowed silently: no output, no event, no file written. Any doubt about which
+project it is means guarded.
+
 The warning, the block reason and the events carry rule ids and the error type only, never any part of the prompt.
 """
 
@@ -73,6 +77,16 @@ def run(payload: dict) -> dict | None:
     return hook_output(result, warnings)
 
 
+def unguarded(payload: dict) -> bool:
+    """True when the project does not use the guard (ADR 0008). Any error means guarded."""
+    try:
+        cwd = payload.get("cwd")
+        root = pc.project_root(Path(cwd) if isinstance(cwd, str) and cwd else None)
+        return pc.guard_state(root, cwd) != pc.GUARDED
+    except Exception:
+        return False
+
+
 def main() -> int:
     raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
@@ -81,6 +95,8 @@ def main() -> int:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
+    if unguarded(payload):
+        return 0
     answer = run(payload)
     if answer:
         print(json.dumps(answer))

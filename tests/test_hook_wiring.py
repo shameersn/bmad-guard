@@ -242,6 +242,84 @@ class ConflictTests(unittest.TestCase):
         self.assertEqual(out.settings["hooks"]["PreToolUse"][:3], settings["hooks"]["PreToolUse"])
 
 
+class UnmergeTests(unittest.TestCase):
+    """`unmerge()` takes out what `merge()` put in, and nothing else (the setup script's --uninstall)."""
+
+    def test_unmerge_of_a_fresh_merge_gives_back_an_empty_settings_dict(self):
+        result = hw.unmerge(full())
+        self.assertEqual(result.settings, {})
+        self.assertEqual(result.conflicts, [])
+        self.assertEqual(len(result.changes), 3 + len(hw.DENY_RULES))
+
+    def test_the_projects_own_entries_and_keys_stay(self):
+        original = {
+            "model": "m",
+            "env": {"A": "1"},
+            "hooks": {
+                "PreToolUse": [copy.deepcopy(OWN_HOOK)],
+                "Stop": [{"hooks": [{"type": "command", "command": "x"}]}],
+            },
+            "permissions": {"allow": ["Bash(ls)"], "deny": ["Read(x)"]},
+        }
+        merged = hw.merge(original).settings
+        self.assertNotEqual(merged, original)
+        self.assertEqual(hw.unmerge(merged).settings, original)
+
+    def test_unmerge_is_idempotent(self):
+        once = hw.unmerge(full()).settings
+        again = hw.unmerge(once)
+        self.assertEqual((again.settings, again.changes, again.conflicts), ({}, [], []))
+        self.assertEqual(hw.unmerge(None).settings, {})
+
+    def test_our_hook_sharing_a_group_with_a_project_hook_leaves_the_project_hook(self):
+        settings = full()
+        settings["hooks"]["PreToolUse"][0]["hooks"].append({"type": "command", "command": "./mine.sh"})
+        left = hw.unmerge(settings).settings
+        self.assertEqual(left["hooks"]["PreToolUse"][0]["hooks"], [{"type": "command", "command": "./mine.sh"}])
+
+    def test_a_changed_timeout_is_still_our_hook(self):
+        settings = full()
+        settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 99
+        self.assertEqual(hw.unmerge(settings).settings, {})
+
+    def test_a_lookalike_command_is_a_conflict_and_stays_unless_forced(self):
+        old = "python3 old/skills/tool-guard/scripts/pre_tool_use.py"
+        settings = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": old}]}]}}
+        result = hw.unmerge(settings)
+        self.assertEqual(result.settings, settings)
+        self.assertEqual(len(result.conflicts), 1)
+        self.assertIn("looks like a bmad-guard hook", result.conflicts[0])
+        forced = hw.unmerge(settings, force=True)
+        self.assertEqual((forced.settings, forced.conflicts), ({}, []))
+
+    def test_the_machine_form_is_a_lookalike_in_a_project(self):
+        machine = hw.merge(None, base=LINUX).settings
+        self.assertTrue(hw.unmerge(machine).conflicts)
+
+    def test_a_deny_rule_the_project_already_had_is_removed_with_ours(self):
+        """setup cannot tell its rule from the project's own identical rule; the docs say so."""
+        settings = {"permissions": {"deny": ["Read(.env)", "Read(mine)"]}}
+        self.assertEqual(hw.unmerge(settings).settings, {"permissions": {"deny": ["Read(mine)"]}})
+
+    def test_other_permission_keys_and_odd_shapes_are_left_alone(self):
+        for settings in (
+            {"hooks": "x"},
+            {"hooks": {"PreToolUse": "x"}},
+            {"permissions": []},
+            {"permissions": {"deny": "x"}},
+            {"disableAllHooks": True},
+        ):
+            with self.subTest(settings=settings):
+                result = hw.unmerge(settings)
+                self.assertEqual((result.settings, result.changes, result.conflicts), (settings, [], []))
+
+    def test_input_is_not_changed(self):
+        settings = full()
+        before = copy.deepcopy(settings)
+        hw.unmerge(settings)
+        self.assertEqual(settings, before)
+
+
 class LoadSettingsTests(unittest.TestCase):
     def test_missing_file_is_none(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,6 +341,78 @@ class LoadSettingsTests(unittest.TestCase):
             path.write_text(hw.render(full()))
             self.assertEqual(hw.load_settings(path), full())
             self.assertTrue(hw.render({}).endswith("}\n"))
+
+
+MAC = "/Library/Application Support/ClaudeCode/bmad-guard"
+LINUX = "/etc/claude-code/bmad-guard"
+
+
+class MachineCommandTests(unittest.TestCase):
+    """ADR 0008: the same hooks, with scripts in the machine folder instead of the project."""
+
+    def test_machine_command_is_absolute_quoted_and_has_no_project_dir(self):
+        cmd = hw.command("tool-guard", "pre_tool_use.py", MAC)
+        self.assertEqual(
+            cmd,
+            'python3 "/Library/Application Support/ClaudeCode/bmad-guard/skills/tool-guard/scripts/pre_tool_use.py"',
+        )
+        self.assertNotIn("CLAUDE_PROJECT_DIR", cmd)
+
+    def test_no_base_is_the_project_command(self):
+        self.assertEqual(hw.command("tool-guard", "pre_tool_use.py", None), PRE)
+
+    def test_a_base_that_could_break_the_quoting_is_refused(self):
+        for base in ('/x"y', "/x$HOME", "/x`id`", "/x\\y", "/x\ny", "relative/path", ""):
+            with self.subTest(base=base), self.assertRaises(ValueError):
+                hw.command("tool-guard", "pre_tool_use.py", base)
+
+    def test_machine_hooks_keep_the_matcher_timeout_and_on_failure(self):
+        mine, project = hw.desired_hooks(LINUX), hw.desired_hooks()
+        for event, groups in project.items():
+            for group, machine_group in zip(groups, mine[event], strict=True):
+                self.assertEqual(group.get("matcher"), machine_group.get("matcher"))
+                for key in ("timeout", "onFailure"):
+                    self.assertEqual(group["hooks"][0].get(key), machine_group["hooks"][0].get(key))
+        self.assertEqual(
+            mine["PreToolUse"][0]["hooks"][0]["command"],
+            f'python3 "{LINUX}/skills/tool-guard/scripts/pre_tool_use.py"',
+        )
+
+    def test_script_paths_with_a_base_are_absolute(self):
+        self.assertEqual(
+            hw.script_paths(LINUX),
+            [
+                f"{LINUX}/skills/tool-guard/scripts/session_start.py",
+                f"{LINUX}/skills/prompt-guard/scripts/prompt_guard_hook.py",
+                f"{LINUX}/skills/tool-guard/scripts/pre_tool_use.py",
+            ],
+        )
+
+    def test_machine_bases_come_from_the_managed_folders(self):
+        self.assertEqual(hw.machine_base("darwin"), MAC)
+        self.assertEqual(hw.machine_base("linux"), LINUX)
+        self.assertIsNone(hw.machine_base("win32"))
+        self.assertIsNone(hw.machine_base("plan9"))
+        self.assertEqual(hw.MANAGED_DIRS["darwin"], "/Library/Application Support/ClaudeCode")
+
+    def test_merge_with_a_base_writes_machine_commands_and_is_idempotent(self):
+        result = hw.merge(None, base=LINUX)
+        self.assertEqual(result.conflicts, [])
+        self.assertEqual(result.settings["hooks"], hw.desired_hooks(LINUX))
+        self.assertTrue(hw.merge(result.settings, base=LINUX).ok)
+
+    def test_each_form_is_a_lookalike_conflict_for_the_other(self):
+        machine = hw.merge(None, base=LINUX).settings
+        self.assertTrue(hw.merge(machine).conflicts)  # project form wanted, machine command found
+        self.assertTrue(hw.merge(full(), base=LINUX).conflicts)  # machine form wanted, project command found
+
+    def test_another_machine_folder_is_a_lookalike_conflict(self):
+        self.assertTrue(hw.merge(hw.merge(None, base=MAC).settings, base=LINUX).conflicts)
+
+    def test_force_replaces_the_other_form(self):
+        result = hw.merge(full(), force=True, base=LINUX)
+        self.assertEqual(result.conflicts, [])
+        self.assertEqual(result.settings["hooks"], hw.desired_hooks(LINUX))
 
 
 class ManagedTemplateTests(unittest.TestCase):
@@ -287,6 +437,87 @@ class ManagedTemplateTests(unittest.TestCase):
         text = (ROOT / "module/managed-settings/managed-settings.json").read_text()
         self.assertNotIn("/Users/", text)
         self.assertNotRegex(text, r"(?i)api[_-]?key|token|password")
+
+    def test_the_project_form_template_has_the_same_telemetry_as_the_machine_form(self):
+        self.assertEqual(self.template["env"], hw.TELEMETRY_ENV)
+
+
+class MachineTemplatesTests(unittest.TestCase):
+    """One managed template per OS (ADR 0008), written from hook_wiring.py by `install_machine.py --print-template`.
+    They must equal what `managed_settings(base)` gives, so there is one definition."""
+
+    FILES = {
+        "macos": ("managed-settings.macos.json", MAC),
+        "linux": ("managed-settings.linux.json", LINUX),
+    }
+
+    def load(self, os_name: str) -> tuple[str, dict, str]:
+        name, base = self.FILES[os_name]
+        text = (ROOT / "module/managed-settings" / name).read_text()
+        return text, json.loads(text), base
+
+    def test_each_file_is_exactly_what_hook_wiring_writes(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                text, _, base = self.load(os_name)
+                self.assertEqual(text, hw.render(hw.managed_settings(base)))
+
+    def test_each_file_matches_the_wiring_piece_by_piece(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                _, data, base = self.load(os_name)
+                self.assertEqual(data["hooks"], hw.desired_hooks(base))
+                self.assertEqual(data["permissions"]["deny"], list(hw.DENY_RULES))
+                self.assertEqual(data["env"], hw.TELEMETRY_ENV)
+                self.assertEqual(data["otelHeadersHelper"], f'python3 "{base}/otel_headers.py"')
+                self.assertIs(data["allowManagedHooksOnly"], True)
+                self.assertNotIn("disableAllHooks", data)
+
+    def test_the_base_is_the_managed_folder_of_the_os(self):
+        for os_name, platform in (("macos", "darwin"), ("linux", "linux")):
+            self.assertEqual(self.FILES[os_name][1], hw.machine_base(platform))
+
+    def test_no_script_path_uses_the_project_dir_and_every_one_is_absolute(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                text, data, base = self.load(os_name)
+                self.assertNotIn("CLAUDE_PROJECT_DIR", text)
+                commands = [h["command"] for groups in data["hooks"].values() for g in groups for h in g["hooks"]]
+                self.assertEqual(len(commands), 3)
+                for command in commands + [data["otelHeadersHelper"]]:
+                    self.assertTrue(command.startswith(f'python3 "{base}/'), command)
+
+    def test_the_macos_file_has_the_space_quoted(self):
+        text, data, _ = self.load("macos")
+        self.assertIn("Application Support/ClaudeCode/bmad-guard/skills/tool-guard/scripts/pre_tool_use.py", text)
+        command = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertEqual(command.count('"'), 2)
+
+    def test_the_machine_files_differ_from_the_project_form_file_only_in_the_three_commands(self):
+        old = json.loads((ROOT / "module/managed-settings/managed-settings.json").read_text())
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                _, data, base = self.load(os_name)
+                self.assertEqual(
+                    {k: v for k, v in data.items() if k != "hooks"},
+                    {k: v for k, v in old.items() if k != "hooks"} | {"otelHeadersHelper": data["otelHeadersHelper"]},
+                )
+                self.assertEqual(data["hooks"], hw.desired_hooks(base))
+
+    def test_no_secrets_or_real_paths(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                text, _, _ = self.load(os_name)
+                self.assertNotIn("/Users/", text)
+                self.assertNotRegex(text, r"(?i)api[_-]?key|token|password")
+                self.assertIn(hw.ENDPOINT_PLACEHOLDER, text)  # IT replaces it; never a real host
+
+    def test_a_machine_file_is_wired_for_session_start_in_its_own_managed_folder(self):
+        """A file written for a base counts as wired when the managed folder is the base's parent."""
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                _, data, base = self.load(os_name)
+                self.assertTrue(hw.merge(data, base=base).ok, hw.merge(data, base=base).changes)
 
 
 if __name__ == "__main__":

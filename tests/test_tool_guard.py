@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.fake_home import isolated_env
+from tests.guarded import mark_guarded
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "module/skills/tool-guard/scripts"
@@ -242,6 +243,7 @@ class MainInProcessTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
+        mark_guarded(self.root)
         env = mock.patch.dict(os.environ, {**CLEAN_ENV, "CLAUDE_PROJECT_DIR": str(self.root)}, clear=True)
         env.start()
         self.addCleanup(env.stop)
@@ -352,6 +354,7 @@ class MainProcessTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
+        mark_guarded(self.root)
 
     def run_script(self, name: str, raw: str):
         env = {**CLEAN_ENV, "CLAUDE_PROJECT_DIR": str(self.root)}
@@ -386,6 +389,7 @@ class SessionStartTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name).resolve()
         git(self.root, "init", "-q")
+        mark_guarded(self.root)
         env = mock.patch.dict(os.environ, CLEAN_ENV, clear=True)
         env.start()
         self.addCleanup(env.stop)
@@ -524,6 +528,65 @@ class SessionStartTests(unittest.TestCase):
             "managed-settings.json", (ROOT / "module/managed-settings/managed-settings.json").read_text()
         )
         self.assertTrue(ss.wiring_ok(self.root))
+
+    def machine_settings(self, base: Path | None = None) -> dict:
+        return hw.managed_settings(str((base or self.managed) / "bmad-guard"))
+
+    def test_machine_commands_in_the_managed_file_count_as_wired(self):
+        self.wire(settings=False)
+        self.write_managed("managed-settings.json", self.machine_settings())
+        self.assertTrue(ss.wiring_ok(self.root))
+        self.assertEqual(self.start(), (0, "", ""))
+        self.assertEqual(queue(self.root), [])
+
+    def test_machine_commands_in_drop_ins_count_as_wired(self):
+        self.wire(settings=False)
+        full = self.machine_settings()
+        self.write_managed("managed-settings.d/10-hooks.json", {"hooks": full["hooks"]})
+        self.write_managed("managed-settings.d/20-deny.json", {"permissions": full["permissions"]})
+        self.assertTrue(ss.wiring_ok(self.root))
+
+    def test_machine_commands_pointing_into_another_folder_do_not_count(self):
+        self.wire(settings=False)
+        self.write_managed("managed-settings.json", self.machine_settings(self.root / "elsewhere"))
+        self.assertFalse(ss.wiring_ok(self.root))
+        self.assertIn("will not run", json.loads(self.start()[1])["systemMessage"])
+
+    def test_machine_hooks_with_a_missing_deny_rule_do_not_count(self):
+        self.wire(settings=False)
+        settings = self.machine_settings()
+        settings["permissions"]["deny"].pop()
+        self.write_managed("managed-settings.json", settings)
+        self.assertFalse(ss.wiring_ok(self.root))
+
+    def test_machine_version_is_known_only_inside_a_machine_folder(self):
+        self.assertIsNone(ss.machine_version(), "the repo copy is not in a machine folder")
+        base = self.root / "machine"
+        scripts = base / "skills/tool-guard/scripts"
+        scripts.mkdir(parents=True)
+        with mock.patch.object(ss, "HERE", scripts):
+            self.assertIsNone(ss.machine_version())  # no VERSION and manifest.json yet
+            (base / "VERSION").write_text("v1.2.3\n")
+            self.assertIsNone(ss.machine_version(), "a VERSION alone is not enough")
+            (base / "manifest.json").write_text("{}")
+            self.assertEqual(ss.machine_version(), "v1.2.3")
+            (base / "VERSION").write_text("\n")
+            self.assertIsNone(ss.machine_version())
+
+    def test_project_version_reads_the_manifest_and_never_raises(self):
+        path = self.root / hc.GUARD_MANIFEST_REL
+        path.write_text('{"version": "v0.4", "files": {}}')
+        self.assertEqual(ss.project_version(self.root), "v0.4")
+        for text in ("{not json", "[]", '{"version": 5}', '{"version": ""}', ""):
+            path.write_text(text)
+            self.assertIsNone(ss.project_version(self.root), text)
+        path.unlink()
+        self.assertIsNone(ss.project_version(self.root))
+
+    def test_the_machine_folder_is_defined_once(self):
+        self.assertFalse(hasattr(ss, "MANAGED_DIRS"))
+        with mock.patch.object(ss.sys, "platform", "linux"):
+            self.assertEqual(str(REAL_MANAGED_DIR()), hw.MANAGED_DIRS["linux"])
 
     def test_managed_drop_ins_are_read_together(self):
         self.wire(settings=False)
