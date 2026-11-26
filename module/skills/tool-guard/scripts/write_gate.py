@@ -80,7 +80,7 @@ SKIP_FOLDERS = {"node_modules", ".git"}
 KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 SESSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 NEXT_PLAN = (
-    "Run bmad-build to write the plan, ask the developer to approve it with Warden (agent-approval-grant), "
+    "Run bmad-build to write the plan, ask the developer to approve it with agent-approval-grant (Warden), "
     "then set the plan's status to in-progress."
 )
 READY_NEXT = (
@@ -238,15 +238,15 @@ def plan_reasons(root: Path, plan: Plan) -> list[hc.Verdict]:
             verdict(
                 "GATE_PLAN_CHANGED",
                 f"The plan {plan.rel} was edited after it was approved. "
-                "Ask the developer to read the change and approve the plan again with Warden (agent-approval-grant).",
+                "Ask the developer to read the change and approve the plan again with agent-approval-grant (Warden).",
             )
         ]
     reopened = " The approval was reopened." if why == "superseded" else ""
     return [
         verdict(
             "GATE_PLAN_NOT_APPROVED",
-            f"The plan {plan.rel} is not approved.{reopened} Ask the developer to approve it with Warden "
-            "(agent-approval-grant). Never write approval_status: approved yourself.",
+            f"The plan {plan.rel} is not approved.{reopened} Ask the developer to approve it with "
+            "agent-approval-grant (Warden). Never write approval_status: approved yourself.",
         )
     ]
 

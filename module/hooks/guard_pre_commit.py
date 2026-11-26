@@ -327,9 +327,9 @@ def check_documents(root: Path, paths: list[str], head: bool, approvals: Approva
             Reason(
                 "COMMIT_APPROVAL_NO_ENTRY",
                 f"{listing([p for p, _ in no_entry])}: the approval status is approved (or approved_by / approved_at "
-                f"changed), but {STATE_REL} has no matching Warden approval for it that is still in force. Only Warden "
-                "(agent-approval-grant, Grant Approval) sets these fields, after the developer confirms. Undo the "
-                "change, or ask the developer to run Warden on the document.",
+                f"changed), but {STATE_REL} has no matching approval for it that is still in force. Only "
+                "agent-approval-grant (Warden) sets these fields (Grant Approval), after the developer confirms. Undo "
+                "the change, or ask the developer to run agent-approval-grant (Warden) on the document.",
                 BLOCK,
                 "approval",
                 targets=no_entry,
@@ -339,9 +339,10 @@ def check_documents(root: Path, paths: list[str], head: bool, approvals: Approva
         reasons.append(
             Reason(
                 "COMMIT_APPROVAL_STALE",
-                f"{listing([p for p, _ in stale])}: approved, but the text differs from what Warden recorded, so it "
-                "was edited after approval. Undo the edit, or ask the developer to reopen the document with Warden "
-                "(Reopen Document) and approve it again.",
+                f"{listing([p for p, _ in stale])}: approved, but the text differs from what "
+                "agent-approval-grant (Warden) recorded, so it was edited after approval. Undo the edit, or ask the "
+                "developer to reopen the document with agent-approval-grant (Warden), Reopen Document, and approve "
+                "it again.",
                 BLOCK,
                 "approval",
                 targets=stale,
@@ -389,7 +390,7 @@ def check_tech_stack(root: Path, paths: list[str], head: bool, approvals: Approv
                 Reason(
                     "COMMIT_TECH_STACK_REMOVED",
                     f"this commit deletes {LIST_REL}, which the architect approved. A list is retired in two steps: "
-                    "reopen it with Warden (agent-approval-grant, Reopen Document) and commit that, then delete it.",
+                    "reopen it with agent-approval-grant (Warden), Reopen Document, and commit that, then delete it.",
                     BLOCK,
                     "tech-stack",
                 )
@@ -442,7 +443,7 @@ def check_tech_stack(root: Path, paths: list[str], head: bool, approvals: Approv
                 Reason(
                     "COMMIT_TECH_STACK_UNAPPROVED",
                     f"this commit adds dependencies ({listing(sorted(added))}), but the list {LIST_REL} {why}. Ask "
-                    "the architect to approve the list with Warden (agent-approval-grant, doc type tech-stack), "
+                    "the architect to approve the list with agent-approval-grant (Warden), doc type tech-stack, "
                     "then commit again.",
                     BLOCK,
                     "tech-stack",
@@ -461,7 +462,8 @@ def check_tech_stack(root: Path, paths: list[str], head: bool, approvals: Approv
                     Reason(
                         "COMMIT_TECH_STACK_NOT_ALLOWED",
                         f"new dependencies that are not on the approved tech-stack list ({lines}). Use a package "
-                        f"that is on the list, or ask the architect to add it and approve the list with Warden.",
+                        "that is on the list, or ask the architect to add it and approve the list with "
+                        "agent-approval-grant (Warden).",
                         BLOCK,
                         "tech-stack",
                         str(sum(len(v) for v in outside.values())),

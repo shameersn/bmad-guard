@@ -106,5 +106,37 @@ class ShippedFilesTests(unittest.TestCase):
                 self.assertTrue(os.access(path, os.X_OK), "git does not run a hook that is not executable")
 
 
+def message_strings(source: str) -> list[str]:
+    """Text of every string in a script except docstrings. An f-string counts as its fixed parts."""
+    tree = ast.parse(source)
+    docs = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+    }
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
+            found.append(node.value)
+        elif isinstance(node, ast.JoinedStr):
+            found.append("".join(p.value for p in node.values if isinstance(p, ast.Constant)))
+    return found
+
+
+class MessageNameTests(unittest.TestCase):
+    def test_messages_name_the_skill_when_they_say_warden(self):
+        """Claude cannot find a skill called Warden (pilot 1, C2): a message says `agent-approval-grant (Warden)`."""
+        full = "agent-approval-grant (Warden)"
+        bad = []
+        for folder in ("module/skills/tool-guard/scripts", "module/hooks"):
+            for path in sorted((ROOT / folder).glob("*.py")):
+                for text in message_strings(path.read_text()):
+                    if text.count("Warden") != text.count(full):
+                        bad.append(f"{path.relative_to(ROOT)}: {text[:60]}")
+        self.assertEqual(bad, [])
+
+
 if __name__ == "__main__":
     unittest.main()

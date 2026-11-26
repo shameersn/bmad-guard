@@ -97,7 +97,7 @@ Written for the document guard (file tools) and the Bash write guard (shell). Th
 | `DOC_APPROVAL_FIELD` | in a Markdown file: adding, removing or changing `status: approved` or `approval_status: approved` in the frontmatter, any `approved_by` or `approved_at` line there, any `Resolved:` line, any `[ASSUMPTION-RESOLVED ...]` tag, and adding, removing or changing `gate: generic` in the frontmatter (it skips the ready-for-dev gate) | other values (`status: ready-for-dev`, `approval_status: pending-approval`, `gate: full`), any edit elsewhere in an approved document |
 | `DOC_QUESTION_REMOVED` | in a Markdown file: an open question (`Q-n` under `## Open questions`) or an open `[ASSUMPTION ...]` that is gone from the new text, with no record for it there | rewording an item that stays open, moving it, adding items |
 
-Each message says the human path: ask the developer to approve or reopen with Warden, to write the answer, or to change the guard settings.
+Each message says the human path: ask the developer to approve or reopen with `agent-approval-grant` (Warden), to write the answer, or to change the guard settings.
 
 ### Design choices
 

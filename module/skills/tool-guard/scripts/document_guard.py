@@ -60,8 +60,8 @@ SKILL_DIRS = (".claude/skills", ".agents/skills")
 GUARD_SKILLS = ("tool-guard", "prompt-guard", "ready-for-dev-gate", "agent-approval-grant", "agent-approval-gate-check")
 REASONS = {
     "DOC_APPROVAL_STATE": (
-        "approval-state.json is written only by Warden (agent-approval-grant), after the developer confirms twice. "
-        "Ask the developer to approve or reopen the document with Warden."
+        "approval-state.json is written only by agent-approval-grant (Warden), after the developer confirms twice. "
+        "Ask the developer to approve or reopen the document with agent-approval-grant (Warden)."
     ),
     "DOC_GUARD_RECORD": (
         "Review and build records in _bmad-output/guard are written by the guard scripts and hooks only. "
@@ -78,7 +78,7 @@ REASONS = {
     "DOC_APPROVAL_FIELD": (
         "This edit changes an approval field (status or approval_status 'approved', approved_by, approved_at) "
         "or a resolution record (Resolved:, [ASSUMPTION-RESOLVED ...]). "
-        "Ask the developer to approve with Warden, or to write the answer."
+        "Ask the developer to approve with agent-approval-grant (Warden), or to write the answer."
     ),
     "DOC_QUESTION_REMOVED": (
         "An open question or [ASSUMPTION ...] was removed and has no resolution record. "
