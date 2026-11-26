@@ -110,5 +110,7 @@ If a command is safe and blocked, run it yourself in your terminal, or add a scr
 ## Limits to know
 
 - The guards read command text. A script file, `python -c` or text built at run time is not seen. Do not treat the guard as a sandbox.
+- A secret built by a shell command at run time (for example `python3 -c` that joins string parts) is not seen by the content scan of the agent layer. The pre-commit hook catches it before it is committed. A scan after the write is planned for Phase 4.
+- Your own global `~/.claude` settings (deny or ask rules, your own hooks) can block before the project guard runs. Then you see a Claude Code permission message, not a rule id. To check the guard alone, run `claude --setting-sources project,local`.
 - Free-text PHI (names, diagnoses in a sentence) is not seen.
 - A person can skip a local hook. The design accepts this (ADR 0002), and the pilot rules forbid it.

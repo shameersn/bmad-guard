@@ -294,6 +294,7 @@ Phase 4 starts only when all of these are true:
 - [ ] **Backups of the metrics tables** (`backup.sh` covers the events table only; T4). Owner: Shameer.
 - [ ] **Pilot people and project** (D12). Owner: Shameer. Date: end of week 1 at the latest.
 - [ ] **Mac or Linux machine for a BA** (D11). Owner: Manesh G. Date: end of week 1. Decides whether T9 exists.
+- [ ] **PostToolUse scan** that warns after a write when a secret was built by a shell command at run time (pilot 1, finding B; the pre-commit hook catches it today). Owner: Shameer. Phase 4.
 - [ ] **Windows support** for BAs and PMs beyond L1 (git hooks, queue lock without `fcntl`, a Windows CI runner for the install test). BAs and PMs use Windows. Owner: Shameer. Phase 4 at the latest.
 - [ ] **Retention approved** by the compliance owner (D6). Owner: Shameer. Date: before Gate 3.
 - [ ] **IT contact** for hosting the stack (D6). Owner: Shameer. Date: before the hosting plan is final (T2).

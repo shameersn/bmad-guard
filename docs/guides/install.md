@@ -53,7 +53,16 @@ cd ~/tools/bmad-guard && git fetch --tags && git checkout <new pilot tag>
 python3 ~/tools/bmad-guard/scripts/setup_guard.py --project <your project> --check
 ```
 
-`--check` then says `NOT up to date`. Run the setup script without `--check` (step 4), and commit the result.
+`--check` then says `NOT up to date`. Run the setup script without `--check` (step 4), and commit the result:
+
+```bash
+python3 ~/tools/bmad-guard/scripts/setup_guard.py --project <your project>
+python3 ~/tools/bmad-guard/scripts/setup_guard.py --project <your project> --check
+```
+
+- Run setup again after **every** update. The module in your project is a copy and does not change by itself.
+- `--check` must now say `up to date`. If it does not, send the output to Shameer.
+- The next tag after `pilot-1` will be `pilot-2`.
 
 ## 3. Install BMAD
 

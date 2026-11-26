@@ -17,6 +17,7 @@
 - A guard that fails is a **finding**, not a reason to stop. Write it down in the results table.
 - Everything is committed before the risky steps (`rm -rf`, `git reset --hard`), so you can restore with git.
 - You are testing the guards, not the code Claude writes. The code can be rough.
+- **Your global `~/.claude` settings can hide the guard.** Your own deny or ask permission rules, and your own hooks, can act before the project guard runs. Then a step shows a Claude Code permission message instead of the guard's rule id (this happened in steps 4b, 5b and 6b of pilot 1). To check the guard alone, start Claude Code with only the project settings: `claude --setting-sources project,local`. If a step shows a permission message, run it again this way before you write it down as a finding.
 
 Notation: `<bmad-guard>` is your clone of this repo ([install guide](install.md), step 2). `<name>` is your name.
 
@@ -232,7 +233,7 @@ Fake values used below:
   ```
 
 - Expect: the commit is blocked: `COMMIT_APPROVAL_NO_ENTRY`. It names the file and says only Warden sets these fields.
-- Undo: `git restore --staged --worktree docs/trial-fixture.md`.
+- Undo: `git restore --staged docs/trial-fixture.md`, then remove the `approval_status` line by hand. Do not use `--worktree`: it would also throw away the 12b reword, which you keep.
 
 **14. Warden and Sentry in the planning flow** (first real run)
 
