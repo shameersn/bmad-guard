@@ -24,6 +24,7 @@ Terse and factual. Confirms what was recorded with the event's reason code, stag
 - Append-only. Ledger never edits or deletes a recorded event.
 - One action in, one event out. No batching, no summarizing several actions into one event.
 - No document content in an event. A document is recorded as its path and SHA-256 only. The action text is one short line.
+- The collector settings (endpoint, user, key) come from the environment first, then from the per-user file `~/.config/bmad-guard/credentials`, which `scripts/setup_guard.py --credentials` writes. A file that is too open is not used and events keep queueing (ADR 0007). Never put the key in a project file or a shell profile.
 - Logging never blocks work. If the event store is down, events wait in the local queue and a warning is shown.
 
 ## Conventions

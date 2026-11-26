@@ -20,7 +20,7 @@ This guide puts the guards into one project. It takes about 10 minutes.
 
 | You need | Check with | Notes |
 |---|---|---|
-| macOS or Linux | | **Windows is not supported yet** (decision D10 in the Phase 3 plan). `setup_guard.py --check` does not warn about Windows yet; that warning is planned (Phase 3, T3). |
+| macOS or Linux | | **Windows is not supported yet** (decision D10 in the Phase 3 plan). `setup_guard.py --check` prints a warning on Windows. |
 | Python 3.10 or later, as `python3` | `python3 --version` | The macOS system Python is 3.9 and is **too old**: the pre-commit hook blocks every commit and says so. Put a newer `python3` first in your `PATH`. |
 | git | `git --version` | |
 | BMAD 6.12.4 (exactly) | | Installed in step 3. The guards are tested only with this version. |
@@ -139,8 +139,12 @@ These are exactly what `setup_guard.py --help` prints:
 | `--dry-run` | Print the plan, change nothing. |
 | `--check` | Exit 1 unless the project is up to date. |
 | `--force` | Overwrite conflicts and replace `core.hooksPath`. |
+| `--credentials` | Write your per-user collector file instead of setting up a project (see "Optional: send events to the collector" below). Needs `--endpoint` and `--user`, and cannot be used with `--project`. |
+| `--endpoint URL`, `--user ID` | With `--credentials`: the collector URL and your developer id. |
 
 `--dry-run` and `--check` cannot be used together.
+
+With `--check`, the script may print extra lines about your per-user file: `note` (no file; sending is optional), `problem` (the file is not safe to use, with the fix) or `warning` (Windows). They do not change the exit code.
 
 ### When setup reports a conflict
 
@@ -177,6 +181,24 @@ The first prints `_bmad/custom/guard/hooks`. The second prints a block, because 
 ```
 
 Then start Claude Code in the project folder. No `[tool-guard]` warning at the start means the setup is in place.
+
+### Optional: send events to the collector
+
+Skip this unless Shameer gives you a **developer id**, a **key** and the **collector URL** (one-time share from the password manager). Without them, events only queue on your laptop, and that is fine.
+
+Run this once per machine, outside any project (the key is never written into a project):
+
+```bash
+python3 <bmad-guard>/scripts/setup_guard.py --credentials \
+  --endpoint <collector URL> --user <your developer id>
+```
+
+- It asks for the key with a hidden prompt. There is no option for the key on the command line, so it does not land in your shell history or in `ps`.
+- It writes `~/.config/bmad-guard/credentials` with mode 600 in a folder with mode 700. Run it again with the same values: nothing changes. With different values it stops and asks for `--force` (use that after Shameer rotates your key).
+- **Do not `export BMAD_GUARD_KEY` in your shell profile.** A key in the environment is visible to every command the agent runs (`printenv`). The file is the normal way. The environment variables `BMAD_GUARD_ENDPOINT`, `BMAD_GUARD_USER` and `BMAD_GUARD_KEY` still override the file, for CI or a one-off test only.
+- If the file is open to group or others, a link, or not yours, the guards **do not use it**: events keep queueing, and `setup_guard.py --project . --check` and the `SessionStart` warning say how to fix it (`chmod 600 ~/.config/bmad-guard/credentials`). Nothing is lost.
+- If the collector answers HTTP 401, the warning says whether the key came from the environment or from the file. A stale `BMAD_GUARD_KEY` in your environment hides a new key in the file.
+- Not supported on Windows yet.
 
 ## 5. What setup changes
 
