@@ -58,11 +58,23 @@ FIXES = {
         "chmod 700 on its folder; run setup_guard.py --check for details"
     ),
 }
+# Windows has no mode bits: the file is refused for a link or junction, a type that is not a file, or a read error.
+FIXES_WINDOWS = {
+    "credential": (
+        "the bmad-guard credential file (%USERPROFILE%\\.config\\bmad-guard\\credentials) is not safe to use "
+        "(a link or junction, not a file, or unreadable), so events only queue. Fix: run setup_guard.py "
+        "--credentials again; run setup_guard.py --check for details"
+    ),
+}
 
 
 def hooks_path_ok(root: Path) -> bool:
+    if sys.platform == "win32":  # setup installs no git hooks on Windows (ADR 0009), so there is nothing to check
+        return True
     try:
-        out = subprocess.run(["git", "config", "core.hooksPath"], cwd=root, capture_output=True, text=True)
+        out = subprocess.run(
+            ["git", "config", "core.hooksPath"], cwd=root, capture_output=True, encoding="utf-8", errors="replace"
+        )
     except OSError:
         return False
     value = out.stdout.strip()
@@ -112,7 +124,7 @@ def wiring_ok(root: Path) -> bool:
     project form of the commands (the first template) or the machine form (ADR 0008): its scripts are in the
     `bmad-guard` folder next to the managed file."""
     managed = managed_dir()
-    machine = str(managed / hw.MACHINE_DIR_NAME) if managed is not None else None
+    machine = (managed / hw.MACHINE_DIR_NAME).as_posix() if managed is not None else None  # `C:/...` on Windows
     return (
         _wired(lambda: hw.load_settings(root / hw.SETTINGS_REL))
         or _wired(lambda: managed_settings(managed))
@@ -199,13 +211,15 @@ def main() -> int:
         missing=",".join(found),
         session_id=session_id if isinstance(session_id, str) else "",
     )
-    text = "; ".join(FIXES[name] for name in found)
+    fixes = {**FIXES, **(FIXES_WINDOWS if sys.platform == "win32" else {})}
+    text = "; ".join(fixes[name] for name in found)
     advice = "Run the bmad-guard setup script (scripts/setup_guard.py --project .)."
     print(json.dumps({"systemMessage": f"{TAG} Warning: {text}. {advice}"}))
     return 0
 
 
 def entry() -> int:
+    hc.utf8_output()
     try:
         return main()
     except Exception as err:  # never block a session start

@@ -169,6 +169,7 @@ def main() -> int:
 
 
 def entry() -> int:
+    hc.utf8_output()  # before anything is printed: a cp1252 console must not fail inside the handler below
     try:
         return main()
     except Exception as err:  # fail closed on a bug in the guard itself

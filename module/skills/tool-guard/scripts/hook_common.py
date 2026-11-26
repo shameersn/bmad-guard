@@ -7,7 +7,7 @@
   `pre_tool_use.py` imports it once its module name is listed in `GUARD_MODULES`. A verdict blocks by default;
   `severity="warn"` lets the call go ahead and tells the developer and the model (T5, content scan).
 - `read_payload()`: parse the hook JSON that Claude Code sends on stdin.
-- `project_root()`, `emit()`: find the project and record one guard event through Ledger. Never raises.
+- `project_root()`, `utf8_output()`, `emit()`: find the project and record one guard event through Ledger. Never raises.
 - `guard_state()`, `project_state()`: the unguarded-project rule (ADR 0008). Each hook entry asks first whether the
   project uses the guard, before any guard is imported. `prompt_check.py` holds a copy of `guard_state` (the prompt hook
   does not import this file); a test keeps the two equal.
@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -73,14 +74,36 @@ def read_payload(raw: str) -> dict:
     return data
 
 
+IS_WINDOWS = os.name == "nt"  # tests set it (ADR 0009)
+
+
+def _native(text: str) -> str:
+    """Windows only: a Git Bash path `/c/x` (also `/cygdrive/c/x`, `/mnt/c/x`) becomes `C:\\x`. A copy lives in
+    prompt_check.py (a test keeps the two equal); winpaths.native() does the same and more."""
+    match = re.match(r"^/(?:cygdrive/|mnt/)?([A-Za-z])(?:/(.*))?$", text, re.S) if IS_WINDOWS else None
+    return f"{match.group(1).upper()}:\\" + (match.group(2) or "").replace("/", "\\") if match else text
+
+
+def utf8_output() -> None:
+    """Write stdout and stderr as UTF-8 whatever the console code page is (cp1252 on Windows), so a message with a
+    non-ASCII file name cannot raise inside the hook's fail-closed handler. A copy lives in prompt_check.py."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass  # a stream that cannot be reconfigured (a test, a closed pipe) is left as it is
+
+
 def project_root(cwd: str | Path | None = None) -> Path:
     """CLAUDE_PROJECT_DIR when Claude Code sets it, else the git top level of `cwd`, else `cwd`."""
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
-        return Path(env)
+        return Path(_native(env))
     folder = Path(cwd) if cwd else Path.cwd()
     try:
-        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, text=True)
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, encoding="utf-8", errors="replace"
+        )
     except OSError:
         return folder
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else folder
