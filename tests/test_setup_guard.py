@@ -524,6 +524,332 @@ class SettingsWiringTests(Base):
         self.assertEqual(self.settings()["hooks"], self.hw.desired_hooks())
 
 
+def snapshot(project: Path) -> dict[str, str]:
+    """Every file under the project (not .git) and its content: a project before setup against after uninstall."""
+    out = {}
+    for path in sorted(project.rglob("*")):
+        rel = path.relative_to(project)
+        if ".git" in rel.parts or not path.is_file():
+            continue
+        out[rel.as_posix()] = path.read_text(errors="replace")
+    return out
+
+
+class UninstallTests(Base):
+    """`setup_guard.py --uninstall`: take out what setup added, using the manifest, and nothing else."""
+
+    def setUp(self):
+        super().setUp()
+        shutil.copytree(ROOT / "module/skills/tool-guard", self.module / "module/skills/tool-guard")
+        self.hw = sg.load_wiring(ROOT)
+        # stock BMAD files and the project's own files: never touched
+        self.stock = {
+            "_bmad/core/config.yaml": "user_name: Fake\n",
+            "_bmad/custom/my-own-note.md": "mine\n",
+            ".claude/skills/bmad-help/SKILL.md": "stock skill\n",
+            "src/app.py": "print('app')\n",
+        }
+        for rel, text in self.stock.items():
+            write(self.project / rel, text)
+        self.before = snapshot(self.project)
+
+    def setup_project(self) -> None:
+        code, out, _ = run(self.project, self.module)
+        self.assertEqual(code, 0, out)
+
+    def uninstall(self, *flags: str):
+        return run(self.project, self.module, "--uninstall", *flags)
+
+    def hooks_path(self) -> str:
+        out = subprocess.run(
+            ["git", "config", "--local", "core.hooksPath"], cwd=self.project, capture_output=True, text=True
+        )
+        return out.stdout.strip()
+
+    def test_setup_then_uninstall_gives_back_the_project(self):
+        self.setup_project()
+        self.assertNotEqual(snapshot(self.project), self.before)
+        code, out, err = self.uninstall()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(snapshot(self.project), self.before)
+        self.assertEqual(self.hooks_path(), "")
+        self.assertFalse((self.project / "_bmad/custom/guard").exists())
+        self.assertIn("done", out)
+
+    def test_the_project_is_the_same_down_to_its_folders(self):
+        """Folders that setup made (the guard folder, the skill folders) are gone; the ones that were there stay."""
+        folders = lambda: sorted(  # noqa: E731
+            p.relative_to(self.project).as_posix()
+            for p in self.project.rglob("*")
+            if p.is_dir() and ".git" not in p.parts
+        )
+        before = folders()
+        self.setup_project()
+        self.uninstall()
+        self.assertEqual(folders(), before)
+
+    def test_dry_run_prints_the_plan_and_changes_nothing(self):
+        self.setup_project()
+        before, hooks = snapshot(self.project), self.hooks_path()
+        code, out, _ = self.uninstall("--dry-run")
+        self.assertEqual(code, 0, out)
+        self.assertIn("remove   .claude/skills/guard-a/SKILL.md", out)
+        self.assertIn("remove   _bmad/custom/guard/manifest.json", out)
+        self.assertIn("remove   .claude/settings.json (3 hook entries and 21 deny rules", out)
+        self.assertIn("unset    core.hooksPath", out)
+        self.assertIn("dry run: nothing changed", out)
+        self.assertEqual(snapshot(self.project), before)
+        self.assertEqual(self.hooks_path(), hooks)
+
+    def test_the_projects_own_settings_survive(self):
+        own = {
+            "model": "m",
+            "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "./my-check.sh"}]}]},
+            "permissions": {"allow": ["Bash(ls)"], "deny": ["Read(mine)"]},
+        }
+        write(self.project / sg.SETTINGS_REL, json.dumps(own, indent=2) + "\n")
+        self.setup_project()
+        self.assertEqual(self.uninstall()[0], 0)
+        self.assertEqual(json.loads((self.project / sg.SETTINGS_REL).read_text()), own)
+
+    def test_settings_that_setup_created_are_deleted_and_the_folder_stays(self):
+        self.setup_project()
+        self.assertTrue((self.project / sg.SETTINGS_REL).is_file())
+        self.uninstall()
+        self.assertFalse((self.project / sg.SETTINGS_REL).exists())
+        self.assertTrue((self.project / ".claude").is_dir())
+
+    def test_a_file_that_changed_since_install_stops_the_whole_uninstall(self):
+        self.setup_project()
+        edited = self.project / ".claude/skills/guard-a/scripts/run.py"
+        edited.write_text("print('my edit')")
+        before = snapshot(self.project)
+        code, out, _ = self.uninstall()
+        self.assertEqual(code, 1)
+        self.assertIn("conflict .claude/skills/guard-a/scripts/run.py (changed since install)", out)
+        self.assertIn("nothing was changed", out)
+        self.assertEqual(snapshot(self.project), before)
+        self.assertEqual(self.hooks_path(), sg.HOOKS_REL)
+
+    def test_force_removes_the_changed_file_too(self):
+        self.setup_project()
+        (self.project / ".claude/skills/guard-a/scripts/run.py").write_text("print('my edit')")
+        code, out, _ = self.uninstall("--force")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(snapshot(self.project), self.before)
+
+    def test_a_file_in_a_skill_folder_that_setup_did_not_install_stays(self):
+        self.setup_project()
+        mine = write(self.project / ".claude/skills/guard-a/notes.md", "my notes")
+        code, out, _ = self.uninstall()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(mine.read_text(), "my notes")
+        self.assertFalse((self.project / ".claude/skills/guard-a/SKILL.md").exists())
+
+    def test_the_guard_folder_with_a_file_of_the_projects_stays(self):
+        self.setup_project()
+        mine = write(self.project / "_bmad/custom/guard/my-rules.txt", "mine")
+        self.assertEqual(self.uninstall()[0], 0)
+        self.assertEqual(mine.read_text(), "mine")
+
+    def test_stock_and_project_files_are_never_touched(self):
+        self.setup_project()
+        self.uninstall("--force")
+        for rel, text in self.stock.items():
+            self.assertEqual((self.project / rel).read_text(), text, rel)
+
+    def test_a_file_setup_did_not_create_but_replaced_with_force_is_listed_so_it_goes(self):
+        """With --force setup overwrote a file it did not create; the manifest lists it, so it goes with the rest."""
+        write(self.project / ".claude/skills/guard-a/SKILL.md", "the project's own copy")
+        self.assertEqual(run(self.project, self.module, "--force")[0], 0)
+        self.assertEqual(self.uninstall()[0], 0)
+        self.assertFalse((self.project / ".claude/skills/guard-a").exists())
+
+    def test_a_doctored_manifest_cannot_delete_other_files(self):
+        self.setup_project()
+        manifest = json.loads((self.project / sg.MANIFEST_REL).read_text())
+        digest = sg.sha256(self.project / "src/app.py")
+        for rel in (
+            "src/app.py",
+            "../outside.txt",
+            "/etc/hostname",
+            ".claude/skills/../../src/app.py",
+            "_bmad/core/config.yaml",
+        ):
+            manifest["files"][rel] = digest
+        (self.project / sg.MANIFEST_REL).write_text(json.dumps(manifest))
+        outside = write(self.project.parent / "outside.txt", "keep me")
+        code, out, _ = self.uninstall("--force")
+        self.assertEqual(code, 1, out)
+        self.assertIn("not a path setup installs", out)
+        self.assertEqual((self.project / "src/app.py").read_text(), "print('app')\n")
+        self.assertEqual((self.project / "_bmad/core/config.yaml").read_text(), "user_name: Fake\n")
+        self.assertEqual(outside.read_text(), "keep me")
+
+    def test_a_link_in_place_of_an_installed_file_is_not_followed(self):
+        self.setup_project()
+        target = write(self.project / "src/keep.txt", "keep me")
+        link = self.project / ".claude/skills/guard-a/SKILL.md"
+        link.unlink()
+        link.symlink_to(target)
+        code, out, _ = self.uninstall("--force")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(target.read_text(), "keep me")
+
+    def test_core_hooks_path_that_is_not_ours_is_kept(self):
+        self.setup_project()
+        git(self.project, "config", "--local", "core.hooksPath", ".husky")
+        code, out, _ = self.uninstall()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.hooks_path(), ".husky")
+        self.assertIn("keep     core.hooksPath", out)
+
+    def test_gitignore_keeps_the_projects_lines_and_removes_ours(self):
+        write(self.project / ".gitignore", "node_modules/\n")
+        self.setup_project()
+        self.uninstall()
+        self.assertEqual((self.project / ".gitignore").read_text(), "node_modules/\n")
+
+    def test_a_gitignore_that_only_held_our_lines_is_deleted(self):
+        self.setup_project()
+        self.assertTrue((self.project / ".gitignore").is_file())
+        self.uninstall()
+        self.assertFalse((self.project / ".gitignore").exists())
+
+    def test_a_gitignore_line_that_setup_did_not_write_stays_unless_forced(self):
+        write(self.project / ".gitignore", ".bmad-guard/\n")  # the project already had it
+        self.setup_project()
+        self.assertEqual((self.project / ".gitignore").read_text(), ".bmad-guard/\n")  # setup added nothing
+        code, out, _ = self.uninstall()
+        self.assertEqual(code, 0, out)
+        self.assertEqual((self.project / ".gitignore").read_text(), ".bmad-guard/\n")
+        self.assertIn("keep     .gitignore", out)
+
+    def test_the_local_event_queue_is_left_and_named(self):
+        self.setup_project()
+        write(self.project / ".bmad-guard/events/queue.jsonl", "{}\n")
+        code, out, _ = self.uninstall()
+        self.assertEqual(code, 0, out)
+        self.assertTrue((self.project / ".bmad-guard/events/queue.jsonl").is_file())
+        self.assertIn(".bmad-guard/", out)
+
+    def test_a_lookalike_hook_entry_is_a_conflict_and_force_removes_it(self):
+        self.setup_project()
+        path = self.project / sg.SETTINGS_REL
+        data = json.loads(path.read_text())
+        data["hooks"]["PreToolUse"].append(
+            {"hooks": [{"type": "command", "command": "python3 old/skills/tool-guard/scripts/pre_tool_use.py"}]}
+        )
+        path.write_text(json.dumps(data))
+        code, out, _ = self.uninstall()
+        self.assertEqual(code, 1)
+        self.assertIn("looks like a bmad-guard hook", out)
+        self.assertEqual(self.uninstall("--force")[0], 0)
+        self.assertFalse(path.exists())
+
+    def test_without_a_manifest_it_stops(self):
+        code, _, err = self.uninstall()
+        self.assertEqual(code, 2)
+        self.assertIn("no manifest", err)
+        self.assertEqual(snapshot(self.project), self.before)
+
+    def test_a_broken_manifest_stops(self):
+        write(self.project / sg.MANIFEST_REL, "{not json")
+        self.assertEqual(self.uninstall()[0], 2)
+
+    def test_a_second_uninstall_stops_cleanly_and_setup_works_again(self):
+        self.setup_project()
+        self.assertEqual(self.uninstall()[0], 0)
+        self.assertEqual(self.uninstall()[0], 2)
+        self.setup_project()
+        self.assertEqual(self.hooks_path(), sg.HOOKS_REL)
+
+    def test_a_run_that_stopped_half_way_can_be_run_again(self):
+        """The manifest goes last, so a stop in the middle leaves it in place and the next run finishes."""
+        self.setup_project()
+        (self.project / ".claude/skills/guard-a/SKILL.md").unlink()
+        (self.project / ".claude/skills/guard-a/scripts/run.py").unlink()
+        self.assertEqual(self.uninstall()[0], 0)
+        self.assertEqual(snapshot(self.project), self.before)
+
+    def test_it_does_not_run_with_check_or_dry_run_together_wrongly(self):
+        with self.assertRaises(SystemExit):
+            run(self.project, self.module, "--uninstall", "--check")
+
+    def test_a_module_that_does_not_ship_the_wiring_still_removes_files_and_the_hooks_path(self):
+        shutil.rmtree(self.module / "module/skills/tool-guard")
+        run(self.project, self.module)
+        code, out, _ = self.uninstall()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.hooks_path(), "")
+
+    def test_the_real_module_round_trip(self):
+        """The real skills, hooks and overrides: setup, uninstall, and the project is as before."""
+        code, out, _ = run(self.project, ROOT)
+        self.assertEqual(code, 0, out)
+        self.assertTrue((self.project / ".claude/skills/tool-guard/scripts/pre_tool_use.py").is_file())
+        code, out, _ = run(self.project, ROOT, "--uninstall")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(snapshot(self.project), self.before)
+        self.assertEqual(self.hooks_path(), "")
+
+
+class MachineCheckTests(Base):
+    """ADR 0008, version skew: `--check` compares the project's manifest version with the machine folder's VERSION."""
+
+    def setUp(self):
+        super().setUp()
+        run(self.project, self.module)
+        self.machine = self.project.parent / "machine"
+        self.machine.mkdir()
+
+    def check(self, *flags: str):
+        return run(self.project, self.module, "--check", "--machine-dir", str(self.machine), *flags)
+
+    def test_no_machine_folder_is_a_note_and_not_a_failure(self):
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("note     machine scripts: none (fine unless managed settings point to them)", out)
+
+    def test_the_same_version_says_nothing(self):
+        (self.machine / "VERSION").write_text(self.manifest()["version"] + "\n")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("machine scripts", out)
+
+    def test_a_different_version_is_a_warning_and_does_not_change_the_exit_code(self):
+        (self.machine / "VERSION").write_text("v9.9.9\n")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("warning  machine scripts: v9.9.9; this project's module: v0.1.0. They differ", out)
+        self.assertIn("up to date", out)
+
+    def test_the_exit_code_still_follows_the_project(self):
+        (self.project / sg.MANIFEST_REL).unlink()
+        (self.machine / "VERSION").write_text("v9.9.9\n")
+        self.assertEqual(self.check()[0], 1)
+
+    def test_an_empty_version_file_counts_as_no_machine_folder(self):
+        (self.machine / "VERSION").write_text("\n")
+        self.assertIn("machine scripts: none", self.check()[1])
+
+    def test_the_default_is_the_os_folder_and_windows_has_none(self):
+        hw = sg.load_wiring(ROOT)
+        shutil.copytree(ROOT / "module/skills/tool-guard", self.module / "module/skills/tool-guard")
+        with mock.patch.object(sg.sys, "platform", "plan9"):
+            self.assertEqual(sg.machine_report(self.module, "v1", None), [])
+        with (
+            mock.patch.object(sg.sys, "platform", "linux"),
+            mock.patch.object(sg.Path, "read_text", side_effect=OSError),
+        ):
+            self.assertIn("none", sg.machine_report(self.module, "v1", None)[0])
+        self.assertEqual(hw.machine_base("linux"), "/etc/claude-code/bmad-guard")
+
+    def test_machine_dir_needs_check(self):
+        with self.assertRaises(SystemExit):
+            run(self.project, self.module, "--machine-dir", str(self.machine))
+
+
 class ManifestAndVersionTests(Base):
     def test_broken_manifest_stops_with_clear_error(self):
         write(self.project / sg.MANIFEST_REL, "{not json")

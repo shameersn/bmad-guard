@@ -242,6 +242,84 @@ class ConflictTests(unittest.TestCase):
         self.assertEqual(out.settings["hooks"]["PreToolUse"][:3], settings["hooks"]["PreToolUse"])
 
 
+class UnmergeTests(unittest.TestCase):
+    """`unmerge()` takes out what `merge()` put in, and nothing else (the setup script's --uninstall)."""
+
+    def test_unmerge_of_a_fresh_merge_gives_back_an_empty_settings_dict(self):
+        result = hw.unmerge(full())
+        self.assertEqual(result.settings, {})
+        self.assertEqual(result.conflicts, [])
+        self.assertEqual(len(result.changes), 3 + len(hw.DENY_RULES))
+
+    def test_the_projects_own_entries_and_keys_stay(self):
+        original = {
+            "model": "m",
+            "env": {"A": "1"},
+            "hooks": {
+                "PreToolUse": [copy.deepcopy(OWN_HOOK)],
+                "Stop": [{"hooks": [{"type": "command", "command": "x"}]}],
+            },
+            "permissions": {"allow": ["Bash(ls)"], "deny": ["Read(x)"]},
+        }
+        merged = hw.merge(original).settings
+        self.assertNotEqual(merged, original)
+        self.assertEqual(hw.unmerge(merged).settings, original)
+
+    def test_unmerge_is_idempotent(self):
+        once = hw.unmerge(full()).settings
+        again = hw.unmerge(once)
+        self.assertEqual((again.settings, again.changes, again.conflicts), ({}, [], []))
+        self.assertEqual(hw.unmerge(None).settings, {})
+
+    def test_our_hook_sharing_a_group_with_a_project_hook_leaves_the_project_hook(self):
+        settings = full()
+        settings["hooks"]["PreToolUse"][0]["hooks"].append({"type": "command", "command": "./mine.sh"})
+        left = hw.unmerge(settings).settings
+        self.assertEqual(left["hooks"]["PreToolUse"][0]["hooks"], [{"type": "command", "command": "./mine.sh"}])
+
+    def test_a_changed_timeout_is_still_our_hook(self):
+        settings = full()
+        settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 99
+        self.assertEqual(hw.unmerge(settings).settings, {})
+
+    def test_a_lookalike_command_is_a_conflict_and_stays_unless_forced(self):
+        old = "python3 old/skills/tool-guard/scripts/pre_tool_use.py"
+        settings = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": old}]}]}}
+        result = hw.unmerge(settings)
+        self.assertEqual(result.settings, settings)
+        self.assertEqual(len(result.conflicts), 1)
+        self.assertIn("looks like a bmad-guard hook", result.conflicts[0])
+        forced = hw.unmerge(settings, force=True)
+        self.assertEqual((forced.settings, forced.conflicts), ({}, []))
+
+    def test_the_machine_form_is_a_lookalike_in_a_project(self):
+        machine = hw.merge(None, base=LINUX).settings
+        self.assertTrue(hw.unmerge(machine).conflicts)
+
+    def test_a_deny_rule_the_project_already_had_is_removed_with_ours(self):
+        """setup cannot tell its rule from the project's own identical rule; the docs say so."""
+        settings = {"permissions": {"deny": ["Read(.env)", "Read(mine)"]}}
+        self.assertEqual(hw.unmerge(settings).settings, {"permissions": {"deny": ["Read(mine)"]}})
+
+    def test_other_permission_keys_and_odd_shapes_are_left_alone(self):
+        for settings in (
+            {"hooks": "x"},
+            {"hooks": {"PreToolUse": "x"}},
+            {"permissions": []},
+            {"permissions": {"deny": "x"}},
+            {"disableAllHooks": True},
+        ):
+            with self.subTest(settings=settings):
+                result = hw.unmerge(settings)
+                self.assertEqual((result.settings, result.changes, result.conflicts), (settings, [], []))
+
+    def test_input_is_not_changed(self):
+        settings = full()
+        before = copy.deepcopy(settings)
+        hw.unmerge(settings)
+        self.assertEqual(settings, before)
+
+
 class LoadSettingsTests(unittest.TestCase):
     def test_missing_file_is_none(self):
         with tempfile.TemporaryDirectory() as tmp:

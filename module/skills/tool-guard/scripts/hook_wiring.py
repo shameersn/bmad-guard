@@ -297,3 +297,53 @@ def merge(settings: dict | None, force: bool = False, base: str | None = None) -
         else:
             result.conflicts.append("disableAllHooks is true: no hook would run")
     return result
+
+
+def _unmerge_hooks(result: Merge, force: bool) -> None:
+    hooks = result.settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event, _matcher, skill, script, _extra in HOOKS:
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
+            continue
+        want = command(skill, script)
+        stale = [cmd for _, _, cmd in _commands(groups) if cmd != want and any(m in cmd for m in MARKERS)]
+        if stale and not force:
+            result.conflicts.append(f"{event}: '{stale[0]}' looks like a bmad-guard hook but is not the expected one")
+        ours = [cmd for _, _, cmd in _commands(groups) if cmd == want or (force and cmd in stale)]
+        if not ours:
+            continue
+        _drop(groups, ours)
+        result.changes.append(f"remove hook {event} {script}")
+        if not groups:
+            del hooks[event]
+    if not hooks:
+        del result.settings["hooks"]
+
+
+def _unmerge_deny(result: Merge) -> None:
+    perms = result.settings.get("permissions")
+    deny = perms.get("deny") if isinstance(perms, dict) else None
+    if not isinstance(deny, list):
+        return
+    ours = [rule for rule in deny if rule in DENY_RULES]
+    if not ours:
+        return
+    perms["deny"] = [rule for rule in deny if rule not in DENY_RULES]
+    result.changes.extend(f"remove deny rule {rule}" for rule in dict.fromkeys(ours))
+    if not perms["deny"]:
+        del perms["deny"]
+    if not perms:
+        del result.settings["permissions"]
+
+
+def unmerge(settings: dict | None, force: bool = False) -> Merge:
+    """The opposite of `merge()` for a project's settings (a copy): take out our hook entries and deny rules. A hook
+    found by its exact command is ours; a lookalike is a conflict and stays unless `force`. A deny rule that is in
+    DENY_RULES is removed (setup cannot tell it from the project's own identical rule). Emptied containers go; nothing
+    else is touched. The result is `{}` when nothing but ours was there."""
+    result = Merge(copy.deepcopy(settings) if settings else {})
+    _unmerge_hooks(result, force)
+    _unmerge_deny(result)
+    return result
