@@ -147,6 +147,8 @@ DESTR-C2 | L1 | PreToolUse Bash | allow |                    | Control: recursiv
 SENS-1  | L1 | PreToolUse Read | block | PATH_ENV_FILE     | Read of an environment file
 SENS-2  | L1 | PreToolUse Bash | block | PATH_SSH_DIR      | cat of an SSH private key
 SENS-3  | L1 | PreToolUse Read | block | PATH_GUARD_CONFIG | Read of the guard's credential folder
+SENS-4  | L1 | PreToolUse Bash | block | PATH_GUARD_CONFIG | cat of the guard's credential file
+SENS-5  | L1 | PreToolUse Grep | block | PATH_GUARD_CONFIG | Grep in the guard's credential folder
 SENS-C1 | L1 | PreToolUse Read | allow |                   | Control: read of the environment example file
 ## Data export
 EXP-1  | L1 | PreToolUse Bash | block | EXPORT_DB_REMOTE   | pg_dump against a remote host
@@ -433,6 +435,8 @@ def stateless_calls(sb: Path) -> list[Call]:
         Call("SENS-1", "Read", {"file_path": path(".env")}),
         bash("SENS-2", "cat ~/.ssh/id_ed25519"),
         Call("SENS-3", "Read", {"file_path": "~/.config/bmad-guard/credentials"}),
+        bash("SENS-4", "cat ~/.config/bmad-guard/credentials"),
+        Call("SENS-5", "Grep", {"pattern": "key", "path": "~/.config/bmad-guard"}),
         Call("SENS-C1", "Read", {"file_path": path(".env.example")}),
         bash("EXP-1", "pg_dump -h db.example.invalid appdb"),
         bash("EXP-2", "aws s3 cp s3://example-bucket/export.csv ."),
