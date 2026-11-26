@@ -40,7 +40,7 @@ Phase 2 made the guards block on a laptop. Phase 3 makes them **usable by a pilo
 ### Stack and credentials
 
 - **D4. Hosting:** local Docker on a dev machine for the pilot. Target: company AWS, reached by VPN only (TLS through ALB + ACM). The hosting plan is written in Phase 3; building it is not.
-- **D5. Endpoint:** in the credential file `~/.config/bmad-guard/credentials`, next to the key. The environment variable `BMAD_GUARD_ENDPOINT` overrides it. With no endpoint, events only queue. Moving to the real host is one setup re-run.
+- **D5. Endpoint:** in the credential file `~/.config/bmad-guard/credentials`, next to the key and the developer id (`user`: the sender needs all three; ADR 0007). The environment variables `BMAD_GUARD_ENDPOINT`, `BMAD_GUARD_USER` and `BMAD_GUARD_KEY` override it (`BMAD_GUARD_COLLECTOR` is a deprecated alias of the endpoint for one release). With no endpoint, events only queue. Moving to the real host is one setup re-run.
 - **D6. Owner and retention:** Shameer owns the stack (keys, rotation, backups) for the pilot. An IT contact is named before the move to real hosting. Retention: 180 days; the compliance owner approves it before Gate 3 (todo).
 - **D7. Machine-level script folder:** decided in the T1 ADR. Proposal to test: `/Library/Application Support/ClaudeCode/bmad-guard/` (macOS) and `/etc/claude-code/bmad-guard/` (Linux), next to the managed settings, root-owned so the agent cannot edit them. IT copies them with the managed file; updates use the same channel.
 
@@ -104,8 +104,8 @@ The pilot starts in week 1 (D1), so its users need the docs on day 1. Today `doc
 
 Two decisions block the build tasks, so they are written first, with `/adr`.
 
-- **ADR 0007, credential storage** (Phase 1 open item 1). A per-user file outside every repo, `~/.config/bmad-guard/credentials`, mode 600, written once by the setup script, holding the key and the endpoint (D5); scripts read `BMAD_GUARD_KEY` and `BMAD_GUARD_ENDPOINT` first, then the file. Later option: the OS keychain. Not a `.env` file in the project.
-- **ADR 0008, machine-level script location** (D7).
+- **ADR 0007, credential storage** ([`docs/adr/0007-credential-storage.md`](../adr/0007-credential-storage.md); Phase 1 open item 1). A per-user file outside every repo, `~/.config/bmad-guard/credentials`, mode 600, written once by the setup script, holding the endpoint, the developer id and the key (D5); scripts read `BMAD_GUARD_ENDPOINT`, `BMAD_GUARD_USER` and `BMAD_GUARD_KEY` first, then the file. Later option: the OS keychain. Not a `.env` file in the project.
+- **ADR 0008, machine-level script location** ([`docs/adr/0008-machine-level-script-location.md`](../adr/0008-machine-level-script-location.md); D7). Status Proposed: it is tested in T5.
 
 **Done when:** both ADRs are approved by PR, with options and trade-offs.
 
@@ -124,7 +124,8 @@ Move the spike config (`spikes/collector/`) into `deploy/collector/` with pinned
 
 ### T3. Sender, credentials and queue (weeks 1–2)
 
-- Ledger's sender reads the key and the endpoint from `BMAD_GUARD_KEY` / `BMAD_GUARD_ENDPOINT`, then the credential file (T1, D5). No endpoint: queue only.
+- Ledger's sender reads the endpoint, user and key from `BMAD_GUARD_ENDPOINT` / `BMAD_GUARD_USER` / `BMAD_GUARD_KEY`, then the credential file (ADR 0007, D5). No endpoint: queue only.
+- Done early (T1 review, 2026-11-26): the `BMAD_GUARD_ENDPOINT` rename with the `BMAD_GUARD_COLLECTOR` alias, a send backoff so an unreachable collector does not stall every hook, and red-team cases for the credential folder through Bash and Grep.
 - The setup script writes the credential file once (mode 600), never into the project, and `--check` reports a missing or too open file. Setup stays idempotent.
 - `--check` warns on Windows that it is not supported (D10).
 - Sending stays best effort: a failure queues the event and never blocks a commit or a tool call.

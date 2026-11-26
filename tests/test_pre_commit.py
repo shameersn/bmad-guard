@@ -596,15 +596,17 @@ class FailClosedTests(HookTestCase):
     def test_the_hook_does_not_send_events_even_when_a_collector_is_set(self):
         self.write("src/app.py", f"token = '{KEY}'\n")
         self.stage("src/app.py")
-        env = {
-            "BMAD_GUARD_COLLECTOR": "https://collector.invalid",
-            "BMAD_GUARD_USER": "dev",
-            "BMAD_GUARD_KEY": "fake-key-for-the-test",
-        }
-        proc = self.hook(env)
-        self.assertEqual(proc.returncode, 1)
-        self.assertNotIn("could not send", proc.stderr)
-        self.assertEqual(self.codes(), ["COMMIT_SECRET"])  # queued, not sent
+        for name in ("BMAD_GUARD_ENDPOINT", "BMAD_GUARD_COLLECTOR"):  # the new name and its deprecated alias
+            with self.subTest(name=name):
+                env = {
+                    name: "https://collector.invalid",
+                    "BMAD_GUARD_USER": "dev",
+                    "BMAD_GUARD_KEY": "fake-key-for-the-test",
+                }
+                proc = self.hook(env)
+                self.assertEqual(proc.returncode, 1)
+                self.assertNotIn("could not send", proc.stderr)
+                self.assertEqual(self.codes()[-1], "COMMIT_SECRET")  # queued, not sent
 
     def test_the_hook_leaves_no_pycache_in_the_project(self):
         self.stage_plain()
