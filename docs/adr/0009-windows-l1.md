@@ -60,8 +60,8 @@ Constraints:
 **Option B — `msvcrt.locking` now.** Cons: untestable without Windows.
 
 ### Decision 5 — the git layer (L2) and line endings
-**Option A — setup on Windows skips the git layer** (no hook copy, no `core.hooksPath`, no exec bit) and says so. It writes `.gitattributes` lines (`.claude/skills/** text eol=lf` and the same for `.agents/skills` and `_bmad/custom/guard`), so the manifest hashes do not change with CRLF. This is written on all OSes, because a shared repo is cloned on Windows too.
-- Cons: an extra file in the project that setup owns; uninstall removes its lines.
+**Option A — setup on Windows skips the git layer** (no hook copy, no `core.hooksPath`, no exec bit) and says so. It writes `.gitattributes` lines (`text eol=lf`), so the manifest hashes do not change with CRLF. This is written on all OSes, because a shared repo is cloned on Windows too. The lines cover only what setup installs: one per guard skill folder in each tool folder, the guard folder, and each override file. (The first design had one broad line per tool folder. The install test showed that it makes git see BMAD's own CRLF files as modified.)
+- Cons: an extra file in the project that setup owns, and its lines change when the module adds a skill; uninstall removes them (worked out from the manifest).
 
 **Option B — normalise line endings when hashing.** Cons: changes the manifest rule on all OSes and weakens the byte check.
 
