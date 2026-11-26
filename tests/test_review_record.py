@@ -17,6 +17,7 @@ import importlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -172,6 +173,54 @@ class RecordTests(ReviewCase):
                 path.unlink(missing_ok=True)
                 self.run_record(command)
                 self.assertTrue(path.is_file())
+
+    def put_project_copy(self, tool_dir: str) -> str:
+        """A real copy (not a link) of the script in the project, as the setup script installs it."""
+        dest = self.project / tool_dir / "tool-guard/scripts/review_record.py"
+        dest.parent.mkdir(parents=True)
+        dest.write_text((ROOT / "module/skills/tool-guard/scripts/review_record.py").read_text(encoding="utf-8"))
+        return str(dest)
+
+    def test_the_project_copy_is_recognised_when_the_hook_runs_from_elsewhere(self):
+        """ADR 0008, break 1: with machine-level hooks `rr.SCRIPT` is the machine copy, but the review command names
+        the project copy (the bmad-code-review override). MACH-3."""
+        for tool_dir in (".claude/skills", ".agents/skills"):
+            with self.subTest(tool_dir=tool_dir):
+                copy = self.put_project_copy(tool_dir)
+                rel = f"{tool_dir}/tool-guard/scripts/review_record.py"
+                forms = (
+                    f'python3 "{copy}" --story 2-3 --verdict pass',
+                    f'python3 "${{CLAUDE_PROJECT_DIR}}/{rel}" --story 2-3 --verdict pass',
+                    f"python3 {rel} --story 2-3 --verdict pass",
+                )
+                for command in forms:
+                    path = self.project / REVIEW
+                    path.unlink(missing_ok=True)
+                    _, verdicts = self.run_record(command)
+                    self.assertEqual(verdicts, [], command)
+                    self.assertEqual(self.record()["sessions"], ["s-review"], command)
+                shutil.rmtree(self.project / tool_dir.split("/")[0])
+
+    def test_a_project_copy_that_is_not_there_or_sits_elsewhere_is_not_recognised(self):
+        missing = self.project / ".claude/skills/tool-guard/scripts/review_record.py"
+        self.put_project_copy(".claude/skills/other-skill")  # right file name, wrong skill folder
+        elsewhere = self.put_project_copy("docs/skills")
+        for command in (
+            f'python3 "{missing}" --story 2-3 --verdict pass',
+            f'python3 "{self.project}/.claude/skills/other-skill/tool-guard/scripts/review_record.py" '
+            "--story 2-3 --verdict pass",
+            f'python3 "{elsewhere}" --story 2-3 --verdict pass',
+        ):
+            with self.subTest(command=command):
+                self.run_record(command)
+                self.assertFalse((self.project / REVIEW).exists())
+
+    def test_another_projects_copy_is_not_recognised(self):
+        other = self.project.parent / "other-project/.claude/skills/tool-guard/scripts/review_record.py"
+        other.parent.mkdir(parents=True)
+        other.write_text("print('x')\n")
+        self.run_record(f'python3 "{other}" --story 2-3 --verdict pass')
+        self.assertFalse((self.project / REVIEW).exists())
 
     def test_a_command_that_is_not_the_one_plain_call_writes_nothing(self):
         other = self.project / "copy/review_record.py"

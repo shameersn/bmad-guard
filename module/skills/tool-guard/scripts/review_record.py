@@ -10,7 +10,8 @@ The review ends with one command, run through the Bash tool:
 Two parts live in this file:
 
 1. The hook side (`check`, registered in the PreToolUse dispatcher). When a Bash call is exactly that command (one plain
-   command, `python3`, this very script), the hook writes `_bmad-output/guard/reviews/<story>.json` itself:
+   command, `python3`, this very script or the project's copy of it), the hook writes
+   `_bmad-output/guard/reviews/<story>.json` itself:
    {"story", "reviewed_sha", "sessions", "verdict", "reviewed_at"}. The session id is the `session_id` of the hook
    input.
    The reviewed commit is `git rev-parse HEAD` of the project. The hook never reads `CLAUDE_CODE_SESSION_ID`: the model
@@ -67,6 +68,7 @@ PYTHON_RE = re.compile(r"python(3(\.\d+)?)?")
 USAGE = "usage: review_record.py --story <story id or file> --verdict pass|fail"
 SCRIPT = Path(os.path.realpath(__file__))
 ROOT_VARS = ("${CLAUDE_PROJECT_DIR}", "$CLAUDE_PROJECT_DIR")
+PROJECT_COPIES = tuple(f"{d}/skills/tool-guard/scripts/review_record.py" for d in (".claude", ".agents"))
 AGENT = f"{hc.GUARD}/PreToolUse"
 
 
@@ -132,8 +134,22 @@ def head_sha(root: Path) -> str | None:
     return sha if out.returncode == 0 and SHA_RE.fullmatch(sha) else None
 
 
+def accepted_scripts(root: Path) -> set[str]:
+    """The files a review command may name: this very script, and the project's copy of it (ADR 0008). With
+    machine-level hooks this script is the machine copy, but the bmad-code-review override tells the model to run the
+    project copy. The copy only prints a receipt (the hook writes the record), so accepting it adds no way to forge
+    one. A copy that is not a file in this project (another folder, another project) is not accepted."""
+    found = {str(SCRIPT)}
+    for rel in PROJECT_COPIES:
+        copy = root / rel
+        if copy.is_file():
+            found.add(os.path.realpath(copy))
+    return found
+
+
 def _script_arg(word: sp.Word, root: Path, cwd: str) -> bool:
-    """True when the word is a path to this very script (a literal path, or one that starts with CLAUDE_PROJECT_DIR)."""
+    """True when the word is a path to an accepted script (a literal path, or one that starts with
+    CLAUDE_PROJECT_DIR)."""
     text = word.text
     for var in ROOT_VARS:
         if text.startswith(var + "/"):
@@ -142,7 +158,7 @@ def _script_arg(word: sp.Word, root: Path, cwd: str) -> bool:
     else:
         if word.dynamic:
             return False
-    return os.path.realpath(os.path.join(cwd, text)) == str(SCRIPT)
+    return os.path.realpath(os.path.join(cwd, text)) in accepted_scripts(root)
 
 
 def record_call(command: str, root: Path, cwd: str) -> list[str] | None:
