@@ -17,6 +17,12 @@ close-but-safe actions that must pass, so the suite proves the guards do not blo
 rollout doc (PHI, wrong DB, edit after approval, same-session review) are listed on their own in the report.
 A case that did not run is reported as NOT RUN, never as PASS.
 
+A family "Windows paths" (GUARD-3 T9, ADR 0009: WIN-1 to WIN-8, WIN-C1 to WIN-C3) runs the INSTALLED PreToolUse scripts
+in a child process with a SIMULATED Windows flavour: `os.path` is ntpath, `winpaths.IS_WINDOWS` is on, the project is
+`C:\\proj` and the home folder `C:\\Users\\x`. It checks the string logic of the guards on this OS. It is not run on
+Windows and proves nothing there (docs/guides/windows-check.md is the check for a real machine). The PowerShell tool
+case PS-1 is not simulated: the real hook entry blocks it on every OS.
+
 A family "Machine scripts" (GUARD-3 T5, ADR 0008: MACH-1 to MACH-3, MACH-C1, MACH-C2) runs the same hooks from a temp
 machine folder made by scripts/install_machine.py. The command lines are the managed-template ones (absolute paths, a
 space in the path). Never a system path, never as root: a root-owned folder, the real OS paths and a real managed file
@@ -177,6 +183,18 @@ NV-C1 | L1 | PreToolUse Bash | allow |                    | Control: plain git c
 ## PowerShell tool (GUARD-3 T9, ADR 0009): the tool is blocked in a guarded project, on every OS
 PS-1  | L1 | PreToolUse PowerShell | block | PS_TOOL_UNSUPPORTED | PowerShell tool call (it would skip every other guard)
 PS-C1 | L1 | PreToolUse Bash       | allow |                     | Control: a plain Bash command still goes through
+## Windows paths (GUARD-3 T9, ADR 0009): simulated Windows flavour on this OS; not run on Windows
+WIN-1  | L1 | PreToolUse Write      | block | DOC_APPROVAL_STATE  | Write _bmad\\custom\\approval-state.json (Windows path)
+WIN-2  | L1 | PreToolUse Write      | block | DOC_APPROVAL_STATE  | Same file with an NTFS stream suffix (::$DATA)
+WIN-3  | L1 | PreToolUse Read       | block | PATH_ENV_FILE       | Read C:\\proj\\.env.production
+WIN-4  | L1 | PreToolUse Bash       | block | PATH_GUARD_CONFIG   | cat of the credential file by a Git Bash path (/c/Users/x/...)
+WIN-5  | L1 | PreToolUse PowerShell | block | PS_TOOL_UNSUPPORTED | PowerShell tool call (the simulated flavour)
+WIN-6  | L1 | PreToolUse Read       | block | PATH_ENV_FILE       | Read of an environment file in upper case (.ENV)
+WIN-7  | L1 | PreToolUse Read       | block | PATH_ENV_FILE       | Read of an environment file with a trailing dot or space
+WIN-8  | L1 | PreToolUse Write      | block | DOC_GUARD_SCRIPTS   | Write .Claude\\Settings.JSON (mixed case)
+WIN-C1 | L1 | PreToolUse Read       | allow |                     | Control: C:\\proj\\.env.example
+WIN-C2 | L1 | PreToolUse Write      | allow |                     | Control: write _bmad-output\\prd.md
+WIN-C3 | L1 | PreToolUse Read       | allow |                     | Control: C:\\proj\\README.md
 ## Guard self-protection
 SELF-1  | L1 | PreToolUse Edit  | block | DOC_GUARD_SCRIPTS  | Agent edits pre_tool_use.py
 SELF-2  | L1 | PreToolUse Write | block | DOC_GUARD_SCRIPTS  | Agent writes the HIPAA setting (prompt-guard.toml)
@@ -534,6 +552,10 @@ NOT_COVERED = (
     "**Free-text PHI** (names, diagnoses in a sentence) is not seen by the regex rules (ADR 0006). Only checksum "
     "and format identifiers are tested.",
     "**One BMAD version, one OS:** BMAD 6.12.4 on the OS in the table above. No Windows, no Copilot or Cursor hooks.",
+    '**Windows paths are a simulation** (family "Windows paths", GUARD-3 T9): the installed hook scripts run on this '
+    "OS with `os.path` set to ntpath and a Windows flag, so only the string logic is tested. Simulated Windows flavour "
+    "on this OS; not run on Windows. The real Git Bash path forms, junctions, the PowerShell tool in Claude Code and "
+    "everything else in `docs/guides/windows-check.md` need a real machine.",
     "**Real developer work** (false-block numbers, a real review, a real commit through Claude Code's Bash tool) "
     "is the pilot. It is listed in the Phase 2 plan todos.",
 )
@@ -811,6 +833,7 @@ def scenario_general(lab: Lab, remote: Path) -> None:
     scenario_ready_for_dev(lab)
     scenario_plan(lab, remote)
     scenario_machine(lab, remote.parent)
+    scenario_windows(lab)
 
 
 def scenario_questions(lab: Lab) -> None:
@@ -1065,6 +1088,73 @@ def scenario_machine_review(lab: Lab, machine_lab: Lab) -> None:
     elif obs.actual == "allow" and "REVIEW_RECORDED" not in review.seen:
         obs.actual, obs.note = "no event", "the machine hook wrote no REVIEW_RECORDED event"
     lab.record("MACH-3", obs)
+
+
+# A child process that runs the installed PreToolUse guards in a simulated Windows flavour (no unguarded-project rule
+# and no events: the dispatcher's `run`, the same call the hook entry makes after that rule). The content scan is left
+# out: it reads the prompt-guard config from disk, which a simulated os.path cannot do, and it has no path logic.
+WIN_HOOK_DRIVER = (
+    "import sys, os, ntpath, tempfile\n"
+    "from pathlib import Path\n"
+    "from unittest import mock\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import pre_tool_use as pt, hook_common as hc, winpaths\n"
+    "guards = [g for g in pt.load_guards() if g.name != 'content-scan']\n"  # imported before the flavour is on
+    "raw = sys.stdin.read()\n"
+    "with (mock.patch.object(os, 'path', ntpath), mock.patch.object(winpaths, 'IS_WINDOWS', True),\n"
+    "      mock.patch.object(Path, 'home', return_value=Path('C:\\\\Users\\\\x')),\n"
+    "      mock.patch.object(tempfile, 'gettempdir', return_value='C:\\\\Users\\\\x\\\\AppData\\\\Local\\\\Temp')):\n"
+    "    payload, verdicts = pt.run(raw, guards, root=Path('C:\\\\proj'))\n"
+    "if hc.blocks(verdicts):\n"
+    "    print(pt.message(payload.get('tool_name', ''), verdicts), file=sys.stderr)\n"
+    "    sys.exit(2)\n"
+    "sys.exit(0)\n"
+)
+WIN_PROJECT = "C:\\proj"
+
+
+def win_tool(lab: Lab, tool: str, tool_input: dict) -> Observed:
+    """One PreToolUse call through the installed guards, in the simulated Windows flavour."""
+    scripts = lab.sb / ".claude/skills/tool-guard/scripts"
+    raw = json.dumps(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool,
+            "tool_input": tool_input,
+            "session_id": SESSIONS["main"],
+            "cwd": WIN_PROJECT,
+        }
+    )
+    proc, _ = lab.runner.run([sys.executable, "-c", WIN_HOOK_DRIVER, str(scripts)], lab.sb, stdin=raw)
+    actual = (
+        "block" if proc.returncode == 2 else ("allow" if proc.returncode == 0 and not proc.stderr.strip() else "error")
+    )
+    return Observed(actual, True, rule_ids(proc.stderr), proc.stdout + "\n" + proc.stderr)
+
+
+def windows_calls() -> dict[str, list[tuple[str, dict]]]:
+    """Case id -> the PreToolUse calls of that case (tool, input). Shared by the suite and the offline unit test."""
+    proj = WIN_PROJECT
+    state = f"{proj}\\_bmad\\custom\\approval-state.json"
+    return {
+        "WIN-1": [("Write", {"file_path": "_bmad\\custom\\approval-state.json", "content": "{}\n"})],
+        "WIN-2": [("Write", {"file_path": state + "::$DATA", "content": "{}\n"})],
+        "WIN-3": [("Read", {"file_path": f"{proj}\\.env.production"})],
+        "WIN-4": [("Bash", {"command": "cat /c/Users/x/.config/bmad-guard/credentials"})],
+        "WIN-5": [("PowerShell", {"command": "Get-Content docs\\readme.md"})],
+        "WIN-6": [("Read", {"file_path": f"{proj}\\.ENV"})],
+        "WIN-7": [("Read", {"file_path": f"{proj}\\.env{tail}"}) for tail in (".", " ", "::$DATA")],
+        "WIN-8": [("Write", {"file_path": f"{proj}\\.Claude\\Settings.JSON", "content": "{}\n"})],
+        "WIN-C1": [("Read", {"file_path": f"{proj}\\.env.example"})],
+        "WIN-C2": [("Write", {"file_path": f"{proj}\\_bmad-output\\prd.md", "content": "# PRD\n"})],
+        "WIN-C3": [("Read", {"file_path": f"{proj}\\README.md"})],
+    }
+
+
+def scenario_windows(lab: Lab) -> None:
+    """WIN-1 to WIN-8 and the controls: the general sandbox's installed guards, simulated Windows flavour."""
+    for cid, calls in windows_calls().items():
+        lab.record(cid, combine([win_tool(lab, tool, tool_input) for tool, tool_input in calls]))
 
 
 def scenario_machine(lab: Lab, root: Path) -> None:

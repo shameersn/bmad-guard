@@ -21,12 +21,19 @@ three hooks through the managed-template commands from that folder, and checks t
 version-skew line. Not tested here (needs root and a real machine): root ownership, the OS paths, a real managed file;
 the checks that simulate them say so. `--machine-only` runs just this stage (git only).
 
+A fourth stage, "windows (static)" (GUARD-3 T9, ADR 0009, cases W-I1 to W-I6), needs no BMAD and no network either. It
+SIMULATES Windows on this OS (`sys.platform` is set to "win32" in a child process; Git Bash and icacls are fakes). It
+checks the Windows managed template, the setup mode (no git hooks, no core.hooksPath), the .gitattributes lines, the
+`--check` lines, the credential file and the matcher. It does not prove anything on Windows:
+docs/guides/windows-check.md is the check for a real machine. `--windows-only` runs just this stage (git only).
+
 Needs network (npx downloads bmad-method@6.12.4 and @6.11.0), Node (npx), uv and git. uv also provides
 a Python 3.11+ to read the override TOML files. Fake data only. Not part of `python3 -m unittest discover`.
 
 Usage:
     python3 scripts/install_test.py [--report docs/reports/phase-1-install-test.md] [--keep] [--skip-upgrade]
     python3 scripts/install_test.py --machine-only        # just the machine-folder stage: no BMAD, no network
+    python3 scripts/install_test.py --windows-only        # just the simulated Windows stage: no BMAD, no network
 
 Prints one PASS/FAIL line per check and a summary; exits 1 if any check fails, 2 if a tool is missing.
 Only the temp folder this script creates is deleted (unless --keep).
@@ -1253,6 +1260,119 @@ def stage_machine(runner: Runner, root: Path) -> None:
     check_machine_rollback(runner, stage, machine)
 
 
+# ---------------------------------------------------------------- windows (static) stage (ADR 0009)
+
+WINDOWS_STAGE = "Windows (static, simulated on this OS)"
+WIN_BASE = "C:/Program Files/ClaudeCode/bmad-guard"
+# A child process that thinks it is on Windows. The modules that read the platform at import (subprocess, shutil, ...)
+# are loaded first, so only the setup script's own checks see "win32". Git Bash and icacls are fakes.
+WIN_DRIVER = (
+    "import sys, subprocess, shutil, getpass, tempfile, importlib.util, json, hashlib, difflib\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import setup_guard as sg\n"
+    "sys.platform = 'win32'\n"
+    "sg.windows_report = lambda: (['ok       Git Bash and python3: simulated (not tested here)'], True)\n"
+    "sg.restrict_windows_acl = lambda folder, path: ['acl      icacls: simulated (not run here)']\n"
+    "sys.exit(sg.main(sys.argv[2:]))\n"
+)
+
+
+def windows_setup(runner: Runner, project: Path, *extra: str, env: dict | None = None):
+    cmd = [sys.executable, "-c", WIN_DRIVER, str(HERE), "--project", str(project), *extra]
+    return runner.run(cmd, project, extra_env=env)[0]
+
+
+def check_windows_template(runner: Runner, stage: str, root: Path) -> None:
+    """W-I1: the Windows template is what hook_wiring writes for `C:/Program Files/...`, PowerShell tool off."""
+    wiring = setup_guard.load_wiring(REPO)
+    proc, _ = machine_installer(runner, root, "--print-template", "windows")
+    text = (REPO / "module/managed-settings/managed-settings.windows.json").read_text(encoding="utf-8")
+    want = wiring.render(wiring.managed_settings(WIN_BASE, windows=True))
+    runner.add(
+        stage,
+        "W-I1 the windows template is what hook_wiring writes",
+        proc.returncode == 0 and proc.stdout == text == want,
+        tail(proc),
+    )
+    data = json.loads(text)
+    commands = [h["command"] for groups in data["hooks"].values() for g in groups for h in g["hooks"]]
+    ok = len(commands) == 3 and all(c.startswith(f'python3 "{WIN_BASE}/skills/') and "\\" not in c for c in commands)
+    runner.add(stage, "W-I1 the three hook commands use forward slashes and `python3`", ok, "; ".join(commands[:1]))
+    off = data.get("env", {}).get("CLAUDE_CODE_USE_POWERSHELL_TOOL") == "0"
+    runner.add(stage, "W-I1 the template turns the PowerShell tool off", off, "CLAUDE_CODE_USE_POWERSHELL_TOOL")
+
+
+def check_windows_setup(runner: Runner, stage: str, root: Path) -> Path:
+    """W-I2, W-I3, W-I4, W-I6 on one project."""
+    project = machine_project(runner, root, "w-setup", bmad=True)
+    (project / ".claude/skills").mkdir(parents=True)
+    proc = windows_setup(runner, project)
+    runner.add(stage, "W-I2 windows setup runs with no conflicts", proc.returncode == 0, tail(proc))
+    hooks_path = git(runner, project, "config", "--local", "core.hooksPath").stdout.strip()
+    no_hooks = not (project / setup_guard.HOOKS_REL).exists()
+    runner.add(
+        stage,
+        "W-I2 no git hook files and no core.hooksPath on Windows",
+        no_hooks and not hooks_path and "not installed on Windows" in proc.stdout,
+        hooks_path or ("hooks folder exists" if not no_hooks else "none set"),
+    )
+    attributes = project / ".gitattributes"
+    text = attributes.read_text(encoding="utf-8") if attributes.is_file() else ""
+    missing = [line for line in setup_guard.GITATTRIBUTES_LINES if line not in text.splitlines()]
+    runner.add(stage, "W-I3 setup wrote the .gitattributes lines", bool(text) and not missing, ", ".join(missing))
+    settings = json.loads((project / ".claude/settings.json").read_text(encoding="utf-8"))
+    matcher = settings["hooks"]["PreToolUse"][0]["matcher"].split("|")
+    runner.add(stage, "W-I6 the PreToolUse matcher includes PowerShell", "PowerShell" in matcher, "|".join(matcher))
+    proc = windows_setup(runner, project, "--check")
+    ok = proc.returncode == 0 and "not supported" not in proc.stdout and "up to date" in proc.stdout
+    ok = ok and "L2 git hooks are not installed on Windows" in proc.stdout
+    runner.add(stage, "W-I4 windows --check: Windows lines, up to date, no `not supported`", ok, tail(proc))
+    return project
+
+
+def check_windows_credentials(runner: Runner, stage: str, root: Path, project: Path) -> None:
+    """W-I5: `--credentials` on Windows writes the file under the user profile and the sender accepts it."""
+    home = root / "w-home"
+    home.mkdir()
+    key = FAKE_KEY_PROMPT
+    env = {"HOME": str(home), "USERPROFILE": str(home), "BMAD_GUARD_KEY": key}
+    cmd = [
+        sys.executable,
+        "-c",
+        WIN_DRIVER,
+        str(HERE),
+        "--credentials",
+        "--endpoint",
+        "https://collector.example.invalid",
+    ]
+    proc, _ = runner.run([*cmd, "--user", "dev-a"], root, extra_env=env)
+    path = home / ".config/bmad-guard/credentials"
+    ok = proc.returncode == 0 and path.is_file() and key in path.read_text(encoding="utf-8") and key not in proc.stdout
+    runner.add(
+        stage, "W-I5 --credentials writes the file under the user profile, and never prints the key", ok, tail(proc)
+    )
+    proc = windows_setup(runner, project, "--check", env={"HOME": str(home), "USERPROFILE": str(home)})
+    ok = proc.returncode == 0 and "problem" not in proc.stdout and "no credential file" not in proc.stdout
+    runner.add(
+        stage, "W-I5 the sender accepts what windows setup wrote (--check has no credential line)", ok, tail(proc)
+    )
+
+
+def check_windows_uninstall(runner: Runner, stage: str, project: Path) -> None:
+    """W-I3: uninstall removes the .gitattributes lines setup wrote."""
+    proc = windows_setup(runner, project, "--uninstall")
+    gone = not (project / ".gitattributes").exists()
+    runner.add(stage, "W-I3 uninstall removes the .gitattributes lines", proc.returncode == 0 and gone, tail(proc))
+
+
+def stage_windows(runner: Runner, root: Path) -> None:
+    stage = WINDOWS_STAGE
+    check_windows_template(runner, stage, root)
+    project = check_windows_setup(runner, stage, root)
+    check_windows_credentials(runner, stage, root, project)
+    check_windows_uninstall(runner, stage, project)
+
+
 def tool_versions() -> dict[str, str]:
     out = {}
     for name, cmd in (("node", ["node", "--version"]), ("uv", ["uv", "--version"]), ("git", ["git", "--version"])):
@@ -1271,9 +1391,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--machine-only", action="store_true", help="only the machine-folder stage (ADR 0008): no BMAD, no network"
     )
+    parser.add_argument(
+        "--windows-only",
+        action="store_true",
+        help="only the simulated Windows stage (ADR 0009): no BMAD, no network",
+    )
     args = parser.parse_args(argv)
 
-    needed = ("git",) if args.machine_only else ("npx", "uv", "git")
+    only = args.machine_only or args.windows_only
+    needed = ("git",) if only else ("npx", "uv", "git")
     missing = [tool for tool in needed if not shutil.which(tool)]
     if missing:
         print(f"install test: missing tool(s): {', '.join(missing)}", file=sys.stderr)
@@ -1285,11 +1411,14 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     print(f"sandboxes in {root}", flush=True)
     try:
-        if not args.machine_only:
+        if not only:
             stage_fresh(runner, root, guard_skills)
             if not args.skip_upgrade:
                 stage_upgrade(runner, root, guard_skills)
-        stage_machine(runner, root)
+        if not args.windows_only:
+            stage_machine(runner, root)
+        if not args.machine_only:
+            stage_windows(runner, root)
     finally:
         total = time.monotonic() - started
         if not args.keep:

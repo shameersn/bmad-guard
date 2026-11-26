@@ -279,6 +279,35 @@ class MachineStageTests(unittest.TestCase):
             self.assertIn(case, names)
 
 
+class WindowsStageTests(unittest.TestCase):
+    """The simulated Windows stage (W-I1 to W-I6, ADR 0009) needs no BMAD and no network, so it runs here too."""
+
+    def test_every_check_of_the_windows_stage_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(os.path.realpath(tmp))
+            runner = it.Runner(root / "commands.log")
+            it.stage_windows(runner, root)
+        failed = [f"{c.name}: {c.detail}" for c in runner.checks if not c.ok]
+        self.assertEqual(failed, [])
+        names = " ".join(c.name for c in runner.checks)
+        for case in ("W-I1", "W-I2", "W-I3", "W-I4", "W-I5", "W-I6"):
+            self.assertIn(case, names)
+
+    def test_the_stage_says_it_is_a_simulation(self):
+        self.assertIn("simulated", it.WINDOWS_STAGE)
+
+    def test_windows_only_needs_just_git(self):
+        err = io.StringIO()
+        with (
+            mock.patch.object(it.shutil, "which", return_value=None),
+            mock.patch.object(it.tempfile, "mkdtemp") as mkdtemp,
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertEqual(it.main(["--windows-only"]), 2)
+        mkdtemp.assert_not_called()
+        self.assertIn("missing tool(s): git", err.getvalue())
+
+
 class RunnerTests(unittest.TestCase):
     """Runner.run: the environment of a sandbox command (extra_env is used by scripts/red_team.py)."""
 
