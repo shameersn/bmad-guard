@@ -4,6 +4,7 @@
 - **Date:** 2026-11-26
 - **Project:** Other (Experion, Guarded BMAD pilot)
 - **Deciders:** Shameer (architect), Manesh G; team approval by PR
+- **Review:** Shameer accepted the recommended answers on 2026-11-26: rename to `BMAD_GUARD_ENDPOINT` with a one-release alias; `user` in the file; a too open file is refused; key delivery by a one-time share from the password manager.
 
 ## Context
 ADR 0003 gives each developer one ingest key. The collector stamps the user from that key, so the key must stay secret. The key is not a database credential: it only lets a client send events.
@@ -151,7 +152,7 @@ Red-team additions (T3, T8): keep SENS-3 green, and add a case for `cat` of the 
 ### Issuing and rotating the key (D6)
 - Shameer owns the stack, the keys and the rotation for the pilot. An IT contact is named before the move to real hosting.
 - Issue: generate a random key, add its **bcrypt** hash to the collector's htpasswd file (the spike's salted SHA1 is too weak; ADR 0003 follow-up, T2), give the developer id and the key to the developer, and reload the collector.
-- Delivery: once, by a channel that does not keep history (not chat, not e-mail). Which channel Experion uses is an open question for Shameer.
+- Delivery: once, by a channel that does not keep history (not chat, not e-mail). Decided (2026-11-26): a one-time share from the team password manager. Which tool Experion uses is to be confirmed by Shameer.
 - The developer writes the file with the setup script. The key is read from the prompt or from one environment variable for that run, never from a command-line argument (shell history, `ps`).
 - Rotate: issue a new key for the same developer id, replace the hash, reload the collector, and the developer re-runs the setup script. The user stamp keeps the same id, so history stays continuous. Until the new key is in the file, the sender gets HTTP 401 and keeps events in the queue (spike test 3 and 4). They drain later.
 - Leave or compromise: delete the htpasswd line. Look at the events stamped with that id since the suspected date.

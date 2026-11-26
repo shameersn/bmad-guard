@@ -4,6 +4,7 @@
 - **Date:** 2026-11-26
 - **Project:** Other (Experion, Guarded BMAD pilot)
 - **Deciders:** Shameer (architect), Manesh G; team approval by PR
+- **Review:** Shameer accepted the recommended answers on 2026-11-26: allow everything in an unguarded project for the pilot; the setup manifest is the marker; one managed template per OS; a separate `install_machine.py`; `review_record.py` accepts the project copy (T5, case MACH-3); the managed `Edit` deny is deferred.
 
 ## Context
 Managed settings (ADR 0002, `docs/managed-settings-rollout.md`) lock the hook entries, but the entries point into the project. Each command is:
@@ -137,7 +138,7 @@ Found by reading the code, not by running it (marked "not run").
 | 3 | `managed-settings.json:8,19,31`; `tests/test_hook_wiring.py:275-286` | The template holds the project-path commands. | One template per OS (above); the test runs for each. |
 | 4 | `session_start.py:41-45` | `MANAGED_DIRS` is defined here only. The installer, the template test and `--check` need the same folders. | Define the machine base once in `hook_wiring.py`. |
 | 5 | `pre_tool_use.py:135-148`, `prompt_guard_hook.py:76-88`, `session_start.py:109-133` | A project with no guard still runs every guard. The write gate would block every source write there (no plan). (not run) | The "unguarded project" rule below. |
-| 6 | `document_guard.py:55-58,100-101`, `bash_write_guard.py:54-59` | They protect the **project** copies of the guard skills. They do not protect the machine folder, and paths outside the project are not gated (`guard-rules.md:176`). | Nothing to change for L1: the OS protects the machine folder. The project copies still matter for L2, so the zones stay. Optional: a managed `Edit` deny for the machine folder as a second layer (not verified). |
+| 6 | `document_guard.py:55-58,100-101`, `bash_write_guard.py:54-59` | They protect the **project** copies of the guard skills. They do not protect the machine folder, and paths outside the project are not gated (`guard-rules.md:176`). | Nothing to change for L1: the OS protects the machine folder. The project copies still matter for L2, so the zones stay. A managed `Edit` deny for the machine folder as a second layer: deferred (2026-11-26), its syntax is not verified. |
 | 7 | `guard_hook_lib.py:27,101-107` | The git hooks load skills from the project only. | Unchanged: L2 stays per project (below). |
 | 8 | Python bytecode | The machine folder is not writable by the user, so Python cannot write `__pycache__` and compiles the scripts on each run. We measured 0.07 to 0.13 s per `PreToolUse` call with the cache off (Python 3.13, a Read call in a scratch project). The timeout is 10 s. Not measured on a pilot Mac with Python 3.10. | Measure in T5. If slow, the installer can pre-compile (`.pyc` are Python-version specific). |
 | 9 | `scripts/install_test.py:349,364-391,631,792,830`; `scripts/red_team.py:449,464,869` | They test the project copies under `.claude/skills`. | New machine stage (below). |
@@ -164,7 +165,7 @@ Today it gets a block on every tool call (problem 1). With machine scripts the s
 **Risk of the rule:**
 - Whoever removes `_bmad/custom/guard/manifest.json` (or `_bmad/`) turns the L1 guards off for that project. The file tools and literal shell targets are blocked (`DOC_GUARD_SCRIPTS`). `python3 -c` and a script file are not seen. This is the same known limit as for every other guard (ADR 0002 accepts bypass). The report "commits with no guard events" (T4) is the check.
 - A BMAD project where nobody ran setup has **no L1 guard** under this rule, only the managed deny rules (they are path-based and work in every project). The developer sees the one-line notice. IT sees it in the same report. This is a deliberate choice for the rollout: friction is worse than a visible gap while the pilot is small.
-- Prompts and commands in an unguarded project are not checked at all (secrets in prompts, `git push --force`, `rm -rf`). Running the command guard and the prompt guard in every project was considered and not chosen: those projects did not ask for the guard, and the first false block there would end the rollout. Open question for Shameer.
+- Prompts and commands in an unguarded project are not checked at all (secrets in prompts, `git push --force`, `rm -rf`). Running the command guard and the prompt guard in every project was considered and not chosen: those projects did not ask for the guard, and the first false block there would end the rollout. Decided (2026-11-26): allow everything in the pilot; look again after the pilot.
 - When IT later wants every BMAD project guarded, the second row changes from "allow" to "block with the setup message". One line of code; not built now.
 - A project with `_bmad/` in a sub-folder (a monorepo) is "not a BMAD project" for this rule. The write gate already assumes `_bmad-output/` at the project root.
 
