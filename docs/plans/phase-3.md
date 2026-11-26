@@ -160,6 +160,15 @@ Move the spike config (`spikes/collector/`) into `deploy/collector/` with pinned
 
 **Done when:** one throwaway session shows events from the guards and from Claude Code in Grafana (local Docker stack), with the user from the key and no prompt text; both reports run on test data.
 
+**Built (T4), 2026-11-26** (branch `feature/GUARD-3-telemetry`; not yet reviewed; Gate items not ticked):
+
+- **Telemetry settings:** the managed template has an `env` block (logs `otlp`, metrics `none`, `http/json`, endpoint placeholder, the five content switches `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, `OTEL_LOG_RAW_API_BODIES` all `0`, account ids off) and `otelHeadersHelper`. The key is not in the file: `otel_headers.py` (Ledger) prints the `Authorization` header from the developer's own key (env, then the credential file), so `user` is stamped per developer. Names checked in the Claude Code docs. `hook_wiring.py` and `session_start.py` did not change (they check hooks and deny rules only). Decision: `setup_guard.py` does **not** write telemetry settings to the project: the docs say a repository's settings ignore the OTel exporter variables, and a key in a project file is the risk ADR 0007 avoids. Details: `docs/managed-settings-rollout.md`.
+- **Scrub list** widened and dated in `deploy/collector/README.md` ("Scrub list"): also `user.id`, `organization.id`, `workspace.host_paths` and (resource) `host.name`, `host.id`. `session.id` and `terminal.type` stay.
+- **Dashboard:** panels for blocks per rule, warnings per rule and Claude Code events by name (`Body`), next to events per user and verdict. All plain `SELECT`s through `grafana_reader`.
+- **Reports:** `deploy/collector/reports/guard_reports.py` (`commits`, `reviews`), standard library, read-only HTTP queries. They live next to the stack, not in `module/` (they need the reader's password and run where the stack runs). Match keys, chosen in the update of ADR 0003: pre-commit events carry `tree` (the staged tree id), `REVIEW_RECORDED` carries the record's path and file hash. A tree with only block events is `blocked-only`, not seen. What they cannot see is in the README ("Audit reports").
+- **Tests:** `tests/test_guard_reports.py`, `tests/test_otel_headers.py`, `TreeTests` in `tests/test_pre_commit.py`, additions in `tests/test_review_record.py` and `tests/test_collector_keys.py`. Live script: `deploy/collector/run_telemetry_live.py` (40 checks pass). Report: `docs/reports/phase-3-telemetry.md`.
+- **Not done / not verified:** the managed file was not deployed (needs admin; T5's rollout test, new step 9); the helper's machine-level path is the proposed ADR 0008 folder; `OTEL_METRICS_INCLUDE_ACCOUNT_UUID` for logs; pre-commit events reach ClickHouse only when a later tool call (or `flush`) sends the queue.
+
 ### T5. Machine-level scripts and the managed-settings pilot (week 3)
 
 The Phase 2 todo lists "Before the managed file goes on any pilot machine" and "Before the full IT rollout" are the source of this task.

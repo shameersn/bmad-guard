@@ -15,6 +15,7 @@ Claude Code applies managed settings above every other settings file. A develope
 |---|---|
 | `hooks` | The three guard hooks: `SessionStart` (setup check), `UserPromptSubmit` (prompt-guard), `PreToolUse` (tool-guard dispatcher). Same commands as the project wiring. |
 | `permissions.deny` | The sensitive-path deny rules (table below). Deny rules cannot be overridden by allow rules. |
+| `env`, `otelHeadersHelper` | Claude Code telemetry to the guard collector (GUARD-3 T4; see "Claude Code telemetry" below). |
 | `allowManagedHooksOnly: true` | Only managed hooks run. User, project, local and plugin hooks are switched off, so a developer cannot turn the guard hooks off with `disableAllHooks` in a lower file. |
 
 The deny rules come from one list (`SENSITIVE_PATHS` in `hook_wiring.py`); the `PreToolUse` path guard matches the same list and reports the rule id. Each rule is written `Read(<pattern>)`; a Read deny also blocks Edit and Write on the same path.
@@ -31,6 +32,46 @@ The deny rules come from one list (`SENSITIVE_PATHS` in `hook_wiring.py`); the `
 | `PATH_GUARD_CONFIG` | `~/.config/bmad-guard/**` | |
 
 The JSON file cannot hold comments, so these tables are the explanation. The test `tests/test_hook_wiring.py` checks that the template and `hook_wiring.py` (used by the setup script) stay equal.
+
+## Claude Code telemetry (GUARD-3 T4)
+
+The `env` block and `otelHeadersHelper` send Claude Code's own events to the guard collector (`deploy/collector/`). Names
+and values were checked against the Claude Code monitoring docs (<https://code.claude.com/docs/en/monitoring-usage>)
+and a live run of Claude Code 2.1.332 against the local stack (`docs/reports/phase-3-telemetry.md`).
+
+| Key | Value | Why |
+|---|---|---|
+| `CLAUDE_CODE_ENABLE_TELEMETRY` | `1` | Required. |
+| `OTEL_LOGS_EXPORTER` | `otlp` | Events go to the collector's logs pipeline. |
+| `OTEL_METRICS_EXPORTER` | `none` | The collector has no metrics pipeline or table. Turn on only after building them. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/json` | What the spike and the live check used. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `https://REPLACE-WITH-COLLECTOR-HOST` | **IT replaces this** with the real collector URL (no path: Claude Code adds `/v1/logs`). Left as is, exports fail quietly. |
+| `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, `OTEL_LOG_RAW_API_BODIES` | `0` | Content switches, all explicitly off (they default to off). All five are in the docs for 2.1.332; `OTEL_LOG_TOOL_DETAILS` would put Bash commands in events. Checked live: `prompt`, `prompt_text` and `response` hold `<REDACTED>` or nothing. |
+| `OTEL_METRICS_INCLUDE_ACCOUNT_UUID` | `false` | Account ids off at the source. The docs name it for metrics; whether logs follow is **not verified**. The collector deletes them either way. |
+| `otelHeadersHelper` | `python3 ".../bmad-guard/otel_headers.py"` | Prints the `Authorization` header from the developer's own credential file or environment. |
+
+**No key in the managed file.** The file is the same for every developer and any local user can read it. A static
+`OTEL_EXPORTER_OTLP_HEADERS` would be one shared key, so every event would carry the same `user`. The helper reads each
+developer's own key (ADR 0007), so the collector stamps the right user. A machine with no credentials gets "otelHeadersHelper
+failed" in `/status` and sends nothing.
+
+**Helper path (open).** The template uses the proposed machine-level folder from ADR 0008
+(`/Library/Application Support/ClaudeCode/bmad-guard/` on macOS, `/etc/claude-code/bmad-guard/` on Linux: change the path
+in the file for Linux). The folder must hold `otel_headers.py` and `guard_events.py` from
+`module/skills/agent-project-logger/scripts/`. T5 builds the install; until then IT copies the two files by hand.
+Not verified: that the helper runs from a path with a space on macOS under managed settings (the live check ran the
+helper from a project path through `--settings`, which worked).
+
+**Not tested through the managed file.** The live check set the same variables in the child's environment and gave the
+helper through `claude --settings <file>`. The managed-file route itself is T5's rollout test (new step 9 below).
+
+**Why the setup script does not write this to the project.** Decision: no, for the pilot.
+- The docs say a repository's `.claude/settings.json` and `settings.local.json` **ignore the OTel exporter variables**, so
+  it would not work for the endpoint and protocol.
+- A static key in a project file is committed by accident and read by the agent. The helper avoids that, but it is
+  only safe in the machine-level folder where the agent cannot edit it.
+- Without managed settings, a developer who wants Claude Code telemetry sets the same variables in the shell for that run
+  (this is what the live check does). Guard events do not depend on any of this.
 
 ## Read this before rolling out
 
@@ -66,6 +107,8 @@ Use a throwaway git project with fake data, not a real project.
 6. **Hook runs:** in the test project run `git config --local --unset core.hooksPath`, start a new session. A warning from `[tool-guard]` must appear at the start. Restore it with `git config --local core.hooksPath _bmad/custom/guard/hooks`. The event `SETUP_INCOMPLETE` is in `.bmad-guard/events/queue.jsonl`.
 7. **No module:** start Claude Code in a folder where the module is not installed. Expect every tool call to be blocked with a message (limit 1 above). This is the reason for a pilot group first.
 8. **Command and path guards (T2):** in the test project ask Claude to run `git push --force` (use a project with no remote, so nothing can happen). Expect a block with `CMD_GIT_FORCE_PUSH (command-guard)` in the message and a `block` event in `.bmad-guard/events/queue.jsonl` that has the rule id and no command text. Then ask it to run `git push` and to read `.env.example`: both must be allowed. Note whether Claude shows the message and stops, or tries another command.
+
+9. **Telemetry (T4):** replace the endpoint placeholder in the deployed file, put `otel_headers.py` and `guard_events.py` in the helper folder, give the developer credentials (`setup_guard.py --credentials`), run `claude -p "say ok"` in the test project. In ClickHouse (or the Grafana panel "Claude Code events by name") there must be `claude_code.*` events with the developer's `user` and no prompt text. With no credentials, `/status` shows "otelHeadersHelper failed" and nothing is sent.
 
 Write down the Claude Code version and the result of each step.
 

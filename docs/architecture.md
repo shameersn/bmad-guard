@@ -245,7 +245,7 @@ The agent cannot write `approval-state.json` (`DOC_APPROVAL_STATE`), the build a
 
 Every guard decision is one event in the local queue (JSON lines). Today events **stay on the laptop**: with no collector set, they only queue and nothing is sent. Leave `BMAD_GUARD_ENDPOINT` unset in the pilot (`BMAD_GUARD_COLLECTOR` is its old name, still read for one release). When a collector is set and cannot be reached, the guards try again only after 5 minutes, so hooks do not slow down.
 
-**What an event holds:** the guard, the stage, the verdict (`allow`, `warn`, `block`, `info`), the **rule id**, the tool name, the **session id**, and a few counts or short codes. Warden, Sentry, the ready-for-dev gate and the commit approval check also record the project-relative path and the SHA-256 of the document.
+**What an event holds:** the guard, the stage, the verdict (`allow`, `warn`, `block`, `info`), the **rule id**, the tool name, the **session id**, and a few counts or short codes. Warden, Sentry, the ready-for-dev gate and the commit approval check also record the project-relative path and the SHA-256 of the document. Since GUARD-3 T4, every pre-commit event also carries `tree` (the id of the staged tree, a hash), and `REVIEW_RECORDED` carries the record's path and the SHA-256 of the record file. The audit reports match on these (ADR 0003, update of 2026-11-26).
 
 Real example (fake session):
 
@@ -275,7 +275,8 @@ Dashed boxes are **planned** (Phase 3, T2 to T4; [ADR 0003](adr/0003-event-loggi
 - The collector takes the user from the developer's ingest key. The event cannot fake it.
 - No database credentials on laptops. The writer can only insert.
 - The key lives in `~/.config/bmad-guard/credentials` (mode 600, written by `setup_guard.py --credentials`), which the agent cannot read (`PATH_GUARD_CONFIG`). The sender uses the file only when it is safe (regular file, yours, no group or other access).
-- Two reports: commits with no guard events, and review records with no `REVIEW_RECORDED` event.
+- Two reports (built in T4, `deploy/collector/reports/guard_reports.py`): commits with no guard events (match by `tree`), and review records with no `REVIEW_RECORDED` event (match by the record file's SHA-256). What they can and cannot see is in `deploy/collector/README.md`, "Audit reports".
+- Claude Code's own telemetry goes to the same collector, set by managed settings (`docs/managed-settings-rollout.md`). Prompts, responses and tool details stay off; the collector deletes personal attributes (`deploy/collector/README.md`, "Scrub list").
 
 ## 9. Fail-closed behaviour
 
