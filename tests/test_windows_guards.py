@@ -14,7 +14,7 @@ import importlib
 import unittest
 from pathlib import Path
 
-from tests.windows_flavour import HOME, windows
+from tests.windows_flavour import HOME, POSIX_ONLY, windows
 
 pg = importlib.import_module("path_guard")
 dg = importlib.import_module("document_guard")
@@ -171,6 +171,7 @@ class WindowsPathGuardTests(unittest.TestCase):
             verdicts = pg.check(call("Read", {"file_path": ".aws\\config"}, cwd="/c/Users/tester"), ROOT)
         self.assertEqual([v.code for v in verdicts], ["PATH_AWS_DIR"])
 
+    @POSIX_ONLY
     def test_the_same_texts_on_this_os_do_not_change(self):
         """Control: off Windows the Windows forms are not special. `C:\\proj\\.env.local` is one odd file name here."""
         for path in ("C:\\proj\\.env.local", "/c/Users/tester/.aws/config", "$USERPROFILE/.aws/config", "\\\\.\\x"):
@@ -272,6 +273,7 @@ class WindowsDocumentGuardTests(unittest.TestCase):
             verdicts = dg.check(call("Write", {"file_path": "C:\\PROJ\\.Claude\\settings.json", "content": "{}"}), ROOT)
         self.assertIn(".claude/settings.json", verdicts[0].reason)
 
+    @POSIX_ONLY
     def test_the_same_texts_on_this_os_do_not_change(self):
         """Control: off Windows these are odd file names, not the protected files. Only the plain POSIX forms count."""
         for path in ("_bmad\\custom\\approval-state.json", "/c/proj/_bmad/custom/guard/manifest.json"):
@@ -356,6 +358,7 @@ class WindowsBashWriteGuardTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.codes(command), [])
 
+    @POSIX_ONLY
     def test_the_same_commands_on_this_os_do_not_change(self):
         """Control: off Windows a Git Bash path is an ordinary folder, a backslash is an ordinary character."""
         root = Path("/work")
@@ -429,6 +432,7 @@ class WindowsCommandGuardTests(unittest.TestCase):
         self.assertEqual(self.codes("git reset --hard HEAD~1"), ["CMD_GIT_RESET_HARD"])
         self.assertEqual(self.codes("git status"), [])
 
+    @POSIX_ONLY
     def test_the_same_commands_on_this_os_do_not_change(self):
         """Control: off Windows `/tmp` is the system scratch folder, and a Git Bash path is an ordinary folder."""
         root = Path("/work")
@@ -533,6 +537,7 @@ class WindowsWriteGateTests(unittest.TestCase):
         self.assertTrue(self.bash("echo x > a.py", cwd="/c/proj/src"))
         self.assertFalse(self.bash("echo x > a.md", cwd="/c/proj/docs"))
 
+    @POSIX_ONLY
     def test_the_same_texts_on_this_os_do_not_change(self):
         """Control: off Windows a Git Bash path is outside the project, and `C:\\proj\\src\\app.py` is one odd file
         name in the project folder."""
@@ -561,6 +566,7 @@ class WindowsShellParseTests(unittest.TestCase):
                 with self.subTest(text=text):
                     self.assertEqual(sp.base_name(text), want)
 
+    @POSIX_ONLY
     def test_base_name_off_windows_is_what_it_was(self):
         for text, want in (
             ("/bin/rm", "rm"),
@@ -611,6 +617,7 @@ class WindowsContentScanTests(unittest.TestCase):
             self.assertEqual(cs.bash_texts("echo hello > notes.txt", PROJECT), ["hello"])
             self.assertEqual(cs.bash_texts("echo hello > null", PROJECT), ["hello"])  # only nul
 
+    @POSIX_ONLY
     def test_off_windows_nul_is_an_ordinary_file(self):
         self.assertEqual(cs.bash_texts("echo hello > nul", "/work"), ["hello"])
         self.assertEqual(cs.bash_texts("echo hello > /dev/null", "/work"), [])

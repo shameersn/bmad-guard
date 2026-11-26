@@ -18,6 +18,7 @@ from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 import tests.test_install_machine as tim
+from tests.windows_flavour import POSIX_ONLY
 
 im, wiring, ROOT = tim.im, tim.wiring, tim.ROOT
 VERSION = tim.VERSION
@@ -187,6 +188,7 @@ class WindowsInstallTests(tim.Base):
         self.assertIn("PermissionError", err)
         self.assertEqual((self.target / "VERSION").read_text(encoding="utf-8"), before)
 
+    @POSIX_ONLY
     def test_off_windows_a_rename_is_not_retried(self):
         with (
             mock.patch.object(im, "on_windows", return_value=False),
@@ -320,6 +322,7 @@ class WindowsMainTests(tim.Base):
         with mock.patch.dict(sys.modules, {"ctypes": fake}):
             self.assertFalse(im.is_admin())
 
+    @POSIX_ONLY
     def test_privileged_and_euid_off_windows_are_the_posix_ones(self):
         self.assertEqual(im.euid(), os.geteuid())
         self.assertEqual(im.privileged(), os.geteuid() == 0)

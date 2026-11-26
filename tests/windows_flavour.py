@@ -15,6 +15,7 @@ import ntpath
 import os
 import sys
 import tempfile
+import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -24,6 +25,7 @@ if str(SCRIPTS) not in sys.path:
 
 import winpaths  # noqa: E402 - found through the sys.path line above
 
+POSIX_ONLY = unittest.skipIf(sys.platform == "win32", "a control for the behaviour off Windows")
 HOME = "C:\\Users\\tester"
 TEMP = "C:\\Users\\tester\\AppData\\Local\\Temp"
 

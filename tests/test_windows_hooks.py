@@ -21,6 +21,7 @@ from unittest import mock
 
 from tests.guard_harness import ROOT, GuardTestCase, queue
 from tests.test_tool_guard import hc, hw, pt, ss
+from tests.windows_flavour import POSIX_ONLY
 
 PROMPT_SCRIPTS = ROOT / "module/skills/prompt-guard/scripts"
 if str(PROMPT_SCRIPTS) not in sys.path:
@@ -56,6 +57,7 @@ class SessionStartOnWindowsTests(GuardTestCase):
             code = ss.entry()
         return code, out.getvalue(), err.getvalue()
 
+    @POSIX_ONLY
     def test_a_project_with_no_git_hooks_path_warns_off_windows(self):
         """Control: the same project warns on macOS and Linux (core.hooksPath is not set)."""
         self.assertIn("core.hooksPath", json.loads(self.start()[1])["systemMessage"])
@@ -169,6 +171,7 @@ class ProjectRootOnWindowsTests(GuardTestCase):
                     ):
                         self.assertEqual(str(copy.project_root()), want, text)
 
+    @POSIX_ONLY
     def test_off_windows_the_project_dir_is_used_as_it_is(self):
         for copy in (hc, pc):
             with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": "/c/Users/x/proj"}):

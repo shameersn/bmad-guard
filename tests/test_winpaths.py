@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests.windows_flavour import HOME, TEMP, windows, winpaths
+from tests.windows_flavour import HOME, POSIX_ONLY, TEMP, windows, winpaths
 
 
 class NativeTests(unittest.TestCase):
@@ -45,6 +45,7 @@ class NativeTests(unittest.TestCase):
             self.assertFalse(winpaths.is_device("\\\\?\\C:\\x"))
             self.assertFalse(winpaths.is_device("C:\\x"))
 
+    @POSIX_ONLY
     def test_posix_is_unchanged(self):
         for text in ("/c/Users/x", "/cygdrive/c/x", "/tmp/a", "\\\\.\\PhysicalDrive0"):
             with self.subTest(text=text):
@@ -70,6 +71,7 @@ class StripTests(unittest.TestCase):
                 with self.subTest(text=text):
                     self.assertEqual(winpaths.strip_win_tricks(text), want)
 
+    @POSIX_ONLY
     def test_posix_is_unchanged(self):
         for text in ("/p/x.", "/p/x::$DATA", "/p/.env ", "\\\\?\\x"):
             with self.subTest(text=text):
@@ -93,6 +95,7 @@ class KeyTests(unittest.TestCase):
                 with self.subTest(text=text):
                     self.assertEqual(winpaths.key(text), want)
 
+    @POSIX_ONLY
     def test_posix_key_keeps_case(self):
         self.assertEqual(winpaths.key("/proj/./Docs/../X"), "/proj/X")
 
@@ -112,6 +115,7 @@ class NameTests(unittest.TestCase):
                 with self.subTest(text=text):
                     self.assertEqual(winpaths.name_of(text), want)
 
+    @POSIX_ONLY
     def test_posix_splits_on_slash_only(self):
         self.assertEqual(winpaths.name_of("/p/.env/"), ".env")
         self.assertEqual(winpaths.name_of("a\\.env"), "a\\.env")
@@ -119,6 +123,7 @@ class NameTests(unittest.TestCase):
 
 
 class SmallHelperTests(unittest.TestCase):
+    @POSIX_ONLY
     def test_fold_is_normal_and_lower_case_on_windows_and_nothing_on_posix(self):
         with windows():
             self.assertEqual(winpaths.fold("C:\\Proj/_BMAD\\x\\..\\y"), "c:\\proj\\_bmad\\y")
@@ -147,6 +152,7 @@ class StartDirTests(unittest.TestCase):
                 with self.subTest(cwd=bad):
                     self.assertEqual(winpaths.start_dir(bad, "ROOT"), "ROOT")
 
+    @POSIX_ONLY
     def test_posix_is_what_the_guards_did_before(self):
         self.assertEqual(winpaths.start_dir("/p/sub", "ROOT"), "/p/sub")
         for bad in ("", None, 5, "sub", "C:\\x"):
@@ -182,6 +188,7 @@ class ExpandHomeTests(unittest.TestCase):
         with windows(env={"APPDATA": ""}):
             self.assertEqual(winpaths.expand_home("$APPDATA\\x", HOME), "$APPDATA\\x")
 
+    @POSIX_ONLY
     def test_posix_expands_only_the_old_forms(self):
         for text, want in (
             ("~", "/h"),

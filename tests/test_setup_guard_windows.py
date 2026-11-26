@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 import tests.test_setup_guard as t
+from tests.windows_flavour import POSIX_ONLY
 
 sg = t.sg
 HOOK = "_bmad/custom/guard/hooks/pre-commit"
@@ -70,6 +71,7 @@ class WindowsPlanTests(t.Base):
         self.assertIn("up to date", out)
         self.assertEqual(self.go()[1].count("create"), 0)
 
+    @POSIX_ONLY
     def test_off_windows_the_hooks_are_still_installed(self):
         """Control: the same module on this OS copies the hook and sets core.hooksPath."""
         t.run(self.project, self.module)
@@ -334,6 +336,7 @@ class WindowsCredentialsTests(t.FakeHomeMixin, unittest.TestCase):
         self.assertIn("link or junction", lines[0])
         self.assertTrue(lines[0].startswith("problem"))
 
+    @POSIX_ONLY
     def test_off_windows_icacls_is_never_run(self):
         out = io.StringIO()
         with (

@@ -20,6 +20,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest import mock
 
+from tests.windows_flavour import POSIX_ONLY
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "module/skills/agent-project-logger/scripts"
 spec = importlib.util.spec_from_file_location("guard_events", SCRIPTS / "guard_events.py")
@@ -545,6 +547,7 @@ class WindowsCredentialFileTests(CredentialFileTests):
 
 
 class PosixCredentialPathTests(unittest.TestCase):
+    @POSIX_ONLY
     def test_home_wins_and_userprofile_is_ignored_off_windows(self):
         env = {"HOME": "/h", "USERPROFILE": "/u"}
         self.assertEqual(ge.credentials_path(env), Path("/h") / ge.CREDENTIALS_REL)
