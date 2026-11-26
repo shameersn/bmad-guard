@@ -1,5 +1,6 @@
 # Collector config (from the T3 spike, hardened in GUARD-3 T2).
 # - basicauth/server: one htpasswd line per developer (user = developer id, password = ingest key). Hashes are bcrypt (keys.py).
+# - Logs and metrics use the same chain: auth, user stamp, scrub.
 # - attributes/who: overwrite the "user" attribute with the authenticated user. Clients cannot fake it.
 # - clickhouse: insert-only DB user; the admin creates the schema (create_schema: false).
 extensions:
@@ -62,6 +63,8 @@ exporters:
     username: otel_writer
     password: ${env:CLICKHOUSE_WRITER_PASSWORD}
     logs_table_name: guard_events
+    # Metrics go to guard.otel_metrics_sum / otel_metrics_gauge (the exporter's default names), created by
+    # clickhouse/init/02-metrics.sh. The writer has INSERT only, so the exporter must not create anything.
     create_schema: false
     timeout: 10s
     retry_on_failure:
@@ -71,6 +74,12 @@ service:
   extensions: [basicauth/server, health_check]
   pipelines:
     logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/who, attributes/scrub, resource/scrub, batch]
+      exporters: [clickhouse]
+    # Same receiver (so the same basic auth), the same user stamping and scrub. The attributes processor works on
+    # datapoint attributes for metrics; resource/scrub works on the resource.
+    metrics:
       receivers: [otlp]
       processors: [memory_limiter, attributes/who, attributes/scrub, resource/scrub, batch]
       exporters: [clickhouse]

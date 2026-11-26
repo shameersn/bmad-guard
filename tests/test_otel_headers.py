@@ -74,11 +74,12 @@ class TemplateTelemetryTests(unittest.TestCase):
         cls.template = json.loads(TEMPLATE.read_text())
         cls.env = cls.template["env"]
 
-    def test_logs_go_out_as_otlp_http_json_and_metrics_stay_off(self):
+    def test_logs_and_metrics_go_out_as_otlp_http_json_with_delta_sums(self):
         env = self.env
         self.assertEqual(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1")
         self.assertEqual(env["OTEL_LOGS_EXPORTER"], "otlp")
-        self.assertEqual(env["OTEL_METRICS_EXPORTER"], "none")  # the collector has a logs pipeline only
+        self.assertEqual(env["OTEL_METRICS_EXPORTER"], "otlp")  # the collector has a metrics pipeline (T4)
+        self.assertEqual(env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"], "delta")  # the panels sum values
         self.assertEqual(env["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/json")
 
     def test_every_content_switch_is_explicitly_off(self):
@@ -96,8 +97,17 @@ class TemplateTelemetryTests(unittest.TestCase):
         self.assertNotIn("OTEL_EXPORTER_OTLP_HEADERS", self.env)  # a shared header would be one key for everyone
         self.assertIn("otel_headers.py", self.template["otelHeadersHelper"])
 
-    def test_the_account_ids_are_switched_off_at_the_source(self):
-        self.assertEqual(self.env["OTEL_METRICS_INCLUDE_ACCOUNT_UUID"], "false")
+    def test_every_metric_attribute_switch_is_set_on_purpose(self):
+        want = {
+            "OTEL_METRICS_INCLUDE_SESSION_ID": "true",  # also on events: groups a session across logs and metrics
+            "OTEL_METRICS_INCLUDE_VERSION": "true",
+            "OTEL_METRICS_INCLUDE_ACCOUNT_UUID": "false",  # off at the source; the collector deletes them too
+            "OTEL_METRICS_INCLUDE_ENTRYPOINT": "true",
+            "OTEL_METRICS_INCLUDE_REPOSITORY": "false",  # vcs.* would name the repository
+            "OTEL_METRICS_INCLUDE_RESOURCE_ATTRIBUTES": "false",
+        }
+        for name, value in want.items():
+            self.assertEqual(self.env[name], value, name)
 
 
 if __name__ == "__main__":

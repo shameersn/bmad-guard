@@ -239,6 +239,18 @@ class CommittedFilesTests(unittest.TestCase):
         pipeline = config[config.index("pipelines:") :]
         self.assertLess(pipeline.index("attributes/who"), pipeline.index("attributes/scrub"))
         self.assertIn("resource/scrub", pipeline)
+        metrics = pipeline[pipeline.index("metrics:") :]  # same chain as logs: user stamp, then scrub
+        for step in ("attributes/who", "attributes/scrub", "resource/scrub"):
+            self.assertIn(step, metrics)
+        self.assertIn("create_schema: false", config)  # the writer cannot CREATE
+
+    def test_metrics_tables_have_ttl_and_insert_only_grants(self):
+        sql = (COLLECTOR / "clickhouse" / "init" / "02-metrics.sh").read_text()
+        for table in ("otel_metrics_sum", "otel_metrics_gauge"):
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS guard.{table}", sql)
+            self.assertIn(f"GRANT INSERT ON guard.{table} TO otel_writer", sql)
+        self.assertIn("INTERVAL 180 DAY", sql)
+        self.assertNotRegex(sql, r"GRANT (ALL|SELECT|CREATE)[^\n]*otel_writer")
 
     def test_dashboard_has_the_t4_panels_and_every_query_is_a_select(self):
         import json
@@ -251,7 +263,11 @@ class CommittedFilesTests(unittest.TestCase):
             sql = panel["targets"][0]["rawSql"]
             self.assertTrue(sql.startswith("SELECT"), panel["title"])
             self.assertNotRegex(sql, r"(?i)\b(insert|alter|drop|truncate|delete)\b")
-        claude = next(p for p in dash["panels"] if "Claude Code" in p["title"])
+        metric_panels = [p for p in dash["panels"] if "otel_metrics_sum" in p["targets"][0]["rawSql"]]
+        self.assertGreaterEqual(len(metric_panels), 6)  # sessions, tokens, cost, lines, commits/PRs, decisions
+        for panel in metric_panels:
+            self.assertIn("Attributes['user']", panel["targets"][0]["rawSql"], panel["title"])
+        claude = next(p for p in dash["panels"] if "Claude Code events" in p["title"])
         self.assertIn("Body", claude["targets"][0]["rawSql"])  # the event name is in Body (spike finding 3)
 
     def test_schema_has_ttl_and_least_privilege_users(self):

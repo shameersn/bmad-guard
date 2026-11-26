@@ -243,7 +243,14 @@ def claude_run(project: Project, user_key: str, marker: str) -> bool:
         {
             "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
             "OTEL_LOGS_EXPORTER": "otlp",
-            "OTEL_METRICS_EXPORTER": "none",
+            "OTEL_METRICS_EXPORTER": "otlp",
+            "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "delta",
+            "OTEL_METRICS_INCLUDE_SESSION_ID": "true",
+            "OTEL_METRICS_INCLUDE_VERSION": "true",
+            "OTEL_METRICS_INCLUDE_ENTRYPOINT": "true",
+            "OTEL_METRICS_INCLUDE_REPOSITORY": "false",
+            "OTEL_METRICS_INCLUDE_RESOURCE_ATTRIBUTES": "false",
+            "OTEL_METRIC_EXPORT_INTERVAL": "1000",
             "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
             "OTEL_EXPORTER_OTLP_ENDPOINT": COLLECTOR,
             "OTEL_LOG_USER_PROMPTS": "0",
@@ -292,6 +299,127 @@ def grafana(path: str, body: dict | None = None) -> dict:
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
+
+
+PERSONAL = ("user.email", "user.account_uuid", "user.account_id", "user.id", "organization.id", "host.name", "host.id")
+
+
+def check_metrics() -> None:
+    """Claude Code metrics from the real session: arrived, user from the key, no personal attribute."""
+    where = f"Attributes['user'] = '{DEV}' AND ServiceName = 'claude-code'"
+    n = wait_for(f"SELECT count() FROM guard.otel_metrics_sum WHERE {where}", 1, 30)
+    check("Claude Code metrics arrived in otel_metrics_sum with the key's user", n >= 1, f"{n} datapoint(s)")
+    names = ch(f"SELECT arraySort(groupUniqArray(MetricName)) FROM guard.otel_metrics_sum WHERE {where}")
+    fact(f"Claude Code metric names stored: {names}")
+    fact(
+        "metric datapoint attribute keys: "
+        + ch(f"SELECT arraySort(groupUniqArrayArray(mapKeys(Attributes))) FROM guard.otel_metrics_sum WHERE {where}")
+    )
+    fact(
+        "metric resource attribute keys: "
+        + ch(
+            f"SELECT arraySort(groupUniqArrayArray(mapKeys(ResourceAttributes))) FROM guard.otel_metrics_sum WHERE {where}"
+        )
+    )
+    users = ch("SELECT groupUniqArray(Attributes['user']) FROM guard.otel_metrics_sum")
+    check("every metric datapoint has the key's user", users == f"['{DEV}']", users)
+    for name in PERSONAL:
+        hits = int(
+            ch(
+                f"SELECT count() FROM guard.otel_metrics_sum WHERE mapContains(Attributes, '{name}') "
+                f"OR mapContains(ResourceAttributes, '{name}')"
+            )
+            or 0
+        )
+        check(f"metrics: '{name}' is absent", hits == 0, f"{hits} row(s)")
+
+
+def check_metrics_scrub_synthetic(user_key: str) -> None:
+    """One made-up counter with every personal attribute on the datapoint and the resource, sent as the fake developer."""
+    run = "mscrub-" + uuid.uuid4().hex[:8]
+
+    def attr(k: str, v: str) -> dict:
+        return {"key": k, "value": {"stringValue": v}}
+
+    now = str(time.time_ns())
+    point = {
+        "attributes": [attr("run_id", run), attr("user", "someone-else")]
+        + [attr(k, "fake") for k in PERSONAL if not k.startswith("host.")]
+        + [attr("type", "input")],
+        "startTimeUnixNano": now,
+        "timeUnixNano": now,
+        "asDouble": 7,
+    }
+    body = {
+        "resourceMetrics": [
+            {
+                "resource": {
+                    "attributes": [
+                        attr("service.name", "claude-code"),
+                        attr("host.name", "fake-laptop"),
+                        attr("host.id", "fake-id"),
+                    ]
+                },
+                "scopeMetrics": [
+                    {
+                        "scope": {"name": "com.anthropic.claude_code"},
+                        "metrics": [
+                            {
+                                "name": "claude_code.token.usage",
+                                "unit": "tokens",
+                                "sum": {"dataPoints": [point], "aggregationTemporality": 1, "isMonotonic": True},
+                            },
+                            # What a plain reply does not produce, so the other panels have rows too (fake numbers).
+                            *[
+                                {
+                                    "name": name,
+                                    "sum": {
+                                        "dataPoints": [
+                                            {
+                                                "attributes": [attr(k, v) for k, v in extra],
+                                                "startTimeUnixNano": now,
+                                                "timeUnixNano": now,
+                                                "asDouble": 3,
+                                            }
+                                        ],
+                                        "aggregationTemporality": 1,
+                                        "isMonotonic": True,
+                                    },
+                                }
+                                for name, extra in (
+                                    ("claude_code.lines_of_code.count", [("type", "added")]),
+                                    ("claude_code.commit.count", []),
+                                    ("claude_code.pull_request.count", []),
+                                    (
+                                        "claude_code.code_edit_tool.decision",
+                                        [("tool_name", "Edit"), ("decision", "accept")],
+                                    ),
+                                )
+                            ],
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    token = base64.b64encode(f"{DEV}:{user_key}".encode()).decode()
+    req = urllib.request.Request(
+        f"{COLLECTOR}/v1/metrics",
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Basic {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        check("synthetic metric accepted", resp.status == 200)
+    got = wait_for(f"SELECT count() FROM guard.otel_metrics_sum WHERE Attributes['run_id'] = '{run}'", 1)
+    row = ch(
+        f"SELECT arraySort(mapKeys(Attributes)), arraySort(mapKeys(ResourceAttributes)), Attributes['user'] "
+        f"FROM guard.otel_metrics_sum WHERE Attributes['run_id'] = '{run}'"
+    )
+    fact(f"synthetic metric stored with: {row}")
+    check("synthetic metric: stored", got >= 1)
+    check("synthetic metric: every personal attribute is removed", not any(f"'{name}'" in row for name in PERSONAL))
+    check("synthetic metric: the user is the key's, not the one in the datapoint", row.endswith(DEV))
 
 
 def check_scrub_synthetic(user_key: str) -> None:
@@ -387,7 +515,12 @@ def check_grafana() -> None:
             result = grafana("/api/ds/query", body)["results"]["A"]
             frames = result.get("frames", [])
             rows = len(frames[0]["data"]["values"][0]) if frames and frames[0]["data"]["values"] else 0
-            check(f"Grafana panel '{panel['title']}' query runs", "error" not in result, f"{rows} row(s)")
+            need_rows = "otel_metrics_sum" in target["rawSql"] or panel["id"] <= 3
+            check(
+                f"Grafana panel '{panel['title']}' query runs" + (" and shows rows" if need_rows else ""),
+                "error" not in result and (rows >= 1 or not need_rows),
+                f"{rows} row(s)",
+            )
             fact(f"panel {panel['id']} '{panel['title']}': {rows} row(s)")
         except urllib.error.HTTPError as err:
             check(f"Grafana panel '{panel['title']}' query runs", False, f"HTTP {err.code}")
@@ -492,7 +625,9 @@ def main(argv: list[str] | None = None) -> int:
                     loud == "0",
                     f"{loud} row(s) not redacted",
                 )
+            check_metrics()
         check_scrub_synthetic(user_key)
+        check_metrics_scrub_synthetic(user_key)
 
         check_grafana()
 
