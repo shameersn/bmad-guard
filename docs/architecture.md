@@ -302,7 +302,7 @@ A project where the module is missing (a hook script that does not exist) makes 
 - **A forged record or approval** is possible for a person who can write a file and commit it. The checks are guard rails for the agent. The audit trail is the events, `approved_by` and git history.
 - **Warden's two confirmations** are enforced by the skill text, not by a hook.
 - **Free-text PHI** (names, diagnoses in a sentence) is not seen. The semantic check is out of Phase 3.
-- **Platforms:** macOS and Linux. No Windows. Claude Code only (no Copilot or Cursor hooks).
+- **Platforms:** macOS and Linux. Windows has the Claude Code (L1) guards only, **built and tested by simulation, not run on a real machine** (ADR 0009): Git for Windows and `python3` in Git Bash are required, there are no git hooks (L2), the PowerShell tool is blocked (`PS_TOOL_UNSUPPORTED`), and `cmd /c` and `powershell -c` inside a Bash command are not read. Claude Code only (no Copilot or Cursor hooks).
 - **Rebase, amend or squash** make a review record stale. The review is done again.
 
 ## 11. What is built and what is planned
@@ -316,6 +316,6 @@ A project where the module is missing (a hook script that does not exist) makes 
 | Claude Code telemetry, dashboards, the two reports | **Planned** (T4) |
 | Machine-level script location (installer, templates, unguarded-project rule), setup `--uninstall` | Built in temp folders (T5); the real-machine rollout test is open |
 | CI check (L3), `setup_guard.py --with-ci`, default off | **Planned** (T6) |
-| Windows L1 hooks | Only if needed (T9) |
+| Windows L1 hooks (path helper, PowerShell block, credential file and queue, setup and installer branches, manual check) | Built and tested by simulation (T9); the real-machine check ([windows-check.md](guides/windows-check.md)) is open |
 
 Source of the plan: [docs/plans/phase-3.md](plans/phase-3.md).
