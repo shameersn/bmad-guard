@@ -298,6 +298,7 @@ A project where the module is missing (a hook script that does not exist) makes 
 - **Subagent session ids are unverified** ([hooks.md](hooks.md), open check 7). We do not know if a subagent's hook calls carry the parent's `session_id` or their own. Run the review in a fresh top-level session. `REVIEW_IN_SUBAGENT` helps only if the hook input has `agent_id`.
 - **No live model session has driven the hooks yet.** The red-team suite (66 of 66 cases) drives the hooks with the documented input, as Claude Code does. Still open ([hooks.md](hooks.md), open checks 1, 2, 5, 8): that the model sees the block message and stops, how a `systemMessage` is drawn, and that exit 2 holds in `bypassPermissions` mode.
 - **The guards read command text.** `python -c`, script files, text built at run time and remote commands are not seen. This is not a sandbox. Deny rules are a second layer for file tools.
+- **A secret built by a shell command at run time** (pilot 1, finding B: `python3 -c` joining string parts) is written without a tool-guard block, because the content scan sees only the command text. The pre-commit hook catches it. Phase 4 todo: a PostToolUse scan that warns after the write.
 - **A forged record or approval** is possible for a person who can write a file and commit it. The checks are guard rails for the agent. The audit trail is the events, `approved_by` and git history.
 - **Warden's two confirmations** are enforced by the skill text, not by a hook.
 - **Free-text PHI** (names, diagnoses in a sentence) is not seen. The semantic check is out of Phase 3.

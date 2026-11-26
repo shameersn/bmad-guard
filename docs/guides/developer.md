@@ -27,6 +27,18 @@
 
 A block always has a **rule id**. Look it up in `guard-rules.md` (tool calls) or `module/hooks/README.md` (git). Never ask Claude to "find another way".
 
+### A block shows as "hook error"; that is normal
+
+When a tool call is blocked, Claude Code writes `PreToolUse:Bash hook error: ...` (or the tool name) before our message. This is how Claude Code labels every blocking hook. The call did **not** run, and Claude sees the reason. Read the rule id after the label. (Checked on 2026-11-26 with Claude Code 2.1.332: the JSON "deny" form of a hook shows the same label, so there is nothing to switch.)
+
+### When a prompt is blocked, the value stays on your disk
+
+A blocked prompt is not sent to the model. Claude Code still shows `Original prompt: <your text>` and **stores the prompt in its local transcript**. Checked on 2026-11-26 (Claude Code 2.1.332, `claude -p`): the blocked prompt, including the fake SSN, was in the transcript file `~/.claude/projects/<project path with / and . changed to ->/<session>.jsonl` and in the `stream-json` output.
+
+- The value does not leave your machine through this, but it stays on the disk until the transcript is deleted.
+- On a HIPAA project do **not** paste real PHI, not even to test the guard. Use an obvious fake.
+- If it happens, delete that session's `.jsonl` file in the project's folder under `~/.claude/projects/`, and tell Shameer.
+
 ## What you do
 
 ### 1. Start from a ready story
@@ -110,5 +122,7 @@ If a command is safe and blocked, run it yourself in your terminal, or add a scr
 ## Limits to know
 
 - The guards read command text. A script file, `python -c` or text built at run time is not seen. Do not treat the guard as a sandbox.
+- A secret built by a shell command at run time (for example `python3 -c` that joins string parts) is not seen by the content scan of the agent layer. The pre-commit hook catches it before it is committed. A scan after the write is planned for Phase 4.
+- Your own global `~/.claude` settings (deny or ask rules, your own hooks) can block before the project guard runs. Then you see a Claude Code permission message, not a rule id. To check the guard alone, run `claude --setting-sources project,local`.
 - Free-text PHI (names, diagnoses in a sentence) is not seen.
 - A person can skip a local hook. The design accepts this (ADR 0002), and the pilot rules forbid it.
