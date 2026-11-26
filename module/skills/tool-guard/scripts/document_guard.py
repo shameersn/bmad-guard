@@ -46,6 +46,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import document_text as dt  # noqa: E402 - sibling modules, found through the line above
 import hook_common as hc  # noqa: E402
+import winpaths as wp  # noqa: E402
 
 GUARD = "document-guard"
 TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
@@ -91,7 +92,7 @@ REASONS = {
 @dataclass(frozen=True)
 class Zone:
     code: str
-    folder: str  # lower case, absolute
+    folder: str  # lower case, absolute, in the form of winpaths.fold()
     rel: str = ""  # project-relative, as listed (a guard file or folder): named in the message
 
 
@@ -121,10 +122,10 @@ class Zones:
         self.cwd = os.path.realpath(cwd)
         self.home = os.path.realpath(Path.home())
         roots = {os.path.normpath(root), os.path.realpath(root)}
-        self.roots = [base.lower() for base in roots]
-        self.bmad = [os.path.join(base, "_bmad").lower() for base in roots]  # where approval-state.json lives
+        self.roots = [wp.fold(base).lower() for base in roots]
+        self.bmad = [wp.fold(os.path.join(base, "_bmad")).lower() for base in roots]  # where approval-state.json lives
         self.zones = [
-            Zone(code, os.path.join(base, rel).lower(), rel)
+            Zone(code, wp.fold(os.path.join(base, rel)).lower(), rel)
             for base in roots
             for code, rel in (
                 ("DOC_APPROVAL_STATE", "_bmad/custom/approval-state.json"),  # so `rm -r _bmad` is seen to take it
@@ -135,21 +136,16 @@ class Zones:
         ]
 
     def expand(self, text: str, cwd: str) -> str:
-        for var in ("${HOME}", "$HOME"):
-            if text.startswith(var):
-                text = self.home + text[len(var) :]
-        if text == "~" or text.startswith("~/"):
-            text = self.home + text[1:]
-        return os.path.normpath(os.path.join(cwd, text))
+        return os.path.normpath(os.path.join(cwd, wp.clean(wp.expand_home(text, self.home))))
 
     def paths(self, text: str, cwd: str | None = None) -> set[str]:
         """The path as written and with symlinks followed, lower case (macOS volumes ignore case)."""
         plain = self.expand(text.strip(), cwd or self.cwd)
-        return {plain.lower(), os.path.realpath(plain).lower()}
+        return {wp.fold(plain).lower(), wp.fold(os.path.realpath(plain)).lower()}
 
     def in_bmad(self, text: str, cwd: str | None = None) -> bool:
         """True when the path is the project's _bmad folder or inside it."""
-        return any(p == b or p.startswith(b + os.sep) for p in self.paths(text, cwd) for b in self.bmad)
+        return any(p == b or p.startswith(b + os.path.sep) for p in self.paths(text, cwd) for b in self.bmad)
 
     def hits(self, text: str, cwd: str | None = None, ancestors: bool = False) -> list[str]:
         """Reason codes for a path. `ancestors`: a folder that holds a zone counts too (for delete and move), when it
@@ -165,11 +161,11 @@ class Zones:
             if os.path.basename(path) == STATE_FILE_NAME:
                 found.append(("DOC_APPROVAL_STATE", ""))
             for zone in self.zones:
-                inside = path == zone.folder or path.startswith(zone.folder + os.sep)
+                inside = path == zone.folder or path.startswith(zone.folder + os.path.sep)
                 holds = (
                     ancestors
-                    and zone.folder.startswith(path.rstrip(os.sep) + os.sep)
-                    and any(path.startswith(root + os.sep) for root in self.roots)
+                    and zone.folder.startswith(path.rstrip(os.path.sep) + os.path.sep)
+                    and any(path.startswith(root + os.path.sep) for root in self.roots)
                 )
                 if inside or holds:
                     found.append((zone.code, zone.rel))
@@ -261,12 +257,12 @@ def check(payload: dict, root: Path) -> list[hc.Verdict]:
     target = tool_input.get(PATH_KEY[tool])
     if not isinstance(target, str) or not target.strip():
         return [bad_input(tool)]
-    cwd = payload.get("cwd")
-    start = Path(cwd) if isinstance(cwd, str) and cwd and Path(cwd).is_absolute() else root
+    start = wp.start_dir(payload.get("cwd"), root)
     zones = Zones(root, start)
     hit = zones.hit_zones(target)
     codes = [code for code, _ in hit]
-    if not codes and tool != "NotebookEdit" and target.lower().endswith(MARKDOWN):
+    # On Windows `prd.md.`, `prd.md ` and `prd.md::$DATA` name the same file: look at the cleaned name.
+    if not codes and tool != "NotebookEdit" and wp.clean(target).lower().endswith(MARKDOWN):
         found = markdown_codes(tool, tool_input, Path(zones.expand(target.strip(), zones.cwd)))
         if found is None:
             return [bad_input(tool)]

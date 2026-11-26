@@ -17,6 +17,7 @@ from pathlib import Path
 from tests.windows_flavour import HOME, windows
 
 pg = importlib.import_module("path_guard")
+dg = importlib.import_module("document_guard")
 
 PROJECT = "C:\\proj"
 ROOT = Path(PROJECT)
@@ -173,6 +174,111 @@ class WindowsPathGuardTests(unittest.TestCase):
         self.assertEqual(
             [v.code for v in pg.check(call("Read", {"file_path": "/p/.env"}, cwd="/work"), ROOT)], ["PATH_ENV_FILE"]
         )
+
+
+class WindowsDocumentGuardTests(unittest.TestCase):
+    """Zones were built with `/` and compared to `\\` paths, so on Windows every DOC_* zone was off."""
+
+    def codes(self, tool: str, tool_input: dict, **extra) -> list[str]:
+        with windows():
+            return [v.code for v in dg.check(call(tool, tool_input, **extra), ROOT)]
+
+    def write(self, path: str, content: str = "{}\n") -> list[str]:
+        return self.codes("Write", {"file_path": path, "content": content})
+
+    def test_the_approval_state_file_is_protected_in_every_spelling(self):
+        for path in (
+            "C:\\proj\\_bmad\\custom\\approval-state.json",
+            "C:/proj/_bmad/custom/approval-state.json",
+            "C:/proj\\_bmad/custom\\approval-state.json",  # mixed slashes
+            "c:\\PROJ\\_BMAD\\custom\\Approval-State.json",  # case
+            "C:\\proj\\_bmad\\custom\\approval-state.json::$DATA",  # NTFS stream
+            "C:\\proj\\_bmad\\custom\\approval-state.json:stream",
+            "C:\\proj\\_bmad\\custom\\approval-state.json.",  # trailing dot
+            "C:\\proj\\_bmad\\custom\\approval-state.json ",  # trailing space
+            "\\\\?\\C:\\proj\\_bmad\\custom\\approval-state.json",
+            "/c/proj/_bmad/custom/approval-state.json",  # Git Bash
+            "C:\\proj\\_bmad\\x\\..\\custom\\approval-state.json",
+            "_bmad\\custom\\approval-state.json",  # relative to the project (cwd)
+            "C:\\proj\\sub\\approval-state.json",  # the file name in any folder
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.write(path), ["DOC_APPROVAL_STATE"])
+
+    def test_the_other_zones_are_protected_with_backslashes_and_any_case(self):
+        for path, code in (
+            ("C:\\proj\\_bmad-output\\guard\\reviews\\s.json", "DOC_GUARD_RECORD"),
+            ("C:\\proj\\_BMAD-Output\\Guard\\builds\\s.json", "DOC_GUARD_RECORD"),
+            ("C:\\proj\\_bmad\\custom\\project\\guard\\tool-rules.json", "DOC_GUARD_CONFIG"),
+            ("C:\\proj\\_bmad\\custom\\guard\\manifest.json", "DOC_GUARD_SCRIPTS"),
+            ("C:\\proj\\.claude\\settings.json", "DOC_GUARD_SCRIPTS"),
+            ("C:\\proj\\.Claude\\Settings.JSON", "DOC_GUARD_SCRIPTS"),
+            ("C:\\proj\\.claude.\\settings.json", "DOC_GUARD_SCRIPTS"),
+            ("C:\\proj\\.claude\\settings.local.json", "DOC_GUARD_SCRIPTS"),
+            ("C:\\proj\\.claude\\skills\\tool-guard\\scripts\\pre_tool_use.py", "DOC_GUARD_SCRIPTS"),
+            ("C:\\proj\\.agents\\skills\\prompt-guard\\scripts\\prompt_check.py", "DOC_GUARD_SCRIPTS"),
+            ("C:\\proj\\_bmad\\custom\\prompt-guard.toml", "DOC_GUARD_SCRIPTS"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.write(path), [code])
+
+    def test_edit_and_multiedit_and_notebook_use_the_same_zones(self):
+        edit = {"file_path": "C:\\proj\\.claude\\settings.json", "old_string": "a", "new_string": "b"}
+        self.assertEqual(self.codes("Edit", edit), ["DOC_GUARD_SCRIPTS"])
+        multi = {"file_path": "C:\\proj\\.claude\\settings.json", "edits": [{"old_string": "a", "new_string": "b"}]}
+        self.assertEqual(self.codes("MultiEdit", multi), ["DOC_GUARD_SCRIPTS"])
+        notebook = {"notebook_path": "C:\\proj\\_bmad\\custom\\approval-state.json", "new_source": "x"}
+        self.assertEqual(self.codes("NotebookEdit", notebook), ["DOC_APPROVAL_STATE"])
+
+    def test_close_but_safe_writes_are_allowed(self):
+        for path in (
+            "C:\\proj\\src\\app.py",
+            "C:\\proj\\_bmad-output\\prd-notes.json",
+            "C:\\proj\\_bmad\\custom\\other.json",
+            "C:\\proj\\.claude\\skills\\my-own-skill\\SKILL.txt",
+            "C:\\proj\\.claude-notes\\settings.json",
+            "C:\\proj2\\_bmad\\custom\\guard\\manifest.json",  # another folder with the same prefix
+            "/c/proj/docs/notes.txt",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.write(path), [])
+
+    def test_a_markdown_file_with_a_windows_trick_in_its_name_is_still_markdown(self):
+        approved = "---\nstatus: approved\n---\n# PRD\n"
+        for path in (
+            "C:\\proj\\docs\\prd.md",
+            "C:\\proj\\docs\\prd.md.",
+            "C:\\proj\\docs\\prd.md ",
+            "C:\\proj\\docs\\PRD.MD",
+            "C:\\proj\\docs\\prd.markdown.",
+            "C:\\proj\\docs\\prd.md::$DATA",
+            "/c/proj/docs/prd.md.",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.write(path, approved), ["DOC_APPROVAL_FIELD"])
+        self.assertEqual(self.write("C:\\proj\\docs\\prd.md.", "# PRD\n\nPlain text.\n"), [])
+
+    def test_a_git_bash_cwd_is_made_native(self):
+        found = self.codes("Write", {"file_path": "_bmad\\custom\\approval-state.json", "content": "{}"}, cwd="/c/proj")
+        self.assertEqual(found, ["DOC_APPROVAL_STATE"])
+
+    def test_the_message_names_the_guard_file_with_the_listed_name(self):
+        with windows():
+            verdicts = dg.check(call("Write", {"file_path": "C:\\PROJ\\.Claude\\settings.json", "content": "{}"}), ROOT)
+        self.assertIn(".claude/settings.json", verdicts[0].reason)
+
+    def test_the_same_texts_on_this_os_do_not_change(self):
+        """Control: off Windows these are odd file names, not the protected files. Only the plain POSIX forms count."""
+        for path in ("_bmad\\custom\\approval-state.json", "/c/proj/_bmad/custom/guard/manifest.json"):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    [v.code for v in dg.check(call("Write", {"file_path": path, "content": "{}"}, cwd="/work"), ROOT)],
+                    [],
+                )
+        posix = call("Write", {"file_path": "/work/_bmad/custom/approval-state.json", "content": "{}"}, cwd="/work")
+        self.assertEqual([v.code for v in dg.check(posix, Path("/work"))], ["DOC_APPROVAL_STATE"])
+        spaced = call("Write", {"file_path": "/work/docs/prd.md ", "content": "status: approved\n"}, cwd="/work")
+        self.assertEqual([v.code for v in dg.check(spaced, Path("/work"))], [])  # a name with a space is no .md file
 
 
 if __name__ == "__main__":

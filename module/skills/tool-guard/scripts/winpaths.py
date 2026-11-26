@@ -65,6 +65,27 @@ def strip_win_tricks(path: str) -> str:
     return drive + "\\".join(names)
 
 
+def fold(path: str) -> str:
+    """Windows only: normal form and case fold of a path that is already real (zone folders, roots). POSIX: as is."""
+    return os.path.normcase(os.path.normpath(path)) if IS_WINDOWS else path
+
+
+def seps() -> str:
+    """The path separators: `/` and, on Windows, `\\`."""
+    return "/\\" if IS_WINDOWS else "/"
+
+
+def fwd(text: str) -> str:
+    """Windows only: backslashes as slashes, for matching a fragment such as `_bmad/custom`. POSIX: as is."""
+    return text.replace("\\", "/") if IS_WINDOWS else text
+
+
+def split_last(text: str) -> tuple[str, str]:
+    """(everything before the last separator, the rest): `rpartition("/")` on POSIX, both separators on Windows."""
+    cut = max(text.rfind(sep) for sep in seps())
+    return (text[:cut], text[cut + 1 :]) if cut >= 0 else ("", text)
+
+
 def start_dir(cwd, root):
     """The folder a hook call starts in: the input's `cwd` when it is an absolute path text (Windows: a Git Bash form
     is made native first), else `root`. POSIX: what the guards did before (an absolute `cwd` text, else `root`)."""
