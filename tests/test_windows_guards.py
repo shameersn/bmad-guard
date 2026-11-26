@@ -22,6 +22,7 @@ bwg = importlib.import_module("bash_write_guard")
 cg = importlib.import_module("command_guard")
 wg = importlib.import_module("write_gate")
 sp = importlib.import_module("shell_parse")
+cs = importlib.import_module("content_scan")
 
 PROJECT = "C:\\proj"
 ROOT = Path(PROJECT)
@@ -597,6 +598,26 @@ class WindowsShellParseTests(unittest.TestCase):
                 self.assertFalse(winpaths.anchored(text), text)
         self.assertFalse(winpaths.is_null_device("nul"))
         self.assertFalse(winpaths.anchored("C:\\x"))
+
+
+class WindowsContentScanTests(unittest.TestCase):
+    """`> nul` is the null device on Windows, so text sent there is not a file write and is not scanned."""
+
+    def test_text_sent_to_nul_is_not_scanned_on_windows(self):
+        with windows():
+            for target in ("nul", "NUL", "/dev/null"):
+                with self.subTest(target=target):
+                    self.assertEqual(cs.bash_texts(f"echo hello > {target}", PROJECT), [])
+            self.assertEqual(cs.bash_texts("echo hello > notes.txt", PROJECT), ["hello"])
+            self.assertEqual(cs.bash_texts("echo hello > null", PROJECT), ["hello"])  # only nul
+
+    def test_off_windows_nul_is_an_ordinary_file(self):
+        self.assertEqual(cs.bash_texts("echo hello > nul", "/work"), ["hello"])
+        self.assertEqual(cs.bash_texts("echo hello > /dev/null", "/work"), [])
+
+    def test_a_git_bash_cwd_is_made_native(self):
+        with windows():
+            self.assertEqual(cs.texts(call("Bash", {"command": "echo hi > a.txt"}, cwd="/c/proj")), ["hi"])
 
 
 if __name__ == "__main__":

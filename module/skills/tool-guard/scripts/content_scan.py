@@ -50,6 +50,7 @@ if str(HERE) not in sys.path:
 import bash_write_guard as bwg  # noqa: E402 - sibling modules, found through the line above
 import hook_common as hc  # noqa: E402
 import shell_parse as sp  # noqa: E402
+import winpaths as wp  # noqa: E402
 
 GUARD = "content-scan"
 FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
@@ -102,7 +103,7 @@ def file_texts(tool: str, tool_input: dict) -> list[str]:
 def _writes_to_file(inv: sp.Invocation, cwd: str) -> bool:
     """True when the command writes to a file other than a null device or a terminal."""
     for word, _ in bwg.targets(inv, cwd):
-        if word.text in NULL_DEVICES:
+        if word.text in NULL_DEVICES or wp.is_null_device(word.text):  # `> nul` on Windows
             continue
         return True
     return False
@@ -131,8 +132,7 @@ def texts(payload: dict) -> list[str]:
     command = tool_input.get("command")
     if not isinstance(command, str):
         return []  # command_guard reports a call with no command text
-    cwd = payload.get("cwd")
-    return bash_texts(command, cwd if isinstance(cwd, str) and os.path.isabs(cwd) else os.getcwd())
+    return bash_texts(command, wp.start_dir(payload.get("cwd"), os.getcwd()))
 
 
 # --- decision ---------------------------------------------------------------------------------------------------
