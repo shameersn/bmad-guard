@@ -95,6 +95,43 @@ Design:
   - Backups.
   - The "commits with no events" report.
 
+## Update (2026-11-26, GUARD-3 T4): what the two audit reports match on
+
+Problem. ADR 0002 and the Phase 2 todo lists ask for two reports: "commits with no guard events" and "review records
+with no `REVIEW_RECORDED` event". Events carried no commit id, story or record hash, so neither report could be built.
+The `commit` field above is not filled by the pre-commit hook: it runs BEFORE the commit exists, so the SHA is unknown.
+
+Options for the commits report:
+- **A. Match by user and time window** (a commit at 10:04 and a pre-commit event at 10:03). No change to events. Weak:
+  the key user is not the git author, clocks differ, and one event could cover a `--no-verify` commit made a minute later.
+- **B. Add `tree` to the pre-commit events** (the id of the staged tree, `git write-tree`). The commit that follows holds
+  exactly that tree, so the match is exact. One more field, a hash, no content. Survives an amend that changes only the
+  message. Weak spots: a rebase or cherry-pick makes a new tree (false alarm); a `--no-verify` commit of a tree that
+  the hook allowed before (for example a revert) looks seen.
+- **C. A post-commit hook that sends the commit SHA.** Exact, but it is a new hook that `--no-verify` also skips (it
+  would not catch the bypass it is meant to catch), and it adds a hook to every project.
+
+Options for the review report:
+- **D. Put `reviewed_sha` in the event.** The SHA is in the record already and is not secret, but a forger can copy it
+  from `git log`, so it proves nothing about the record file.
+- **E. Put the record path and the SHA-256 of the record file, as written, in the event.** ADR 0003 allows "path and
+  SHA-256" for the target. A record made by hand, or changed after the hook wrote it, has a hash that no event holds.
+
+**Decision: B and E.** `pre-commit` events carry `tree`; `REVIEW_RECORDED` carries `target_path` and `target_sha256`.
+Both stay inside "target: path and SHA-256" and "where: commit". No content, no command text, no matched value: the
+red-team case LEAK-1 stays green.
+
+Rules that follow:
+- A commit is seen only when its tree has an **allow** event from the pre-commit hook. A block event for a tree is no
+  proof: a developer could be refused, then commit the same tree with `--no-verify`. The report lists it as
+  `blocked-only`.
+- The reports read ClickHouse as the read-only user, never as `otel_writer`.
+- What the reports cannot see is printed with each report and listed in `deploy/collector/README.md`. They do not
+  prove who did the review: a hook-written record for a review run in the build session is not caught here (that is
+  the review-record guard's job).
+- Events from before this update have no `tree` or record hash, so the reports flag older commits and records. Run the
+  reports on commits made after the sender is rolled out.
+
 ## Related
 - Past ADRs: 0002 (enforcement layers).
 - Links: `spikes/collector/REPORT.md` (T3), `spikes/collector/otelcol/config.yaml`.

@@ -46,7 +46,10 @@ Other ids: COMMIT_ERROR (the hook failed: blocks), COMMIT_ALLOWED and COMMIT_NOT
 
 Events go to the local queue only (guard_hook_lib.emit). They hold the rule id, the check, the staged file count and a
 detail (rule ids or an error type). The approval events also carry the file path and the SHA-256 of the staged file.
-Never file content, matched text or the paths of scanned files.
+Every event also carries `tree`: the id of the staged tree (`git write-tree`). The commit does not exist yet, but the
+commit that follows holds exactly this tree, so the "commits with no guard events" report (deploy/collector/reports)
+matches a commit to its pre-commit event through it (ADR 0003, update of 2026-11-26). A tree id is a hash; it holds
+no content. Never file content, matched text or the paths of scanned files.
 """
 
 from __future__ import annotations
@@ -523,8 +526,19 @@ def render(reasons: list[Reason]) -> str:
     return "\n".join(lines)
 
 
+def tree_id(root: Path) -> str:
+    """The id of the staged tree, which the commit will hold. Empty when git cannot say (unmerged paths, no git):
+    the events then carry no tree and the report counts the commit as unseen."""
+    try:
+        out = lib.git(root, "write-tree").decode("ascii", errors="replace").strip()
+    except lib.HookError:
+        return ""
+    return out if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", out) else ""
+
+
 def record(root: Path, reasons: list[Reason], file_count: int, nothing: bool = False) -> None:
     """One event per reason (per file for approval reasons) and, when nothing blocks, one allow event."""
+    tree = tree_id(root)
     for r in reasons:
         for path, digest in r.targets or [("", "")]:
             lib.emit(
@@ -538,11 +552,12 @@ def record(root: Path, reasons: list[Reason], file_count: int, nothing: bool = F
                 file_count=file_count,
                 target_path=path,
                 target_sha256=digest,
+                tree=tree,
             )
     if not any(r.severity == BLOCK for r in reasons):
         warned = sum(1 for r in reasons if r.severity == WARN)
         code = "COMMIT_NOTHING_TO_CHECK" if nothing else "COMMIT_ALLOWED"
-        lib.emit(root, STAGE, "allow", code, AGENT, file_count=file_count, warnings=warned or "")
+        lib.emit(root, STAGE, "allow", code, AGENT, file_count=file_count, warnings=warned or "", tree=tree)
 
 
 def main() -> int:
