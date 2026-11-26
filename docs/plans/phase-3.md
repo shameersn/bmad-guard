@@ -104,8 +104,8 @@ The pilot starts in week 1 (D1), so its users need the docs on day 1. Today `doc
 
 Two decisions block the build tasks, so they are written first, with `/adr`.
 
-- **ADR 0007, credential storage** (Phase 1 open item 1). A per-user file outside every repo, `~/.config/bmad-guard/credentials`, mode 600, written once by the setup script, holding the key and the endpoint (D5); scripts read `BMAD_GUARD_KEY` and `BMAD_GUARD_ENDPOINT` first, then the file. Later option: the OS keychain. Not a `.env` file in the project.
-- **ADR 0008, machine-level script location** (D7).
+- **ADR 0007, credential storage** ([`docs/adr/0007-credential-storage.md`](../adr/0007-credential-storage.md); Phase 1 open item 1). A per-user file outside every repo, `~/.config/bmad-guard/credentials`, mode 600, written once by the setup script, holding the key and the endpoint (D5); scripts read `BMAD_GUARD_KEY` and `BMAD_GUARD_ENDPOINT` first, then the file. Later option: the OS keychain. Not a `.env` file in the project.
+- **ADR 0008, machine-level script location** ([`docs/adr/0008-machine-level-script-location.md`](../adr/0008-machine-level-script-location.md); D7). Status Proposed: it is tested in T5.
 
 **Done when:** both ADRs are approved by PR, with options and trade-offs.
 
