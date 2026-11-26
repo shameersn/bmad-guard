@@ -5,8 +5,21 @@
 | Ticket | GUARD-2 |
 | Time box | 3 weeks (15 working days) |
 | Approvers | Shameer, Manesh G (PR approval) |
-| Status | Draft (2026-11-25) |
+| Status | Built (T1–T8). Gate 2: 5 of 6 boxes ticked; the last one waits for dates from Shameer (2026-11-26). See "Phase 2 status". |
 | Inputs | ADRs 0001–0006; Phase 1 plan and install test; "Guarded BMAD: Org Rollout Plan" (Claude doc) |
+
+## Phase 2 status (2026-11-26)
+
+**Done.** All eight tasks are built (T1 to T6 are merged to `main`; T7 and T8 are on stacked branches, not merged yet). The hooks, the git hooks, the setup wiring and the managed-settings template exist, and the four rollout-doc cases are blocked in an automated run (`docs/reports/phase-2-red-team.md`: 66 of 66 cases, 4 of 4 rollout cases, with close-but-safe control rows). The Phase 3 draft is `docs/plans/phase-3.md`.
+
+**Open, and not closable by code:**
+
+- **Real-session checks.** No hook has been driven by a live Claude Code model session (the red-team suite drives the hooks with the documented stdin JSON). The open checks are in `docs/hooks.md` (1, 2, 5, 7, 8) and in each todo list below under "Real block seen", "A real review", "A real push", "A real commit" and "Real warning seen". The subagent session-id question (check 7) decides how strong the same-session proof is.
+- **Dates.** Every item in "Managed settings rollout todos" has an owner or `TBD`, and `Date: TBD (Shameer to set)`. No date was invented. Gate 2 box 6 stays open until Shameer sets them.
+- **Pilot numbers.** False-block numbers for every guard come from the pilot, not from this repo. The todo lists below keep each decision that waits for them (owners are named there).
+- **Phase 3 or later:** machine-level script location, uninstall for the wiring, the collector and credential storage, CI. See `docs/plans/phase-3.md`.
+
+Todo lists: "Managed settings rollout todos", "Command guard todos", "Write gate todos", "Review record todos", "Content scan todos", "Pre-commit todos" and "Open items for later phases", all below.
 
 ## Goal
 
@@ -204,16 +217,28 @@ One branch and one PR per task: `feature/GUARD-2-<short-name>`.
 
 **Done when:** every case is blocked and the report is committed.
 
+**Built (T8), what differs from the text above:** how to run it and what it covers is in `scripts/README.md`; the result is `docs/reports/phase-2-red-team.md`.
+
+- **Two sandboxes, 66 cases.** `scripts/red_team.py` builds a HIPAA sandbox (`phi = "block"`) and a general one, each with fresh BMAD 6.12.4 and the setup script, in a `TemporaryDirectory` (only that folder is removed; `--keep` keeps it). Each case has an expected answer (block, allow or warn) and an expected rule id. A case passes only when both match.
+- **Real entry points.** L1: the hook commands are read from the sandbox's `.claude/settings.json` and run like Claude Code runs them (a shell, `CLAUDE_PROJECT_DIR`, JSON on stdin); a call reaches a hook only if the wiring's matcher covers its tool. L2: real `git commit` and `git push` (to a bare remote in the temp folder). No model session. Reuses the install test's helpers; `Runner.run` got an `extra_env` argument for this.
+- **The four rollout-doc cases** (PHI: PHI-1, 2, 3; wrong DB: DB-1, 2; edit after approval: EDIT-4, 1, 2; same-session review: REV-2) are listed on their own in the report. The approved tech-stack list is approved through Warden's real script; the review record is written by the real hook from the build session's id, then pushed.
+- **More than asked:** one row per other guard (destructive command, sensitive read, data export, deleted question, `--no-verify`, guard self-protection, secret in a prompt, a written file, a here-document and a commit, ready-for-dev, session-start warning, fail closed on bad input), 19 control rows (close-but-safe actions that must pass), the non-HIPAA warn rows as information, and LEAK-1: no fake value and no command text in any queued event.
+- **A case that did not run is NOT RUN**, never PASS, and fails the run. A control row with no matching hook entry fails too.
+- **Checked that the suite can fail:** with the write gate taken out of the dispatcher for one run, GATE-1, GATE-2, GATE-3 and EDIT-4 failed, the set-up stopped, and the exit code was 1. The change was reverted.
+- **Python:** all 66 cases also pass with the hooks started by Python 3.10.18 (`--python python3.10`). The committed report is the Python 3.13.12 run.
+- **No guard bug was found.** No guard file changed in T8.
+- **Not covered** (in the report): no live model session, subagent session ids, `permissions.deny` rules, bypass paths, free-text PHI, other OS and tools.
+
 ## Gate 2
 
-Phase 3 starts only when all of these are true:
+Phase 3 starts only when all of these are true (checked 2026-11-26):
 
-- [ ] Every new hook script has unit tests (happy path, edge, error) and they pass.
-- [ ] The red-team report shows all four rollout-doc cases blocked: PHI, wrong DB, edit after approval, same-session review.
-- [ ] The Phase 1 install test still passes, with the hook wiring surviving a BMAD update.
-- [ ] The managed-settings template and rollout doc exist.
-- [ ] A draft Phase 3 plan exists.
-- [ ] Every item in "Managed settings rollout todos" below has an owner and a date.
+- [x] Every new hook script has unit tests (happy path, edge, error) and they pass. **Evidence:** `python3 -m unittest discover`: 961 tests OK on Python 3.13.12 and on 3.10.18 (8 skipped on 3.10: the tests that read TOML need 3.11, as before). `uvx ruff@0.17.6 check .` and `format --check .` pass. Note: `guard_hook_lib.py` has no test file of its own; its functions run in every pre-commit and pre-push test (real repositories), including the missing-skill case.
+- [x] The red-team report shows all four rollout-doc cases blocked: PHI, wrong DB, edit after approval, same-session review. **Evidence:** `docs/reports/phase-2-red-team.md`, 66 of 66 cases PASS, 4 of 4 rollout cases BLOCKED. Limit: no live model session (see the report's "Not covered").
+- [x] The Phase 1 install test still passes, with the hook wiring surviving a BMAD update. **Evidence:** `python3 scripts/install_test.py` on 2026-11-26: 145 passed, 0 failed (it checks the wiring after setup, quick-update, update and the 6.11.0 to 6.12.4 upgrade). `docs/reports/phase-1-install-test.md` is the older Phase 1 run and was not regenerated.
+- [x] The managed-settings template and rollout doc exist. **Evidence:** `module/managed-settings/managed-settings.json`, `docs/managed-settings-rollout.md` (template only; nothing is installed in a system path).
+- [x] A draft Phase 3 plan exists. **Evidence:** `docs/plans/phase-3.md` (draft, to be grilled and approved).
+- [ ] Every item in "Managed settings rollout todos" below has an owner and a date. **Not true yet:** every item has an owner or `TBD` and a `Date: TBD (Shameer to set)`. Two items have no owner named in the plan (uninstall for the wiring; the open `PreToolUse` checks) and the rollback test has only an implied one (Shameer, with the rollout doc test). Shameer sets the dates and fills the owners; then this box can be ticked.
 
 ## Managed settings rollout todos (from T1)
 
