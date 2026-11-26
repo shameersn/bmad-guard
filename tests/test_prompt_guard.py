@@ -137,6 +137,15 @@ class RuleTests(unittest.TestCase):
         found = rule_ids(f"postgres://app_user:{FAKE['password']}@db.internal:5432/app")
         self.assertEqual(found, {"secret.connection-string"})
 
+    def test_a_backslash_escape_ends_a_token_so_it_is_not_the_start_of_an_email(self):
+        for text in ('"x\\n@app.get(\\"/a\\")"', "'\\t@app.get(\"/a\")'", '"\\r\\n@router.post(\\"/b\\")"'):
+            with self.subTest(text=text):
+                self.assertNotIn("phi.email", rule_ids(text), text)
+        email = "fake.patient@notreal-mail.io"
+        for text in (f"mail\n{email}", f"mail\t{email}", f"mail\\n{email}", f"mail\\t{email}", f"\\r\\n{email}"):
+            with self.subTest(text=text):
+                self.assertIn("phi.email", rule_ids(text), text)
+
     def test_plain_digits_need_context_for_nhs_and_aadhaar(self):
         self.assertIn("phi.nhs-number", rule_ids(f"NHS no {FAKE['nhs-plain']}"))
         self.assertIn("phi.aadhaar-number", rule_ids(f"aadhaar {FAKE['aadhaar-plain']}"))

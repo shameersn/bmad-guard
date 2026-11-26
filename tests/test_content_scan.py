@@ -208,6 +208,11 @@ class PhiTests(ScanCase):
         )
         self.assertEqual((event["detail"], event["tool"]), ("phi.phone-us", "Write"))
 
+    def test_an_escaped_newline_before_a_decorator_is_not_an_email(self):
+        self.hipaa()
+        self.assertEqual(self.save_codes('route = "\\n@app.get(\\"/items\\")"\n'), [])
+        self.assertEqual(self.save_codes("mail\\nfake.patient@notreal-mail.io"), ["CONTENT_PHI"])
+
     def test_a_hipaa_block_is_one_block_event(self):
         self.hipaa()
         self.hook("Write", {"file_path": self.target(), "content": f"x {PHONE}"})

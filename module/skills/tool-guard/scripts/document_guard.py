@@ -60,8 +60,8 @@ SKILL_DIRS = (".claude/skills", ".agents/skills")
 GUARD_SKILLS = ("tool-guard", "prompt-guard", "ready-for-dev-gate", "agent-approval-grant", "agent-approval-gate-check")
 REASONS = {
     "DOC_APPROVAL_STATE": (
-        "approval-state.json is written only by Warden (agent-approval-grant), after the developer confirms twice. "
-        "Ask the developer to approve or reopen the document with Warden."
+        "approval-state.json is written only by agent-approval-grant (Warden), after the developer confirms twice. "
+        "Ask the developer to approve or reopen the document with agent-approval-grant (Warden)."
     ),
     "DOC_GUARD_RECORD": (
         "Review and build records in _bmad-output/guard are written by the guard scripts and hooks only. "
@@ -72,13 +72,14 @@ REASONS = {
         "Tell the developer which rule or path you need; do not edit them."
     ),
     "DOC_GUARD_SCRIPTS": (
-        "The guard's own files (hook scripts, guard skills, git hooks, .claude/settings.json) belong to the developer. "
-        "Tell the developer what needs to change; they edit it or re-run the bmad-guard setup script."
+        "{file} is a guard file (hook script, guard skill, git hook, .claude/settings.json, guard config in "
+        "_bmad/custom/). It belongs to the developer. Tell the developer what needs to change; "
+        "they edit it or re-run the bmad-guard setup script."
     ),
     "DOC_APPROVAL_FIELD": (
         "This edit changes an approval field (status or approval_status 'approved', approved_by, approved_at) "
         "or a resolution record (Resolved:, [ASSUMPTION-RESOLVED ...]). "
-        "Ask the developer to approve with Warden, or to write the answer."
+        "Ask the developer to approve with agent-approval-grant (Warden), or to write the answer."
     ),
     "DOC_QUESTION_REMOVED": (
         "An open question or [ASSUMPTION ...] was removed and has no resolution record. "
@@ -91,6 +92,7 @@ REASONS = {
 class Zone:
     code: str
     folder: str  # lower case, absolute
+    rel: str = ""  # project-relative, as listed (a guard file or folder): named in the message
 
 
 def guard_files(root: Path) -> list[str]:
@@ -122,7 +124,7 @@ class Zones:
         self.roots = [base.lower() for base in roots]
         self.bmad = [os.path.join(base, "_bmad").lower() for base in roots]  # where approval-state.json lives
         self.zones = [
-            Zone(code, os.path.join(base, rel).lower())
+            Zone(code, os.path.join(base, rel).lower(), rel)
             for base in roots
             for code, rel in (
                 ("DOC_APPROVAL_STATE", "_bmad/custom/approval-state.json"),  # so `rm -r _bmad` is seen to take it
@@ -152,12 +154,16 @@ class Zones:
     def hits(self, text: str, cwd: str | None = None, ancestors: bool = False) -> list[str]:
         """Reason codes for a path. `ancestors`: a folder that holds a zone counts too (for delete and move), when it
         is inside the project: `rm -rf .` and `rm -rf /` are the command guard's."""
+        return list(dict.fromkeys(code for code, _ in self.hit_zones(text, cwd, ancestors)))
+
+    def hit_zones(self, text: str, cwd: str | None = None, ancestors: bool = False) -> list[tuple[str, str]]:
+        """(reason code, zone path) for a path; the zone path is empty for the approval state file name."""
         if not text.strip():
             return []
-        found: list[str] = []
+        found: list[tuple[str, str]] = []
         for path in self.paths(text, cwd):
             if os.path.basename(path) == STATE_FILE_NAME:
-                found.append("DOC_APPROVAL_STATE")
+                found.append(("DOC_APPROVAL_STATE", ""))
             for zone in self.zones:
                 inside = path == zone.folder or path.startswith(zone.folder + os.sep)
                 holds = (
@@ -166,8 +172,14 @@ class Zones:
                     and any(path.startswith(root + os.sep) for root in self.roots)
                 )
                 if inside or holds:
-                    found.append(zone.code)
+                    found.append((zone.code, zone.rel))
         return list(dict.fromkeys(found))
+
+
+def reasons(codes: list[str], files: list[str], guard: str) -> list[hc.Verdict]:
+    """One verdict per code. A guard file hit is named in its message (up to three, the guard's own paths)."""
+    named = ", ".join(list(dict.fromkeys(files))[:3]) or "A guard file"
+    return [hc.Verdict(code, REASONS[code].replace("{file}", named), guard) for code in dict.fromkeys(codes)]
 
 
 def _normal(text: str) -> str:
@@ -252,13 +264,14 @@ def check(payload: dict, root: Path) -> list[hc.Verdict]:
     cwd = payload.get("cwd")
     start = Path(cwd) if isinstance(cwd, str) and cwd and Path(cwd).is_absolute() else root
     zones = Zones(root, start)
-    codes = zones.hits(target)
+    hit = zones.hit_zones(target)
+    codes = [code for code, _ in hit]
     if not codes and tool != "NotebookEdit" and target.lower().endswith(MARKDOWN):
         found = markdown_codes(tool, tool_input, Path(zones.expand(target.strip(), zones.cwd)))
         if found is None:
             return [bad_input(tool)]
         codes = found
-    return [hc.Verdict(code, REASONS[code], GUARD) for code in codes]
+    return reasons(codes, [rel for code, rel in hit if code == "DOC_GUARD_SCRIPTS"], GUARD)
 
 
 GUARDS = [hc.Guard(GUARD, TOOLS, check)]

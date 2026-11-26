@@ -97,6 +97,17 @@ class RefusalTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertIn("not a git repository", err)
 
+    def test_refuses_a_missing_project_folder_with_one_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "m").mkdir()
+            mod = make_module(Path(tmp) / "m")
+            for flags in ((), ("--check",), ("--dry-run",), ("--uninstall",)):
+                with self.subTest(flags=flags):
+                    code, out, err = run(Path(tmp) / "missing", mod, *flags)
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertEqual(err.count("\n"), 1)
+                    self.assertIn("not a folder", err)
+
     def test_refuses_project_without_bmad(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "m").mkdir()
@@ -317,6 +328,16 @@ class HooksPathTests(Base):
         self.assertEqual(code, 1)
         self.assertIn("core.hooksPath is '.husky'", out)
         self.assertEqual(git(self.project, "config", "core.hooksPath"), ".husky")
+
+    def test_check_counts_a_hooks_path_that_points_elsewhere_as_a_conflict(self):
+        run(self.project, self.module)
+        git(self.project, "config", "core.hooksPath", ".husky")
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 1)
+        self.assertIn("conflict core.hooksPath is '.husky'", out)
+        self.assertIn("0 change(s), 1 conflict(s)", out)
+        self.assertNotIn(" 0 conflict(s)", out)
+        self.assertIn("NOT up to date", out)
 
     def test_force_replaces_hooks_path(self):
         git(self.project, "config", "core.hooksPath", ".husky")

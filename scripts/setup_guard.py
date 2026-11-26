@@ -217,6 +217,8 @@ def read_manifest(project_dir: Path) -> dict:
 
 
 def check_project(project_dir: Path, module_dir: Path) -> None:
+    if not project_dir.is_dir():
+        raise SetupError(f"not a folder: {project_dir}")
     if git(["rev-parse", "--show-toplevel"], project_dir).returncode != 0:
         raise SetupError(f"not a git repository: {project_dir}")
     if not (project_dir / "_bmad").is_dir():
@@ -349,7 +351,8 @@ def describe(plan: Plan) -> list[str]:
         lines.append(f"append   .gitignore: {GITIGNORE_LINE}")
     lines += plan.notes
     kept = sum(1 for a in plan.actions if a.kind == "keep")
-    lines.append(f"{len(plan.changes())} change(s), {len(plan.conflicts())} conflict(s), {kept} unchanged")
+    conflicts = len(plan.conflicts()) + plan.hooks_path_conflict  # the core.hooksPath line above is a conflict too
+    lines.append(f"{len(plan.changes())} change(s), {conflicts} conflict(s), {kept} unchanged")
     return lines
 
 

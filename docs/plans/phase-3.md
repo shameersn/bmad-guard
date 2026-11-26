@@ -228,6 +228,33 @@ These need real use, not code first. Each item is in a Phase 2 todo list with an
   - Minimum Node version for the BMAD installer: not checked. Owner: Shameer, during the trial run.
 - **Rebase, amend and squash** make a review record stale: decide whether a "re-review a rewritten branch" shortcut is needed.
 
+**Pilot 1 results (clinic-booking trial, 2026-11-26).** 21 steps pass, no hook crashed, no bypass attempt seen. Wrong blocks: 1 of 15 in the model test sessions (about 7%), 3 of about 22 with the trial driver session (about 14%). Both are above the 5% target, so the wrong-block fixes come before the HIPAA project (D12). T6 (CI) is deferred.
+
+Findings:
+
+| #   | Finding | Fix |
+| --- | ------- | --- |
+| A1  | `grep -rl seed --exclude='.env*' .` blocked by `PATH_ENV_FILE` | path-guard: values of `--exclude` / `--exclude-dir` (and similar filter flags) are not reads of the file |
+| A2  | `sed -i` on a file outside the project blocked by `GATE_NO_ACTIVE_PLAN`; the Write tool to the same file is allowed | write gate: Bash write targets outside the project root are not source, same as the Write tool |
+| A3  | `\n@app.get` in Python text read as an email (`phi.email`) | content scan: a backslash escape ends a token |
+| B   | A secret built by a shell command (`python3 -c` string joins) is written without a tool-guard block; pre-commit catches it | Accepted as a known limit (pre-commit holds). Phase 4 todo: PostToolUse scan that warns after the write |
+| C1  | `DOC_GUARD_SCRIPTS` message lists "hook scripts, guard skills, git hooks, .claude/settings.json" but the file was `_bmad/custom/prompt-guard.toml` | message names the file that was hit and includes `_bmad/custom/` guard config |
+| C2  | "Approve with Warden": Claude cannot find a skill named Warden | messages say `agent-approval-grant (Warden)` |
+| C3  | Claude Code shows every correct block as `PreToolUse:Bash hook error` | Spike, 1 hour: does `permissionDecision: deny` show a cleaner message and still block in `bypassPermissions`? Switch only if both are true; else explain the label in the guides |
+| D   | A blocked prompt is echoed locally as `Original prompt: <value>` (not sent to the model) | Check whether the value is stored in the local `~/.claude` transcript; document the result (HIPAA relevant) |
+| E1  | Trial script step 13 undo also throws away the 12b reword | undo with `git restore --staged`, then remove the line by hand |
+| E2  | Global `~/.claude` deny/ask rules and hooks hide the project guard (4b, 5b, 6b) | trial guide says so and shows `--setting-sources project,local` |
+| E3  | Installed module older than the source (1a) | install guide: re-run setup after each bmad-guard update; tag `pilot-2` |
+
+Order:
+
+1. **T7a code fixes** (`fix/GUARD-3-pilot-fixes`): A1–A3 with regression tests, C1, C2, and the two T0 setup bugs (`--project <missing folder>` exits 2; `--check` wording when `core.hooksPath` points elsewhere).
+2. **T7b docs and checks**: E1–E3, the D transcript check, the C3 spike, B recorded as a known limit.
+3. **Tag `pilot-2`.** Re-run setup in clinic-booking, then the pending developer steps (1b, 13, 18a, 19, 15, 14/16/17/20) and the three wrong-block cases again.
+4. **T7c decisions** with the new numbers: the false-block decision list above. The rest moves to Phase 4 with an owner and a date.
+
+Moved to Phase 4 (owner Shameer, date set in the Phase 4 plan): the rules not yet written, the approver role check, the re-review shortcut for rewritten branches, the PostToolUse scan (B).
+
 **Done when:** each item is closed, or moved to a later phase with an owner and a date, and the Phase 2 todo lists are updated.
 
 ### T8. Red-team re-run, install test, pilot pack update and Gate 3 (week 4)

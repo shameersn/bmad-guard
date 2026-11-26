@@ -275,7 +275,12 @@ PHI_RULES = (
     _r("phi.nhs-number", "phi", _NB + r"\d{3}([ -]?)\d{3}\1\d{4}" + _NA, _nhs),
     _r("phi.aadhaar-number", "phi", _NB + r"[2-9]\d{3}([ -]?)\d{4}\1\d{4}" + _NA, _aadhaar),
     _r("phi.us-ssn", "phi", r"(?<![\d-])(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}(?![\d-])"),
-    _r("phi.email", "phi", r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b", _email),
+    _r(  # the name starts at a word edge not after a backslash, or just after an escape: `\n@app.get` is no email
+        "phi.email",
+        "phi",
+        r"(?:\b(?<!\\)|(?<=\\[ntrfbv]))[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",
+        _email,
+    ),
     _r("phi.phone-us", "phi", r"(?<![\w+])(?:\+?1[ .-]?)?(?:\(\d{3}\)\s?|\d{3}[ .-])\d{3}[ .-]\d{4}(?![\d-])"),
     _r("phi.phone-intl", "phi", r"(?<![\w+])\+[2-9]\d{0,2}(?:[ -]?\d{2,5}){2,4}(?![\d-])", _intl_phone),
 )

@@ -434,6 +434,13 @@ class GuardScriptsTests(GuardTestCase):
         self.assertIn("DOC_GUARD_SCRIPTS", self.mine("sed -i 's/block/warn/' _bmad/custom/prompt-guard.toml"))
         self.allows("cat _bmad/custom/prompt-guard.toml", "echo x > _bmad/custom/bmad-prd.toml")
 
+    def test_the_message_names_the_guard_file_that_was_hit(self):
+        payload = self.payload("Bash", {"command": "echo 'phi = \"warn\"' > _bmad/custom/prompt-guard.toml"})
+        code, _, err = self.entry(json.dumps(payload))
+        self.assertEqual(code, 2)
+        self.assertIn("_bmad/custom/prompt-guard.toml is a guard file", err)
+        self.assertNotIn("echo", err)
+
     def test_reading_and_running_the_guard_files_is_allowed(self):
         self.allows(
             "cat .claude/settings.json",
