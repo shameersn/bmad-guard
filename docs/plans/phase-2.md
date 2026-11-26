@@ -235,10 +235,10 @@ Phase 3 starts only when all of these are true (checked 2026-11-26):
 
 - [x] Every new hook script has unit tests (happy path, edge, error) and they pass. **Evidence:** `python3 -m unittest discover`: 961 tests OK on Python 3.13.12 and on 3.10.18 (8 skipped on 3.10: the tests that read TOML need 3.11, as before). `uvx ruff@0.17.6 check .` and `format --check .` pass. Note: `guard_hook_lib.py` has no test file of its own; its functions run in every pre-commit and pre-push test (real repositories), including the missing-skill case.
 - [x] The red-team report shows all four rollout-doc cases blocked: PHI, wrong DB, edit after approval, same-session review. **Evidence:** `docs/reports/phase-2-red-team.md`, 66 of 66 cases PASS, 4 of 4 rollout cases BLOCKED. Limit: no live model session (see the report's "Not covered").
-- [x] The Phase 1 install test still passes, with the hook wiring surviving a BMAD update. **Evidence:** `python3 scripts/install_test.py` on 2026-11-26: 145 passed, 0 failed (it checks the wiring after setup, quick-update, update and the 6.11.0 to 6.12.4 upgrade). `docs/reports/phase-1-install-test.md` is the older Phase 1 run and was not regenerated.
+- [x] The Phase 1 install test still passes, with the hook wiring surviving a BMAD update. **Evidence:** `python3 scripts/install_test.py` on 2026-11-26: 145 passed, 0 failed (it checks the wiring after setup, quick-update, update and the 6.11.0 to 6.12.4 upgrade). Report: [`docs/reports/phase-2-install-test.md`](../reports/phase-2-install-test.md). `docs/reports/phase-1-install-test.md` stays as the Phase 1 record.
 - [x] The managed-settings template and rollout doc exist. **Evidence:** `module/managed-settings/managed-settings.json`, `docs/managed-settings-rollout.md` (template only; nothing is installed in a system path).
 - [x] A draft Phase 3 plan exists. **Evidence:** `docs/plans/phase-3.md` (draft, to be grilled and approved).
-- [ ] Every item in "Managed settings rollout todos" below has an owner and a date. **Not true yet:** every item has an owner or `TBD` and a `Date: TBD (Shameer to set)`. Two items have no owner named in the plan (uninstall for the wiring; the open `PreToolUse` checks) and the rollback test has only an implied one (Shameer, with the rollout doc test). Shameer sets the dates and fills the owners; then this box can be ticked.
+- [ ] Every item in "Managed settings rollout todos" below has an owner and a date. **Not true yet:** every item has an owner or `TBD` and a `Date: TBD (Shameer to set)`. Every item now has an owner (Shameer for the uninstall and the open `PreToolUse` checks, by default). Shameer sets the dates; then this box can be ticked.
 
 ## Managed settings rollout todos (from T1)
 
@@ -255,8 +255,8 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 **Before the full IT rollout (open item 3):**
 
 - [ ] **Machine-level script location.** Install the guard scripts once per machine and point the managed hooks there, so projects without the module are not blocked and the scripts cannot be edited per project. Needs an ADR, a setup script change, a template change and an install-test case. Owner: Shameer. Phase 3 at the latest (`docs/plans/phase-3.md`, T1 and T5). Date: TBD (Shameer to set).
-- [ ] **Uninstall for the wiring** in the setup script (rollback is by hand today). Owner: TBD (the plan names none; Phase 3, T5). Date: TBD (Shameer to set).
-- [ ] **Open `PreToolUse` checks** from `docs/hooks.md` closed: a real block and a crash with `onFailure` seen in Claude Code, the `.env.example` carve-out, a double run when the same hook is in managed and project settings. Owner: TBD (needs a real model session; the plan names none; Phase 3, T5). Date: TBD (Shameer to set).
+- [ ] **Uninstall for the wiring** in the setup script (rollback is by hand today). Owner: Shameer (default; Phase 3, T5). Date: TBD (Shameer to set).
+- [ ] **Open `PreToolUse` checks** from `docs/hooks.md` closed: a real block and a crash with `onFailure` seen in Claude Code, the `.env.example` carve-out, a double run when the same hook is in managed and project settings. Owner: Shameer (default; needs a real model session; Phase 3, T5). Date: TBD (Shameer to set).
 
 ## Command guard todos (from T2)
 
