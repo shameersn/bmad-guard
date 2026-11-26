@@ -635,6 +635,20 @@ class GuardScriptsTests(TextGuardCase):
             ["DOC_GUARD_SCRIPTS"],
         )
 
+    def test_the_message_names_the_guard_file_that_was_hit(self):
+        for rel, named in (
+            ("_bmad/custom/prompt-guard.toml", "_bmad/custom/prompt-guard.toml"),
+            (".claude/settings.json", ".claude/settings.json"),
+            (".claude/skills/tool-guard/scripts/pre_tool_use.py", ".claude/skills/tool-guard"),
+        ):
+            with self.subTest(rel=rel):
+                payload = self.payload("Write", {"file_path": str(self.project / rel), "content": "x"})
+                code, _, err = self.entry(json.dumps(payload))
+                self.assertEqual(code, 2)
+                self.assertIn(f"{named} is a guard file", err)
+                self.assertIn("_bmad/custom/", err)  # the list of guard files includes the guard config
+                self.assertNotIn(str(self.project), err)
+
     def test_the_developer_overrides_of_guard_skills_are_blocked(self):
         for name in ("prompt-guard", "tool-guard", "ready-for-dev-gate", "agent-approval-grant"):
             with self.subTest(name=name):

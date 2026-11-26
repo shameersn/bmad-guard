@@ -190,7 +190,9 @@ def cd_folders(invocations: list[sp.Invocation], zones: dg.Zones) -> list[str]:
     return list(dict.fromkeys(folders))
 
 
-def target_codes(word: sp.Word, mode: str, zones: dg.Zones, folders: list[str]) -> list[str]:
+def target_codes(
+    word: sp.Word, mode: str, zones: dg.Zones, folders: list[str], files: list[str] | None = None
+) -> list[str]:
     text = word.text
     if word.dynamic or "$" in text:  # the value is not known: look for the name of a protected place
         lowered = text.lower()
@@ -207,7 +209,10 @@ def target_codes(word: sp.Word, mode: str, zones: dg.Zones, folders: list[str]) 
         ):
             codes.append("DOC_APPROVAL_STATE")
     for base in folders:
-        codes += zones.hits(text, base, ancestors=mode == "remove")
+        for code, rel in zones.hit_zones(text, base, ancestors=mode == "remove"):
+            codes.append(code)
+            if files is not None and code == "DOC_GUARD_SCRIPTS":
+                files.append(rel)
     return codes
 
 
@@ -224,10 +229,11 @@ def check(payload: dict, root: Path) -> list[hc.Verdict]:
     zones = dg.Zones(root, start)
     folders = cd_folders(invocations, zones)
     codes: list[str] = []
+    files: list[str] = []
     for inv in invocations:
         for word, mode in targets(inv, zones.cwd):
-            codes += target_codes(word, mode, zones, folders)
-    return [hc.Verdict(code, dg.REASONS[code], GUARD) for code in dict.fromkeys(codes)]
+            codes += target_codes(word, mode, zones, folders, files)
+    return dg.reasons(codes, files, GUARD)
 
 
 GUARDS = [hc.Guard(GUARD, ("Bash",), check)]
