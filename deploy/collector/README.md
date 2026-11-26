@@ -10,9 +10,9 @@ The spike that this came from is in `spikes/collector/` and stays as it was.
 - The sender posts events to the collector (`http://127.0.0.1:4318`) with HTTP basic auth: user = developer id,
   password = the developer's ingest key.
 - The collector checks the key against a bcrypt htpasswd file, **stamps `user` from the key** (a client cannot fake it),
-  deletes `user.email`, `user.account_uuid` and `user.account_id`, and writes to ClickHouse as `otel_writer`.
+  deletes the personal attributes Claude Code sends (see "Scrub list" below), and writes to ClickHouse as `otel_writer`.
 - `otel_writer` can only `INSERT`. Grafana reads as `grafana_reader` (`readonly = 2`).
-- Events are kept 180 days (TTL on the table, decision D6; compliance still has to approve the number).
+- Events and metrics are kept 180 days (TTL on the tables, decision D6; compliance still has to approve the number).
 - All ports bind to `127.0.0.1`.
 
 ## Pinned versions
@@ -35,12 +35,15 @@ Every image has an exact tag. No `latest`. The same tags are in `stack.yml`, `ke
 | `docker-compose.yml` | Entry point. Loads `stack.yml` with the password file. |
 | `stack.yml` | The three services. |
 | `otelcol/config.yaml` | Collector pipeline. |
-| `clickhouse/init/01-schema.sh` | Creates the table (TTL 180 days) and the two users. Runs once, on an empty volume. |
+| `clickhouse/init/01-schema.sh` | Creates the events table (TTL 180 days) and the two users. Runs once, on an empty volume. |
+| `clickhouse/init/02-metrics.sh` | Creates the two metrics tables (`otel_metrics_sum`, `otel_metrics_gauge`, TTL 180 days) and the writer's INSERT grants. Runs on an empty volume; run it by hand on an existing stack (see "Metrics"). |
 | `clickhouse/config.d/backup-disk.xml` | Lets ClickHouse write backups to the `clickhouse-backups` volume. |
 | `grafana/` | Data source and the dashboard (provisioned). |
 | `keys.py` | Add, rotate or remove a developer key. Also `init` for the stack passwords. |
 | `backup.sh` | Backup, restore check, restore. |
 | `run_live_tests.py` | The live tests (spike tests 1-5 plus T2 checks). |
+| `run_telemetry_live.py` | The T4 live check: guard events, Claude Code telemetry, Grafana panels and both reports, from a throwaway BMAD project. |
+| `reports/guard_reports.py` | The two audit reports (commits with no guard events, review records with no `REVIEW_RECORDED` event). Read-only. |
 | `secrets.local.ini.example` | Placeholder passwords. The real file `secrets.local.ini` is git-ignored. |
 | `devkeys.htpasswd.example` | Example line with a fake hash. The real file `local/devkeys.htpasswd` is git-ignored. |
 
@@ -50,7 +53,8 @@ You need Docker with Compose v2.20 or newer, and Python 3.10+.
 
 ```sh
 cd deploy/collector
-python3 keys.py init            # creates secrets.local.ini with random passwords (or copy the .example and edit)
+python3 keys.py init            # creates secrets.local.ini with random passwords and an empty local/devkeys.htpasswd
+                                # (or copy the .example files and edit)
 python3 keys.py add dev-a       # first developer. Copy the key it prints: it is shown once.
 docker compose up -d
 docker compose ps               # clickhouse should be "healthy"
@@ -178,13 +182,135 @@ Logs in the ClickHouse exporter are **beta**, so every collector upgrade can cha
 5. Run `python3 run_live_tests.py`. All tests must pass. Write the result in a new report in `docs/reports/`.
 6. Check the exporter's table DDL (`logs_table.sql` of the new version) against `clickhouse/init/01-schema.sh`. The
    collector does not create or change the table (`create_schema: false`).
-7. On a Claude Code upgrade, check the attribute list again: the scrub step only removes what it knows (spike finding 2).
+7. On a Claude Code upgrade, check the attribute list again: the scrub step only removes what it knows (spike finding 2). Do the same for the metric names and attributes (README, "Claude Code telemetry"), and check the exporter's metrics DDL against `clickhouse/init/02-metrics.sh`.
+
+## Scrub list
+
+The collector deletes personal and machine attributes from Claude Code telemetry before they reach ClickHouse. The same
+chain runs for logs and for metrics: `attributes/scrub` (log attributes and metric datapoint attributes) and
+`resource/scrub` (resource attributes) in `otelcol/config.yaml`. The user is
+known from the key, so nothing is lost.
+
+**Reviewed 2026-11-26 against Claude Code 2.1.332. Review it on each Claude Code upgrade** (same time as the collector
+upgrade steps above). How: run a throwaway `claude -p` session against the stack (`run_telemetry_live.py` prints every
+attribute key it saw), compare with this table and the Claude Code monitoring docs
+(<https://code.claude.com/docs/en/monitoring-usage>, "Standard attributes"), then add what is new.
+
+| Attribute | Decision | Why |
+|---|---|---|
+| `user.email` | **delete** | Personal. |
+| `user.account_uuid`, `user.account_id` | **delete** | Account ids of the person. Also set `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false` in the managed template (the docs name it for metrics; not verified for logs). |
+| `user.id` | **delete** | Claude Code's anonymous id (kept in `~/.claude.json`): a second, unrelated id for the same person. |
+| `organization.id` | **delete** | Organization id. No use for the pilot; it names the customer account. |
+| `workspace.host_paths` | **delete** | Folders on the laptop; they hold the account name. |
+| `host.name`, `host.id` (resource) | **delete** | Machine names. Off by default (`OTEL_RESOURCE_INCLUDE_HOST`); removed in case someone turns them on. |
+| `session.id` | keep | A random id. It groups the events of one session and matches the guards' `session_id`. |
+| `terminal.type`, `prompt.id`, `event.sequence`, `model`, token and cost counts, durations, `plugin.*`, `hook_*`, `managed_settings.*`, `anthropic.*`, `os.type`, `os.version`, `host.arch`, `service.version` | keep | Not personal. |
+| `prompt`, `prompt_text`, `response` | keep (redacted by Claude Code) | With the content switches at `0` they hold `<REDACTED>` or nothing. Checked live for all three. |
+| `app.version`, `app.entrypoint` | keep (switched on in the template) | Not personal. |
+| `vcs.*` | not sent (`OTEL_METRICS_INCLUDE_REPOSITORY=false`) | If you turn it on, `vcs.*` may name the repository: decide first. Not in the scrub list. |
+| `anthropic.plan`, `anthropic.provider`, `anthropic.custom_base_url`, `start_type`, `type`, `model`, `effort`, `query_source`, `tool_name`, `decision`, `language`, `skill.name`, `plugin.name`, `mcp_server.name`, `mcp_tool.name`, `agent.name` (metric datapoints) | keep | Not personal. Skill, plugin, MCP and agent names are `custom` or `third-party` unless `OTEL_LOG_TOOL_DETAILS=1` (it is `0`). |
+
+The tested behaviour: `run_telemetry_live.py` sends one made-up log record and one made-up metric datapoint that carry
+every attribute in the "delete" rows and checks that none is stored, and that `session.id` and `terminal.type` stay on logs. A real session did not carry `user.id`,
+`organization.id` or the email (this machine's login), so the made-up record is what proves those rules.
+
+## Claude Code telemetry
+
+Claude Code sends its own **events** (logs: `claude_code.api_request`, `claude_code.user_prompt`, ...) and **metrics** to
+this collector. The settings are in the managed-settings template (`module/managed-settings/managed-settings.json`,
+`env` block and `otelHeadersHelper`; see `docs/managed-settings-rollout.md`). What the collector does with them:
+
+- Both signals use the same receiver, so the same basic auth, then the same chain: `user` stamped from the key, personal
+  attributes deleted (the scrub list below covers log attributes, metric datapoint attributes and resource attributes).
+- **Events:** table `guard.guard_events`. The event name is in `Body` (`EventName` is empty). `ServiceName` is `claude-code`.
+- **Metrics:** tables `guard.otel_metrics_sum` and `guard.otel_metrics_gauge` (same database, the exporter's default names,
+  180-day TTL). Claude Code sends counters, which are sums with delta temporality (the template sets that on purpose), so
+  panels `sum(Value)` over the time range. The user is `Attributes['user']`.
+- Metrics seen live (Claude Code 2.1.332, one reply): `claude_code.session.count`, `claude_code.token.usage` (`type`:
+  input, output, cacheRead, cacheCreation), `claude_code.cost.usage` (`model`), `claude_code.active_time.total`. The docs
+  also list `claude_code.lines_of_code.count`, `claude_code.commit.count`, `claude_code.pull_request.count` and
+  `claude_code.code_edit_tool.decision`; a reply-only session does not produce them, so the live check sends made-up
+  datapoints for those four to prove the panels.
+- The auth header comes from `otel_headers.py` (Ledger), which reads the developer's own key from the credential file or
+  the environment. So the managed file holds no key.
+
+### Metrics: tables and an existing stack
+
+The writer has INSERT only, so the exporter must not create tables (`create_schema: false`). `02-metrics.sh` creates them.
+The layout is what the exporter itself creates (generated once in a scratch database with `create_schema: true` and
+copied; 21 and 23 columns, same as the exporter's). Only **sum and gauge** exist: Claude Code sends counters. If a
+histogram or summary ever arrives, the exporter refuses it (no table) and the collector log shows the error; add that
+table to `02-metrics.sh` from the exporter's DDL.
+
+A stack whose volumes were created before this change has no metrics tables (the init folder runs once). Create them:
+
+```sh
+docker compose exec -T clickhouse bash /docker-entrypoint-initdb.d/02-metrics.sh    # idempotent
+docker compose restart otelcol                                                      # not needed, but harmless
+```
+
+Metrics panels in the dashboard: sessions, tokens (by type), cost (USD, by model), lines of code, commits and pull
+requests, edit tool decisions and active time, each per user. All plain `SELECT`s as `grafana_reader`.
+
+### Metric attribute switches (set on purpose in the template)
+
+| Variable | Value | Why |
+|---|---|---|
+| `OTEL_METRICS_INCLUDE_SESSION_ID` | `true` | The docs say it applies to metrics and events. Keeps `session.id` on events, which groups a session across logs and metrics. Cost: one series per session (fine for a pilot; set `false` if the metrics tables grow). |
+| `OTEL_METRICS_INCLUDE_VERSION` | `true` | `app.version`: not personal; shows who is on which Claude Code version (the `onFailure` rollout needs 2.1.295+). |
+| `OTEL_METRICS_INCLUDE_ACCOUNT_UUID` | `false` | `user.account_uuid` and `user.account_id` off at the source (metrics and events). The collector deletes them too. |
+| `OTEL_METRICS_INCLUDE_ENTRYPOINT` | `true` | `app.entrypoint` (cli, IDE): not personal. |
+| `OTEL_METRICS_INCLUDE_REPOSITORY` | `false` | `vcs.*` would name the repository. |
+| `OTEL_METRICS_INCLUDE_RESOURCE_ATTRIBUTES` | `false` | Custom `OTEL_RESOURCE_ATTRIBUTES` keys would become labels on every series. We set none. |
+| `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` | `delta` | The default; set explicitly because the panels add up values. With `cumulative` they would over-count. |
+
+## Audit reports
+
+Two small scripts compare the events with a git repository. They query ClickHouse through its HTTP interface as a
+**read-only** user (`grafana_reader`), never as `otel_writer`. They live here and not in `module/` because they need
+the reader's password and run where the stack runs, not on developer laptops (ADR 0005).
+
+```sh
+export GUARD_REPORT_PASSWORD=...          # the CLICKHOUSE_READER_PASSWORD value; never on the command line
+python3 reports/guard_reports.py commits --repo <project> --range origin/main..<feature branch>
+python3 reports/guard_reports.py reviews --repo <project> --ref origin/main
+```
+
+**Routine `commits` runs use `origin/main..<feature branch>`, before any rebase** (a rebase gives new trees, so its
+commits would show up as `no-event`). `--range` defaults to `origin/main..HEAD`.
+
+Defaults: `GUARD_REPORT_URL=http://127.0.0.1:8123`, `GUARD_REPORT_USER=grafana_reader`. Exit 0 = nothing to report, 1 =
+findings, 2 = the report could not run.
+
+| Report | Match key (ADR 0003 update) | Reports |
+|---|---|---|
+| `commits` | the staged tree id in the pre-commit event (`tree`) against each commit's tree | `no-event`: no pre-commit event at all. `blocked-only`: the hook refused that tree, but a commit holds it (committed with `--no-verify`). |
+| `reviews` | SHA-256 of the record file, as the hook wrote it (`target_sha256`) against the record in the repo | `no-event`: written by hand or edited later. `story-mismatch`: a valid record copied to another story name. |
+
+**What they can detect:** a commit made without the pre-commit hook (`--no-verify`, setup not run, another git client);
+a review record that the hook did not write, or that changed after.
+
+**What they cannot detect:**
+- A `--no-verify` commit whose tree equals one the hook allowed before (for example a revert to an earlier state).
+- A `--no-verify` commit of a tree the hook never saw, on a machine that sends no events at all: it IS reported, but so
+  is every commit of that machine. Read the report together with "who sends events".
+- Rebased, amended-with-changes or cherry-picked commits: the tree is new, so they show up as `no-event` (false alarm).
+  Run `commits` on a branch before it is rebased, or compare by hand. Server-side squash and merge commits show up too.
+- A review record the hook wrote for a "review" that the agent ran itself in the build session (the guard that blocks
+  that is the review-record guard, not the report).
+- A hook that was edited to emit events without checking. The hook scripts are in the project; the report trusts them.
+- Anything older than the 180-day retention, and anything from before this field existed (older commits and records are
+  all reported).
+- A sender outage that has not drained yet: events still in a laptop's queue are not in ClickHouse. Run the report
+  after the developers have pushed (the queue is flushed by the next tool call that sends).
 
 ## Tests
 
 ```sh
 python3 -m unittest discover -s tests            # from the repo root. No Docker needed
 python3 run_live_tests.py                         # here. Needs the running stack and Docker
+python3 run_telemetry_live.py                     # here. T4 check; also needs npx, git and, for Claude Code, `claude`
 ```
 
 The live script uses fake users `live-test-a` and `live-test-b`, keeps their keys in memory, and removes them at the end.

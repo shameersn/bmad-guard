@@ -3,7 +3,8 @@
 # ///
 """Ingest keys for the guard collector: add, rotate or remove a developer, and create the stack passwords.
 
-    python3 keys.py init              create secrets.local.ini with random stack passwords (never overwrites)
+    python3 keys.py init              create secrets.local.ini with random stack passwords and an empty
+                                      local/devkeys.htpasswd (never overwrites either)
     python3 keys.py add <user>        new developer: random key, hash into local/devkeys.htpasswd
     python3 keys.py rotate <user>     new key for an existing developer (same id, history stays continuous)
     python3 keys.py remove <user>     remove the developer's hash
@@ -147,6 +148,23 @@ def init_secrets(path: Path, out) -> bool:
     return True
 
 
+def init_htpasswd(path: Path, out) -> bool:
+    """Create an EMPTY key file if there is none, so a first `docker compose up` does not stop the collector
+    (it refuses to start without the file). An empty file lets nobody in. Mode 644, like write_entries: the file holds
+    hashes only and the non-root collector must read it. An existing file is never touched."""
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    os.close(fd)
+    path.chmod(0o644)
+    print(
+        f"created empty {path.parent.name}/{path.name} (no developer can send yet: add one with `keys.py add`).",
+        file=out,
+    )
+    return True
+
+
 def main(argv: list[str] | None = None, *, hasher: Hasher = bcrypt_hash, path: Path = HTPASSWD, out=None) -> int:
     out = out or sys.stdout
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], formatter_class=argparse.RawTextHelpFormatter)
@@ -158,6 +176,7 @@ def main(argv: list[str] | None = None, *, hasher: Hasher = bcrypt_hash, path: P
     try:
         if args.command == "init":
             init_secrets(SECRETS_FILE, out)
+            init_htpasswd(path, out)
         elif args.command == "remove":
             remove(args.user, path=path, out=out)
         else:

@@ -12,6 +12,7 @@ Fake names and data only.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib
 import io
 import json
@@ -246,8 +247,17 @@ class RecordTests(ReviewCase):
         event = events[0]
         self.assertEqual((event["verdict"], event["detail"], event["rule"]), ("allow", "pass", "review-record"))
         text = json.dumps(event)
-        for leak in ("2-3", "reviews", self.head(), str(self.project)):
+        for leak in (self.head(), str(self.project)):
             self.assertNotIn(leak, text)
+
+    def test_the_event_carries_the_record_path_and_the_hash_of_the_record_file(self):
+        self.run_record()
+        event = [e for e in queue(self.project) if e["reason_code"] == "REVIEW_RECORDED"][0]
+        file = self.project / REVIEW
+        self.assertEqual(event["target_path"], REVIEW)
+        self.assertEqual(event["target_sha256"], hashlib.sha256(file.read_bytes()).hexdigest())
+        file.write_text(file.read_text().replace("pass", "fail"))  # an edit afterwards no longer matches the event
+        self.assertNotEqual(event["target_sha256"], hashlib.sha256(file.read_bytes()).hexdigest())
 
     def test_the_whole_dispatcher_lets_the_call_through_and_writes_the_record(self):
         code, out, err = self.entry(json.dumps(self.payload("Bash", {"command": CALL}, session_id="s-whole")))

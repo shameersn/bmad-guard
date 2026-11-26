@@ -10,6 +10,9 @@
   A skill that is missing raises `HookError`, and the hook blocks with a message that says what to install.
 - `emit()`: record one guard event in the local queue. It never sends: a git hook never waits on the network
   (ADR 0003), so the collector settings in the environment are ignored here. It never raises.
+- `flush()`: send the queue once, best effort. Only pre-push calls it, after its own event is queued. No endpoint or
+  no queue: nothing happens (no network, no message). It respects the sender's 5-minute backoff and 3 s timeout and
+  never raises, so a collector that is down cannot stop a push.
 
 Events carry rule ids, counts and (for approval events) a path and a SHA-256. Never file content or matched text.
 """
@@ -146,3 +149,16 @@ def emit(root: Path, stage: str, verdict: str, reason_code: str, agent: str, **f
         if not _warned:
             _warned.append(type(err).__name__)
             print(f"bmad-guard: warning: event not recorded ({type(err).__name__})", file=sys.stderr)
+
+
+def flush(root: Path) -> None:
+    """Send what is queued, once. Never raises, never blocks a push beyond the sender's own timeout (3 s)."""
+    try:
+        ge = load_skill_script(root, "agent-project-logger", "guard_events.py")
+        config = ge.Config.for_project(root)
+        if config.sending_enabled and config.queue.is_file():
+            ge.emit(None, config)  # honours the backoff marker; a failure prints one warning and sets the backoff
+    except Exception as err:  # logging never changes a decision
+        if not _warned:
+            _warned.append(type(err).__name__)
+            print(f"bmad-guard: warning: events not sent ({type(err).__name__})", file=sys.stderr)

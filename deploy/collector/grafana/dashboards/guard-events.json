@@ -2,22 +2,316 @@
   "uid": "guard-events",
   "title": "Guard events",
   "schemaVersion": 39,
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "type": "table",
-      "title": "Events per user and verdict",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "guard-clickhouse" },
+      "title": "Guard events per user and verdict",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "guard-clickhouse" },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
           "rawSql": "SELECT User AS user, Verdict AS verdict, count() AS events FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName = 'bmad-guard' GROUP BY user, verdict ORDER BY user, verdict"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Blocks per rule",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT LogAttributes['reason_code'] AS rule_id, Guard AS guard, count() AS blocks, uniqExact(User) AS users FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName = 'bmad-guard' AND Verdict = 'block' GROUP BY rule_id, guard ORDER BY blocks DESC"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Warnings per rule",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT LogAttributes['reason_code'] AS rule_id, Guard AS guard, count() AS warnings, uniqExact(User) AS users FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName = 'bmad-guard' AND Verdict = 'warn' GROUP BY rule_id, guard ORDER BY warnings DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Claude Code events by name (name is in Body, not EventName)",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Body AS event, User AS user, count() AS events FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName != 'bmad-guard' GROUP BY event, user ORDER BY events DESC"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Claude Code sessions per user",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Attributes['user'] AS user, sum(Value) AS sessions FROM guard.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND ServiceName = 'claude-code' AND MetricName = 'claude_code.session.count' GROUP BY user ORDER BY sessions DESC"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Claude Code tokens per user and type",
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Attributes['user'] AS user, Attributes['type'] AS type, sum(Value) AS tokens FROM guard.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND ServiceName = 'claude-code' AND MetricName = 'claude_code.token.usage' GROUP BY user, type ORDER BY user, type"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Claude Code cost (USD) per user and model",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Attributes['user'] AS user, Attributes['model'] AS model, round(sum(Value), 4) AS cost_usd FROM guard.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND ServiceName = 'claude-code' AND MetricName = 'claude_code.cost.usage' GROUP BY user, model ORDER BY cost_usd DESC"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Claude Code lines of code per user",
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Attributes['user'] AS user, Attributes['type'] AS type, sum(Value) AS lines FROM guard.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND ServiceName = 'claude-code' AND MetricName = 'claude_code.lines_of_code.count' GROUP BY user, type ORDER BY user, type"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Claude Code commits and pull requests per user",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Attributes['user'] AS user, replaceOne(MetricName, 'claude_code.', '') AS metric, sum(Value) AS total FROM guard.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND ServiceName = 'claude-code' AND MetricName IN ('claude_code.commit.count', 'claude_code.pull_request.count') GROUP BY user, metric ORDER BY user, metric"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Claude Code edit tool decisions per user",
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Attributes['user'] AS user, Attributes['tool_name'] AS tool, Attributes['decision'] AS decision, sum(Value) AS decisions FROM guard.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND ServiceName = 'claude-code' AND MetricName = 'claude_code.code_edit_tool.decision' GROUP BY user, tool, decision ORDER BY user, tool, decision"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Claude Code active time (s) per user",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Attributes['user'] AS user, Attributes['type'] AS type, round(sum(Value), 1) AS seconds FROM guard.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND ServiceName = 'claude-code' AND MetricName = 'claude_code.active_time.total' GROUP BY user, type ORDER BY user, type"
         }
       ]
     }

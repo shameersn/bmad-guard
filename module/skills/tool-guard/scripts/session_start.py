@@ -13,6 +13,9 @@ Checks these and warns the developer (a `systemMessage`, shown by Claude Code) w
     A macOS configuration profile, the Windows registry and server-managed settings are not read.
 A third check: the per-user credential file (ADR 0007) is there but not safe to use (too open, not yours, a link,
 unreadable). A missing file is not a warning: with no endpoint, events only queue.
+At the start it also sends the event queue once (hook_common.flush): the git hooks only queue. Best effort: no endpoint
+means no network and no message; a collector that is down costs at most the sender's 3 s timeout, then 5 minutes
+of backoff.
 One `warn` event records it (code SETUP_INCOMPLETE, field `missing`). It always exits 0, even on an error.
 """
 
@@ -133,6 +136,7 @@ def main() -> int:
         payload = {}
     cwd = payload.get("cwd")
     root = hc.project_root(cwd if isinstance(cwd, str) and cwd else None)
+    hc.flush(root)  # send what the git hooks queued (they never send); best effort, backoff and 3 s timeout apply
     found = problems(root)
     if not found:
         return 0

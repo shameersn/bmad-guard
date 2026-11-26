@@ -425,7 +425,7 @@ class EventTests(PushCase):
         self.assertEqual([e["reason_code"] for e in events], ["PUSH_ALLOWED"])
         self.assertEqual((events[0]["verdict"], events[0]["commit_count"]), ("allow", "2"))
 
-    def test_the_hook_never_sends_events(self):
+    def test_a_collector_that_is_down_costs_one_warning_and_the_push_goes_ahead(self):
         self.reviewed_branch()
         proc = subprocess.run(
             ["git", "push", "origin", "HEAD"],
@@ -440,7 +440,7 @@ class EventTests(PushCase):
             },
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertNotIn("event", proc.stderr)
+        self.assertEqual(proc.stderr.count("could not send"), 1)  # the push hook sends the queue once (GUARD-3 T4)
 
 
 class EndToEndTests(PushCase):

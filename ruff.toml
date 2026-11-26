@@ -15,3 +15,5 @@ ignore = [
 [lint.per-file-ignores]
 # Live test script for the local Docker stack: fixed http://127.0.0.1 URLs and queries on its own fake test ids.
 "deploy/collector/run_live_tests.py" = ["S104", "S310", "S608"]
+# Live check for T4: fixed local URLs, a fake token shape from random, SQL on its own fake ids, long SQL strings.
+"deploy/collector/run_telemetry_live.py" = ["E501", "S310", "S311", "S608"]

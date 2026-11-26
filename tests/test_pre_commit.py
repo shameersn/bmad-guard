@@ -716,5 +716,51 @@ class RealCommitTests(HookTestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
 
+class TreeTests(HookTestCase):
+    """Every event carries the staged tree, which the commit then holds (ADR 0003 update): the report's match key."""
+
+    def tree_of(self, rev: str = "HEAD") -> str:
+        return self.git("rev-parse", f"{rev}^{{tree}}").stdout.strip()
+
+    def test_the_allow_event_holds_the_tree_of_the_commit_that_follows(self):
+        self.write("src/app.py", "print('hello')\n")
+        proc = self.git("add", "-A")
+        self.assertEqual(proc.returncode, 0)
+        proc = self.commit("add the app")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        events = [e for e in self.events() if e["reason_code"] == "COMMIT_ALLOWED"]
+        self.assertEqual([e["tree"] for e in events][-1], self.tree_of())
+
+    def test_a_blocked_attempt_has_the_tree_too_but_no_allow_event(self):
+        self.write("src/app.py", f"token = '{KEY}'\n")
+        self.stage("src/app.py")
+        self.assertEqual(self.hook().returncode, 1)
+        events = self.events()
+        self.assertTrue(all(len(e["tree"]) in (40, 64) for e in events))
+        self.assertEqual([e["verdict"] for e in events if e["stage"] == "pre-commit"], ["block"])
+
+    def test_commit_a_and_commit_with_a_path_record_the_tree_of_what_is_committed(self):
+        self.write("src/app.py", "print('hello')\n")
+        self.write("src/other.py", "print('other')\n")
+        self.commit_all("two files")
+        self.write("src/app.py", "print('changed')\n")
+        self.write("src/other.py", "print('staged only')\n")
+        self.stage("src/other.py")
+        proc = self.git("commit", "-q", "-m", "only the app", "--", "src/app.py", check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.events()[-1]["tree"], self.tree_of())
+        self.write("src/app.py", "print('again')\n")
+        proc = self.git("commit", "-q", "-a", "-m", "all", check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.events()[-1]["tree"], self.tree_of())
+
+    def test_the_tree_is_a_hash_and_holds_no_content(self):
+        self.write("src/app.py", "print('a very recognisable line')\n")
+        self.stage("src/app.py")
+        self.hook()
+        text = json.dumps(self.events())
+        self.assertNotIn("recognisable", text)
+
+
 if __name__ == "__main__":
     unittest.main()

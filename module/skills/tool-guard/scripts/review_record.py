@@ -33,11 +33,14 @@ recorded and not blocked: the command line side then prints that there is no rec
 references/guard-rules.md ("Review record").
 
 The record holds ids, a commit SHA, a verdict and a time. No content, no path. The event carries the rule id, the
-verdict and the session id.
+verdict, the session id, the record's path and the SHA-256 of the record file as written. The "review records with no
+REVIEW_RECORDED event" report (deploy/collector/reports) compares that hash with the record file in the repository: a
+record that was written by hand, or edited afterwards, has no event with its hash (ADR 0003, update of 2026-11-26).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -159,16 +162,19 @@ def record_call(command: str, root: Path, cwd: str) -> list[str] | None:
     return None if any(w.dynamic for w in rest) else [w.text for w in rest]
 
 
-def write_record(root: Path, key: str, sha: str, session: str, verdict: str) -> None:
-    """Write `_bmad-output/guard/reviews/<story>.json`, atomically. A later review of the story replaces the file."""
+def write_record(root: Path, key: str, sha: str, session: str, verdict: str) -> str:
+    """Write `_bmad-output/guard/reviews/<story>.json`, atomically. A later review of the story replaces the file.
+    Returns the SHA-256 of the bytes written."""
     path = record_path(root, key)
     record = {"story": key, "reviewed_sha": sha, "sessions": [session], "verdict": verdict, "reviewed_at": now()}
     path.parent.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps(record, indent=2) + "\n").encode("utf-8")
     handle, name = tempfile.mkstemp(dir=path.parent, prefix=f".{key}.", suffix=".tmp")
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as out:
-            out.write(json.dumps(record, indent=2) + "\n")
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
         os.replace(name, path)
+        return hashlib.sha256(data).hexdigest()
     except BaseException:
         try:
             os.unlink(name)
@@ -213,7 +219,7 @@ def check(payload: dict, root: Path) -> list[hc.Verdict]:
         ]
     key = story_name(story)
     try:
-        write_record(real_root, key, sha, session, verdict)
+        digest = write_record(real_root, key, sha, session, verdict)
     except OSError as err:
         return [
             verdict_of(
@@ -232,6 +238,8 @@ def check(payload: dict, root: Path) -> list[hc.Verdict]:
         detail=verdict,
         tool="Bash",
         session_id=session,
+        target_path=f"{REVIEWS_REL}/{key}.json",
+        target_sha256=digest,
     )
     return []
 

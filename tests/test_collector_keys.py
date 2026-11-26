@@ -166,6 +166,30 @@ class InitSecretsTests(unittest.TestCase):
             self.assertNotIn(value, out.getvalue())
 
 
+class InitHtpasswdTests(unittest.TestCase):
+    def test_creates_an_empty_readable_file_once_and_never_touches_an_existing_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "local" / "devkeys.htpasswd"
+            self.assertTrue(keys.init_htpasswd(target, io.StringIO()))
+            self.assertEqual(target.read_text(), "")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o644)  # the non-root collector must read it
+            target.write_text("dev-a:$2y$10$" + "x" * 53 + "\n")
+            self.assertFalse(keys.init_htpasswd(target, io.StringIO()))
+            self.assertIn("dev-a:", target.read_text())
+
+    def test_init_command_makes_both_files_and_a_later_add_still_works(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "local" / "devkeys.htpasswd"
+            secrets_file = Path(tmp) / "secrets.local.ini"
+            out = io.StringIO()
+            with mock.patch.object(keys, "SECRETS_FILE", secrets_file):
+                self.assertEqual(keys.main(["init"], path=target, out=out), 0)
+                self.assertTrue(secrets_file.is_file() and target.is_file())
+                self.assertEqual(keys.main(["add", "dev-a"], hasher=fake_hasher, path=target, out=io.StringIO()), 0)
+            self.assertIn("dev-a:", target.read_text())
+            self.assertNotIn(target.read_text().split(":")[1].strip(), out.getvalue())
+
+
 class CommittedFilesTests(unittest.TestCase):
     def test_every_image_has_an_exact_version_tag(self):
         text = (COLLECTOR / "stack.yml").read_text()
@@ -204,9 +228,47 @@ class CommittedFilesTests(unittest.TestCase):
             "user.email",
             "user.account_uuid",
             "user.account_id",
+            "user.id",
+            "organization.id",
+            "workspace.host_paths",
+            "host.name",
+            "resource/scrub",
             "create_schema: false",
         ):
             self.assertIn(needle, config)
+        pipeline = config[config.index("pipelines:") :]
+        self.assertLess(pipeline.index("attributes/who"), pipeline.index("attributes/scrub"))
+        self.assertIn("resource/scrub", pipeline)
+        metrics = pipeline[pipeline.index("metrics:") :]  # same chain as logs: user stamp, then scrub
+        for step in ("attributes/who", "attributes/scrub", "resource/scrub"):
+            self.assertIn(step, metrics)
+        self.assertIn("create_schema: false", config)  # the writer cannot CREATE
+
+    def test_metrics_tables_have_ttl_and_insert_only_grants(self):
+        sql = (COLLECTOR / "clickhouse" / "init" / "02-metrics.sh").read_text()
+        for table in ("otel_metrics_sum", "otel_metrics_gauge"):
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS guard.{table}", sql)
+            self.assertIn(f"GRANT INSERT ON guard.{table} TO otel_writer", sql)
+        self.assertIn("INTERVAL 180 DAY", sql)
+        self.assertNotRegex(sql, r"GRANT (ALL|SELECT|CREATE)[^\n]*otel_writer")
+
+    def test_dashboard_has_the_t4_panels_and_every_query_is_a_select(self):
+        import json
+
+        dash = json.loads((COLLECTOR / "grafana" / "dashboards" / "guard-events.json").read_text())
+        titles = [p["title"] for p in dash["panels"]]
+        for needle in ("per user and verdict", "Blocks per rule", "Warnings per rule", "Claude Code events"):
+            self.assertTrue(any(needle in t for t in titles), needle)
+        for panel in dash["panels"]:
+            sql = panel["targets"][0]["rawSql"]
+            self.assertTrue(sql.startswith("SELECT"), panel["title"])
+            self.assertNotRegex(sql, r"(?i)\b(insert|alter|drop|truncate|delete)\b")
+        metric_panels = [p for p in dash["panels"] if "otel_metrics_sum" in p["targets"][0]["rawSql"]]
+        self.assertGreaterEqual(len(metric_panels), 6)  # sessions, tokens, cost, lines, commits/PRs, decisions
+        for panel in metric_panels:
+            self.assertIn("Attributes['user']", panel["targets"][0]["rawSql"], panel["title"])
+        claude = next(p for p in dash["panels"] if "Claude Code events" in p["title"])
+        self.assertIn("Body", claude["targets"][0]["rawSql"])  # the event name is in Body (spike finding 3)
 
     def test_schema_has_ttl_and_least_privilege_users(self):
         sql = (COLLECTOR / "clickhouse" / "init" / "01-schema.sh").read_text()
