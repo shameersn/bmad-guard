@@ -48,7 +48,8 @@ class GuardTestCase(unittest.TestCase):
     with_content_scan = False
 
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
+        # Not the system temp folder: /tmp is a scratch folder, so a project there could never be blocked.
+        tmp = tempfile.TemporaryDirectory(dir=Path.home(), prefix=".bmad-guard-test-")
         self.addCleanup(tmp.cleanup)
         base = Path(os.path.realpath(tmp.name))
         self.home = base / "home"
