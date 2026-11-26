@@ -262,6 +262,9 @@ Phase 4 starts only when all of these are true:
 
 ## Todos
 
+- [ ] **T5 review answers (Shameer, 2026-11-26).** (1) Retire `managed-settings.json` (project paths) once the real-machine test passes. (2) A BMAD project without the manifest stays "allow" for the pilot; decide on "block" after the pilot from the T4 `commits` report. (3) The managed `Edit` deny for the machine folder stays deferred. (4) `setup_guard.py --uninstall` keeps removing a deny rule that equals one of ours (documented). (5) Uninstall keeps the event queue `.bmad-guard/`. Owner: Shameer.
+- [ ] **T5 real-machine checklist** in `docs/managed-settings-rollout.md` ("Manual steps for Shameer and IT"): root install, managed file, rollout steps 1–12, rollback, open checks 1, 2, 3, 4, 5, 8. IT replaces the collector endpoint placeholder. Owner: Shameer with IT.
+- [ ] **Backups of the metrics tables** (`backup.sh` covers the events table only; T4). Owner: Shameer.
 - [ ] **Pilot people and project** (D12). Owner: Shameer. Date: end of week 1 at the latest.
 - [ ] **Mac or Linux machine for a BA** (D11). Owner: Manesh G. Date: end of week 1. Decides whether T9 exists.
 - [ ] **Windows support** for BAs and PMs beyond L1 (git hooks, queue lock without `fcntl`, a Windows CI runner for the install test). BAs and PMs use Windows. Owner: Shameer. Phase 4 at the latest.
