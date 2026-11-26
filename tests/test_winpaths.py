@@ -118,6 +118,26 @@ class NameTests(unittest.TestCase):
         self.assertEqual(winpaths.name_of("/p/x. "), "x. ")
 
 
+class SmallHelperTests(unittest.TestCase):
+    def test_fold_is_normal_and_lower_case_on_windows_and_nothing_on_posix(self):
+        with windows():
+            self.assertEqual(winpaths.fold("C:\\Proj/_BMAD\\x\\..\\y"), "c:\\proj\\_bmad\\y")
+        self.assertEqual(winpaths.fold("/Proj/./_BMAD/"), "/Proj/./_BMAD/")
+
+    def test_seps_fwd_and_split_last(self):
+        with windows():
+            self.assertEqual(winpaths.seps(), "/\\")
+            self.assertEqual(winpaths.fwd("a\\b/c"), "a/b/c")
+            self.assertEqual(winpaths.split_last("a\\b/c\\appr"), ("a\\b/c", "appr"))
+            self.assertEqual(winpaths.split_last("appr"), ("", "appr"))
+            self.assertEqual(winpaths.split_last("/appr"), ("", "appr"))
+        self.assertEqual(winpaths.seps(), "/")
+        self.assertEqual(winpaths.fwd("a\\b/c"), "a\\b/c")
+        self.assertEqual(winpaths.split_last("a\\b/c/appr"), ("a\\b/c", "appr"))
+        self.assertEqual(winpaths.split_last("appr"), ("", "appr"))
+        self.assertEqual(winpaths.split_last("/appr"), ("", "appr"))  # rpartition("/") gave the same
+
+
 class StartDirTests(unittest.TestCase):
     def test_windows_uses_a_native_absolute_cwd_and_falls_back_to_the_root(self):
         with windows():

@@ -18,6 +18,7 @@ from tests.windows_flavour import HOME, windows
 
 pg = importlib.import_module("path_guard")
 dg = importlib.import_module("document_guard")
+bwg = importlib.import_module("bash_write_guard")
 
 PROJECT = "C:\\proj"
 ROOT = Path(PROJECT)
@@ -279,6 +280,90 @@ class WindowsDocumentGuardTests(unittest.TestCase):
         self.assertEqual([v.code for v in dg.check(posix, Path("/work"))], ["DOC_APPROVAL_STATE"])
         spaced = call("Write", {"file_path": "/work/docs/prd.md ", "content": "status: approved\n"}, cwd="/work")
         self.assertEqual([v.code for v in dg.check(spaced, Path("/work"))], [])  # a name with a space is no .md file
+
+
+class WindowsBashWriteGuardTests(unittest.TestCase):
+    """The Bash tool on Windows runs in Git Bash: POSIX commands, Git Bash paths, sometimes a quoted Windows path."""
+
+    def codes(self, command: str, **extra) -> list[str]:
+        with windows():
+            return [v.code for v in bwg.check(call("Bash", {"command": command}, **extra), ROOT)]
+
+    def test_git_bash_paths_reach_the_zones(self):
+        for command, code in (
+            ("echo x > /c/proj/_bmad/custom/approval-state.json", "DOC_APPROVAL_STATE"),
+            ("echo x > /c/PROJ/_BMAD/custom/Approval-State.json", "DOC_APPROVAL_STATE"),
+            ("echo x >> /cygdrive/c/proj/.claude/settings.json", "DOC_GUARD_SCRIPTS"),
+            ("tee /mnt/c/proj/_bmad/custom/guard/manifest.json", "DOC_GUARD_SCRIPTS"),
+            ("sed -i s/a/b/ /c/proj/_bmad/custom/project/guard/tool-rules.json", "DOC_GUARD_CONFIG"),
+            ("cp new.json /c/proj/_bmad-output/guard/reviews/s.json", "DOC_GUARD_RECORD"),
+            ("mv /c/proj/_bmad/custom/approval-state.json /c/proj/x.json", "DOC_APPROVAL_STATE"),
+            ("rm /c/proj/.claude/skills/tool-guard/scripts/pre_tool_use.py", "DOC_GUARD_SCRIPTS"),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.codes(command), [code])
+
+    def test_quoted_windows_paths_and_tricks_reach_the_zones(self):
+        for command, code in (
+            ("echo x > 'C:\\proj\\_bmad\\custom\\approval-state.json'", "DOC_APPROVAL_STATE"),
+            ("echo x > C:/proj/_bmad/custom/approval-state.json", "DOC_APPROVAL_STATE"),
+            ("echo x > '_bmad/custom/approval-state.json::$DATA'", "DOC_APPROVAL_STATE"),
+            ("echo x > '_bmad\\custom\\approval-state.json.'", "DOC_APPROVAL_STATE"),
+            ("echo x > '.claude\\settings.json '", "DOC_GUARD_SCRIPTS"),
+            ("echo x > '.CLAUDE/Settings.json'", "DOC_GUARD_SCRIPTS"),
+            ("echo x > '.claude./settings.json'", "DOC_GUARD_SCRIPTS"),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.codes(command), [code])
+
+    def test_removing_or_moving_a_folder_that_holds_a_zone_is_seen(self):
+        for command in ("rm -rf /c/proj/_bmad", "rm -r 'C:\\proj\\_bmad'", "mv /c/proj/_bmad /c/proj/old"):
+            with self.subTest(command=command):
+                self.assertIn("DOC_APPROVAL_STATE", self.codes(command))
+
+    def test_a_glob_that_can_match_the_state_file_is_seen_with_either_separator(self):
+        for command in ("echo x > /c/proj/_bmad/custom/appr*", "echo x > '_bmad\\custom\\appr*'"):
+            with self.subTest(command=command):
+                self.assertEqual(self.codes(command), ["DOC_APPROVAL_STATE"])
+        self.assertEqual(self.codes("echo x > '_bmad\\*\\x'"), [])  # a folder part that is a glob is not followed
+
+    def test_a_variable_in_a_windows_path_is_blocked_when_it_spells_a_protected_place(self):
+        self.assertEqual(self.codes('echo x > "$OUT"/_bmad/custom/approval-state.json'), ["DOC_APPROVAL_STATE"])
+        self.assertEqual(self.codes("echo x > '$OUT\\_bmad\\custom\\approval-state.json'"), ["DOC_APPROVAL_STATE"])
+        self.assertEqual(self.codes("echo x > '$OUT\\.claude\\settings.json'"), ["DOC_GUARD_SCRIPTS"])
+
+    def test_a_copy_into_a_folder_with_a_trailing_backslash_lands_inside_it(self):
+        self.assertEqual(self.codes("cp settings.json '.claude\\'"), ["DOC_GUARD_SCRIPTS"])
+        self.assertEqual(self.codes("cp approval-state.json '/c/proj/_bmad/custom/'"), ["DOC_APPROVAL_STATE"])
+
+    def test_cd_into_a_zone_then_write_is_followed_with_git_bash_paths(self):
+        self.assertEqual(self.codes("cd /c/proj/_bmad/custom && echo x > approval-state.json"), ["DOC_APPROVAL_STATE"])
+        self.assertEqual(self.codes("cd /c/proj/.claude && echo x > settings.json"), ["DOC_GUARD_SCRIPTS"])
+
+    def test_close_but_safe_commands_are_allowed(self):
+        for command in (
+            "echo x > /c/proj/src/app.py",
+            "cat /c/proj/_bmad/custom/approval-state.json",
+            "python3 s.py --state-file /c/proj/_bmad/custom/approval-state.json",
+            "cp a.txt /c/proj/docs/",
+            "echo x > /c/proj2/_bmad/custom/guard/manifest.json",
+            "echo x > 'C:\\proj\\docs\\notes.txt'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.codes(command), [])
+
+    def test_the_same_commands_on_this_os_do_not_change(self):
+        """Control: off Windows a Git Bash path is an ordinary folder, a backslash is an ordinary character."""
+        root = Path("/work")
+        for command in (
+            "echo x > /c/proj/.claude/settings.json",
+            "echo x > '.claude\\settings.json'",
+        ):
+            with self.subTest(command=command):
+                found = bwg.check(call("Bash", {"command": command}, cwd="/work"), root)
+                self.assertEqual([v.code for v in found], [])
+        found = bwg.check(call("Bash", {"command": "echo x > _bmad/custom/approval-state.json"}, cwd="/work"), root)
+        self.assertEqual([v.code for v in found], ["DOC_APPROVAL_STATE"])
 
 
 if __name__ == "__main__":
