@@ -193,7 +193,7 @@ FC-1   | L1    | PreToolUse Bash | block | BAD_HOOK_INPUT   | Tool hook gets inp
 LEAK-1 | L1+L2 | event queue     | clean |                  | Events hold no fake value and no command text
 ## Machine scripts (ADR 0008): the hooks run from a machine folder
 MACH-1  | L1 | PreToolUse Bash  | block | CMD_GIT_FORCE_PUSH | Project copy of customize.toml switches the force-push rule off; the machine copy still blocks
-MACH-2  | L1 | PreToolUse Write | block | DOC_GUARD_SCRIPTS  | Write, Edit and rm of the setup manifest (the guard marker)
+MACH-2  | L1 | PreToolUse Write | block | DOC_GUARD_SCRIPTS  | Write, Edit, rm and mv of the setup manifest or of _bmad/ (the guard marker)
 MACH-3  | L2 | git push         | allow | PUSH_ALLOWED       | Review record flow with machine hooks and the project-path command
 MACH-C1 | L1 | PreToolUse Bash  | allow |                    | Control: a project with no _bmad/ allows any tool call and writes nothing
 MACH-C2 | L1 | PreToolUse Bash  | allow |                    | Control: a BMAD project with no manifest is allowed, and session start says so
@@ -986,6 +986,7 @@ def scenario_machine_rules(lab: Lab, machine_lab: Lab) -> None:
         machine_lab.tool("Write", {"file_path": str(manifest), "content": "{}\n"}),
         machine_lab.tool("Edit", {"file_path": str(manifest), "old_string": '"version"', "new_string": '"v"'}),
         machine_lab.tool("Bash", {"command": f"rm {setup_guard.MANIFEST_REL}"}),
+        machine_lab.tool("Bash", {"command": "mv _bmad _bmad.off"}),  # the folder above the marker: same effect
     ]
     machine_lab.record("MACH-2", combine(calls))
     must(manifest.is_file(), "the setup manifest is gone after MACH-2")
