@@ -21,6 +21,7 @@ dg = importlib.import_module("document_guard")
 bwg = importlib.import_module("bash_write_guard")
 cg = importlib.import_module("command_guard")
 wg = importlib.import_module("write_gate")
+sp = importlib.import_module("shell_parse")
 
 PROJECT = "C:\\proj"
 ROOT = Path(PROJECT)
@@ -540,6 +541,62 @@ class WindowsWriteGateTests(unittest.TestCase):
         self.assertFalse(wg.gated(outside, root))
         self.assertTrue(wg.gated(odd, root))
         self.assertTrue(wg.gated(call("Bash", {"command": "echo x > nul"}, cwd="/work"), root))  # a file named nul
+
+
+class WindowsShellParseTests(unittest.TestCase):
+    """A command can be started by its Windows path: `'C:\\Program Files\\Git\\usr\\bin\\rm.exe' -rf src`."""
+
+    def test_base_name_splits_on_both_separators_and_drops_what_windows_drops(self):
+        with windows():
+            for text, want in (
+                ("C:\\Program Files\\Git\\usr\\bin\\rm.exe", "rm"),
+                ("C:/Program Files/Git/usr/bin/git.exe", "git"),
+                ("C:\\tools/rm.EXE", "rm"),
+                ("rm.", "rm"),
+                ("rm ", "rm"),
+                ("..\\bin\\git", "git"),
+                ("rm", "rm"),
+            ):
+                with self.subTest(text=text):
+                    self.assertEqual(sp.base_name(text), want)
+
+    def test_base_name_off_windows_is_what_it_was(self):
+        for text, want in (
+            ("/bin/rm", "rm"),
+            ("C:/tools/git.exe", "git"),
+            ("./rm", "rm"),
+            ("C:\\x\\rm.exe", "C:\\x\\rm"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(sp.base_name(text), want)
+
+    def test_a_command_started_by_its_windows_path_meets_the_same_rules(self):
+        with windows():
+            for command, code in (
+                ("'C:\\Program Files\\Git\\usr\\bin\\rm.exe' -rf src", "CMD_RM_RECURSIVE"),
+                ("rm. -rf src", "CMD_RM_RECURSIVE"),
+                ("RM.EXE -rf src", "CMD_RM_RECURSIVE"),
+                ("'C:\\Program Files\\Git\\cmd\\git.exe' reset --hard", "CMD_GIT_RESET_HARD"),
+                ("'C:\\x\\git.exe' push --force origin main", "CMD_GIT_FORCE_PUSH"),
+                ("/c/Program\\ Files/Git/cmd/git.exe push -f", "CMD_GIT_FORCE_PUSH"),
+            ):
+                with self.subTest(command=command):
+                    found = [v.code for v in cg.check(call("Bash", {"command": command}), ROOT)]
+                    self.assertEqual(found, [code])
+
+    def test_the_other_helpers_that_the_gate_uses(self):
+        from tests.windows_flavour import winpaths
+
+        with windows():
+            self.assertTrue(winpaths.is_null_device("nul"))
+            self.assertTrue(winpaths.is_null_device("NUL"))
+            self.assertFalse(winpaths.is_null_device("null"))
+            for text in ("C:\\x", "C:/x", "/c/x", "~\\x", "$USERPROFILE/x", "%USERPROFILE%\\x"):
+                self.assertTrue(winpaths.anchored(text), text)
+            for text in ("src/x", "x", "./x", "..\\x", "$X/y"):
+                self.assertFalse(winpaths.anchored(text), text)
+        self.assertFalse(winpaths.is_null_device("nul"))
+        self.assertFalse(winpaths.anchored("C:\\x"))
 
 
 if __name__ == "__main__":

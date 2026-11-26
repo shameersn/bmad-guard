@@ -94,7 +94,7 @@ def is_null_device(text: str) -> bool:
 def anchored(text: str) -> bool:
     """Windows only: the text is an absolute path (`C:\\x`, `C:/x`, `/c/x`) or starts with a home form (`~\\`,
     `$USERPROFILE`, `%USERPROFILE%`). It does not depend on the working folder."""
-    return IS_WINDOWS and (os.path.isabs(native(text)) or expand_home(text, "~") != text)
+    return IS_WINDOWS and (os.path.isabs(native(text)) or expand_home(text, "\0") != text)
 
 
 def start_dir(cwd, root):
