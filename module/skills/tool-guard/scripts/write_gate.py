@@ -509,12 +509,14 @@ def _cd_target(inv: sp.Invocation, cwd: str | None, paths: Paths) -> str | None:
 
 
 def write_targets(inv: sp.Invocation, cwd: str) -> list[tuple[sp.Word, str]]:
-    """bash_write_guard's write targets, without the sed script (the first operand when there is no -e or -f)."""
+    """bash_write_guard's write targets, without the sed script (the first operand when there is no -e or -f; not the
+    empty word of macOS `sed -i ''`, which is the backup suffix)."""
     found = bwg.targets(inv, cwd)
     if inv.name.lower() == "sed":
-        values = bwg._opts(inv).values
-        if not any(key in values for key in ("-e", "-f", "--expression", "--file")):
-            return found[1:]
+        opts = bwg._opts(inv)
+        if not any(key in opts.values for key in ("-e", "-f", "--expression", "--file")):
+            script = next((w for w in opts.positionals if w.text), None)
+            return [t for t in found if t[0] is not script]
     return found
 
 

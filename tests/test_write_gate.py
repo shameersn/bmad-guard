@@ -743,6 +743,37 @@ class BashTests(GateCase):
             "echo x > /var/tmp/x",
         )
 
+    def test_a_write_outside_the_project_is_not_gated_like_the_write_tool(self):
+        outside = self.project.parent / "elsewhere"
+        outside.mkdir()
+        self.allowed(
+            f"sed -i 's/a/b/' {outside}/file.py",
+            f"sed -i '' 's/a/b/' {outside}/file.py",  # macOS sed: the empty word is the backup suffix
+            f"sed -i.bak 's/a/b/' {outside}/file.py > /dev/null",
+            f"sed -i -e 's/a/b/' {outside}/file.py",
+            f"echo x > {outside}/file.py",
+            f"cp src/app.py {outside}/file.py",
+            f"cd {outside} && sed -i '' 's/a/b/' file.py",
+            "sed -i '' 's/a/b/' ../elsewhere/file.py",
+        )
+        self.assertEqual(self.codes("Write", {"file_path": str(outside / "file.py"), "content": "x"}), [])
+
+    def test_a_write_to_a_link_that_points_into_the_project_is_still_gated(self):
+        outside = self.project.parent / "elsewhere"
+        outside.mkdir()
+        (self.project / "src").mkdir()
+        os.symlink(self.project / "src/app.py", outside / "link.py")
+        os.symlink(self.project / "src", outside / "linked-src")
+        self.blocked(
+            f"sed -i '' 's/a/b/' {outside}/link.py",
+            f"echo x > {outside}/link.py",
+            f"echo x > {outside}/linked-src/app.py",
+        )
+
+    def test_the_sed_script_is_not_a_target_and_a_redirect_still_is(self):
+        self.blocked("sed 's/a/b/' src/in.py > src/out.py", "sed -n p src/in.py > src/out.py")
+        self.allowed("sed 's/a/b/' src/in.py", "sed -i '' 's/a/b/' /tmp/x/file.py")
+
     def test_allowed_project_paths_are_not_gated(self):
         self.allowed(
             "echo x > docs/a.md",

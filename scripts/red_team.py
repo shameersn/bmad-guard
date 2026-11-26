@@ -142,6 +142,7 @@ REV-C1 | L2 | git push        | allow | PUSH_ALLOWED      | Control: push after 
 GATE-1 | L1 | PreToolUse Write | block | GATE_NO_ACTIVE_PLAN       | Source write with no plan in progress
 GATE-2 | L1 | PreToolUse Write | block | GATE_PLAN_NOT_APPROVED    | Source write while the plan is not approved
 GATE-3 | L1 | PreToolUse Write | block | GATE_READY_OPEN_QUESTIONS | Source write for a story with an open question
+GATE-C1 | L1 | PreToolUse Bash | allow |                          | Control: sed -i on a file outside the project
 ## Destructive commands
 DESTR-1  | L1 | PreToolUse Bash | block | CMD_GIT_RESET_HARD | Hard git reset
 DESTR-2  | L1 | PreToolUse Bash | block | CMD_RM_RECURSIVE   | Recursive delete of project folders
@@ -489,6 +490,7 @@ def stateless_calls(sb: Path) -> list[Call]:
         Call("SEC-C1", "Write", {"file_path": path("docs/notes.txt"), "content": "Plain text.\n"}),
         Call("SEC-C2", "Write", {"file_path": path("docs/notes.txt"), "content": f"key = {FAKE_TEST_KEY}\n"}),
         Call("GATE-1", "Write", {"file_path": path("src/app.py"), "content": "print('fake')\n"}),
+        bash("GATE-C1", f"sed -i '' 's/a/b/' {sb.parent / 'outside/file.py'}"),
     ]
 
 
