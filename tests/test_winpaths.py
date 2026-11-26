@@ -118,6 +118,22 @@ class NameTests(unittest.TestCase):
         self.assertEqual(winpaths.name_of("/p/x. "), "x. ")
 
 
+class StartDirTests(unittest.TestCase):
+    def test_windows_uses_a_native_absolute_cwd_and_falls_back_to_the_root(self):
+        with windows():
+            self.assertEqual(winpaths.start_dir("C:\\proj\\sub", "ROOT"), "C:\\proj\\sub")
+            self.assertEqual(winpaths.start_dir("/c/proj/sub", "ROOT"), "C:\\proj\\sub")
+            for bad in ("", None, 5, "sub\\x", "relative"):
+                with self.subTest(cwd=bad):
+                    self.assertEqual(winpaths.start_dir(bad, "ROOT"), "ROOT")
+
+    def test_posix_is_what_the_guards_did_before(self):
+        self.assertEqual(winpaths.start_dir("/p/sub", "ROOT"), "/p/sub")
+        for bad in ("", None, 5, "sub", "C:\\x"):
+            with self.subTest(cwd=bad):
+                self.assertEqual(winpaths.start_dir(bad, "ROOT"), "ROOT")
+
+
 class ExpandHomeTests(unittest.TestCase):
     def test_windows_forms(self):
         env = {"APPDATA": "C:\\Users\\tester\\AppData\\Roaming", "LOCALAPPDATA": "C:\\Users\\tester\\AppData\\Local"}

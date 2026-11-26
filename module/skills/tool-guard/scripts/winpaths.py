@@ -65,6 +65,16 @@ def strip_win_tricks(path: str) -> str:
     return drive + "\\".join(names)
 
 
+def start_dir(cwd, root):
+    """The folder a hook call starts in: the input's `cwd` when it is an absolute path text (Windows: a Git Bash form
+    is made native first), else `root`. POSIX: what the guards did before (an absolute `cwd` text, else `root`)."""
+    if isinstance(cwd, str) and cwd:
+        cwd = native(cwd)
+        if os.path.isabs(cwd):
+            return cwd
+    return root
+
+
 def clean(text: str) -> str:
     """`native()` then `strip_win_tricks()`: the text to join to a folder."""
     return strip_win_tricks(native(text))

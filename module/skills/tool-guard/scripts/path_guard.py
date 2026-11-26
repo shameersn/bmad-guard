@@ -33,6 +33,7 @@ import guard_config as gc  # noqa: E402 - sibling modules, found through the lin
 import hook_common as hc  # noqa: E402
 import hook_wiring as hw  # noqa: E402
 import shell_parse as sp  # noqa: E402
+import winpaths as wp  # noqa: E402
 
 GUARD = "path-guard"
 FILE_KEYS = {
@@ -53,6 +54,7 @@ REASONS = {
     "PATH_AWS_DIR": "~/.aws holds cloud credentials. Do not read or write it; ask the developer.",
     "PATH_SSH_DIR": "~/.ssh holds SSH keys and host settings. Do not read or write it; ask the developer.",
     "PATH_GUARD_CONFIG": "~/.config/bmad-guard holds the guard's own settings and credentials. Do not touch it.",
+    "PATH_DEVICE": "A Windows device path (\\\\.\\...) cannot be checked. Use a normal file path.",
 }
 GREP_COMMANDS = {"grep", "egrep", "fgrep", "rg", "ag", "ack"}
 TEXT_COMMANDS = {"echo", "printf"}
@@ -107,7 +109,7 @@ class NameRule:
 @dataclass(frozen=True)
 class DirRule:
     code: str
-    folder: str  # absolute, real path
+    folder: str  # absolute, real path, in the form of winpaths.key()
 
 
 def _has_wildcard(text: str) -> bool:
@@ -137,17 +139,12 @@ class Matcher:
                 folder = os.path.join(self.home, base[2:])
             else:
                 folder = os.path.join(root, base)  # absolute stays absolute
-            self.dirs.append(DirRule(code, os.path.realpath(folder)))
+            self.dirs.append(DirRule(code, wp.key(folder)))
         else:
             self.names.append(NameRule(code, pattern.lower(), tuple(c.lower() for c in carve_outs)))
 
     def _expand(self, text: str) -> str:
-        for var in ("${HOME}", "$HOME"):
-            if text.startswith(var):
-                return self.home + text[len(var) :]
-        if text == "~" or text.startswith("~/"):
-            return self.home + text[1:]
-        return text
+        return wp.expand_home(text, self.home)
 
     def _name_hits(self, name: str) -> list[str]:
         name = name.lower()
@@ -174,17 +171,20 @@ class Matcher:
         text = self._expand(text.strip())
         if not text:
             return found
+        if wp.is_device(text):  # Windows only
+            return ["PATH_DEVICE"]
+        text = wp.clean(text)  # Windows only: Git Bash paths, `\\?\`, stream suffix, trailing dots and spaces
         literal = text[: min((text.index(c) for c in "*?[" if c in text), default=len(text))]
         if "$" not in text:
             plain = os.path.normpath(os.path.join(self.cwd, literal))
             real = os.path.realpath(plain)
-            for candidate in {plain, real}:
+            for candidate in {os.path.normcase(plain), os.path.normcase(real)}:
                 for rule in self.dirs:
-                    if candidate == rule.folder or candidate.startswith(rule.folder + os.sep):
+                    if candidate == rule.folder or candidate.startswith(rule.folder + os.path.sep):
                         found.append(rule.code)
             if real != plain and literal == text:  # a link to a sensitive file name
                 found += self._name_hits(os.path.basename(real))
-        name = text.rstrip("/").rsplit("/", 1)[-1]
+        name = wp.name_of(text)
         if not name.startswith("$"):
             found += self._name_hits(name)
         return list(dict.fromkeys(found))
@@ -294,8 +294,7 @@ def check(payload: dict, root: Path) -> list[hc.Verdict]:
         if tool == "Bash":  # command_guard reports it once
             return []
         return [hc.Verdict("EXT_BAD_FILE", f"{err}. Fix the file by hand; this tool is blocked until then.", GUARD)]
-    cwd = payload.get("cwd")
-    start = Path(cwd) if isinstance(cwd, str) and cwd and Path(cwd).is_absolute() else root
+    start = wp.start_dir(payload.get("cwd"), root)
     matcher = Matcher(root, start, tuple(extra))
     if tool == "Bash":
         command = tool_input.get("command")
