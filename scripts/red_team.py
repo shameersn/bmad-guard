@@ -17,6 +17,11 @@ close-but-safe actions that must pass, so the suite proves the guards do not blo
 rollout doc (PHI, wrong DB, edit after approval, same-session review) are listed on their own in the report.
 A case that did not run is reported as NOT RUN, never as PASS.
 
+A family "Machine scripts" (GUARD-3 T5, ADR 0008: MACH-1 to MACH-3, MACH-C1, MACH-C2) runs the same hooks from a temp
+machine folder made by scripts/install_machine.py. The command lines are the managed-template ones (absolute paths, a
+space in the path). Never a system path, never as root: a root-owned folder, the real OS paths and a real managed file
+need a real machine (docs/managed-settings-rollout.md).
+
 Needs network (npx downloads bmad-method@6.12.4), Node (npx), uv and git, like the install test. Fake data only: every
 key-shaped value is built at run time; every identifier is random and fake. Not part of `python3 -m unittest discover`.
 
@@ -186,6 +191,12 @@ SS-1   | L1    | SessionStart    | warn  | SETUP_INCOMPLETE | Session start with
 SS-C1  | L1    | SessionStart    | allow |                  | Control: session start with the setup in place
 FC-1   | L1    | PreToolUse Bash | block | BAD_HOOK_INPUT   | Tool hook gets input that is not JSON
 LEAK-1 | L1+L2 | event queue     | clean |                  | Events hold no fake value and no command text
+## Machine scripts (ADR 0008): the hooks run from a machine folder
+MACH-1  | L1 | PreToolUse Bash  | block | CMD_GIT_FORCE_PUSH | Project copy of customize.toml switches the force-push rule off; the machine copy still blocks
+MACH-2  | L1 | PreToolUse Write | block | DOC_GUARD_SCRIPTS  | Write, Edit and rm of the setup manifest (the guard marker)
+MACH-3  | L2 | git push         | allow | PUSH_ALLOWED       | Review record flow with machine hooks and the project-path command
+MACH-C1 | L1 | PreToolUse Bash  | allow |                    | Control: a project with no _bmad/ allows any tool call and writes nothing
+MACH-C2 | L1 | PreToolUse Bash  | allow |                    | Control: a BMAD project with no manifest is allowed, and session start says so
 """  # noqa: E501
 
 
@@ -501,7 +512,9 @@ NOT_COVERED = (
     "top-level session ids. Whether a subagent shares its parent's id is not known; run the review in a fresh "
     "top-level session.",
     "**Permission deny rules** (`permissions.deny`) are the second layer and are not exercised: only the hooks "
-    "are driven. The managed-settings file is a template and is not installed here.",
+    'are driven. The managed-settings files are templates and are not installed here. The "Machine scripts" '
+    "cases run the hooks from a temp machine folder (never a system path, never as root); a root-owned folder, the "
+    "real OS paths and a real managed file are the manual steps in `docs/managed-settings-rollout.md`.",
     "**Bypass paths** (ADR 0002, accepted): `git commit --no-verify` by a person, another git client, a project "
     "where the setup script was not run, a script that writes a guarded file (`python -c`), and CI (not built). "
     "The agent's own `--no-verify` is covered (NV-1, NV-2).",
@@ -654,9 +667,19 @@ def approve_plan(runner: it.Runner, sandbox: Path, rel: str) -> None:
 class Lab:
     """One sandbox: fires hook calls and git commands, and records one Result per case id."""
 
-    def __init__(self, runner: it.Runner, sandbox: Path, results: dict[str, Result]) -> None:
+    def __init__(
+        self,
+        runner: it.Runner,
+        sandbox: Path,
+        results: dict[str, Result],
+        settings: dict | None = None,
+        env_extra: dict[str, str] | None = None,
+    ) -> None:
+        """`settings` and `env_extra` stand in for the sandbox's own wiring (the machine cases use the managed-template
+        hooks and no bytecode)."""
         self.runner, self.sb, self.results = runner, sandbox, results
-        self.settings = json.loads((sandbox / setup_guard.SETTINGS_REL).read_text(encoding="utf-8"))
+        self.env_extra = env_extra or {}
+        self.settings = settings or json.loads((sandbox / setup_guard.SETTINGS_REL).read_text(encoding="utf-8"))
 
     def queue_len(self) -> int:
         return len(it.queue_lines(self.sb))
@@ -675,7 +698,7 @@ class Lab:
                 self.sb,
                 stdin=stdin,
                 timeout=int(hook.get("timeout", 30)) + 20,
-                extra_env={"CLAUDE_PROJECT_DIR": str(self.sb)},
+                extra_env={"CLAUDE_PROJECT_DIR": str(self.sb), **self.env_extra},
             )
             runs.append((proc.returncode, proc.stdout, proc.stderr, hook.get("onFailure") == "block"))
         text = "\n".join(f"{out}\n{err}" for _c, out, err, _s in runs)
@@ -772,6 +795,7 @@ def scenario_general(lab: Lab, remote: Path) -> None:
     scenario_approval_docs(lab)
     scenario_ready_for_dev(lab)
     scenario_plan(lab, remote)
+    scenario_machine(lab, remote.parent)
 
 
 def scenario_questions(lab: Lab) -> None:
@@ -917,6 +941,130 @@ def record_sessions(path: Path) -> list[str] | None:
     except (OSError, ValueError):
         return None
     return sessions if isinstance(sessions, list) else None
+
+
+def install_machine_folder(runner: it.Runner, root: Path) -> tuple[Path, dict]:
+    """A temp machine folder (a space in its path) and the managed-template hooks that point into it."""
+    machine = root / "machine" / "Application Support" / "bmad-guard"
+    version = setup_guard.module_version(REPO)
+    cmd = [sys.executable, str(HERE / "install_machine.py"), "--target", str(machine), "--version", version]
+    proc, _ = runner.run(cmd, root)
+    must(proc.returncode == 0, f"install_machine.py failed: {it.tail(proc)}")
+    return machine, {"hooks": setup_guard.load_wiring(REPO).desired_hooks(str(machine))}
+
+
+def combine(observations: list[Observed]) -> Observed:
+    """One observation from several calls of one case: `block` only when every call blocked, `allow` only when every
+    call was allowed; anything mixed is reported as it is."""
+    actuals = {o.actual for o in observations}
+    actual = actuals.pop() if len(actuals) == 1 else "mixed: " + "/".join(o.actual for o in observations)
+    seen = [code for o in observations for code in o.seen]
+    return Observed(actual, all(o.ran for o in observations), seen, "\n".join(o.text for o in observations))
+
+
+def scenario_machine_rules(lab: Lab, machine_lab: Lab) -> None:
+    """MACH-1 and MACH-2: the general sandbox (set up, guarded), hooks run from the machine folder."""
+    sb = lab.sb
+    rules = sb / ".claude/skills/tool-guard/customize.toml"
+    original = rules.read_text(encoding="utf-8")
+    flags = 'flag_sets = [["-f|--force|--force-with-lease|--force-if-includes"]]'
+    must(flags in original, "the force-push rule in customize.toml changed: update MACH-1")
+    rules.write_text(original.replace(flags, 'flag_sets = [["--never-matches"]]'), encoding="utf-8")
+    push = {"command": "git push --force origin main"}
+    try:
+        obs = machine_lab.tool("Bash", push)
+        project_copy = lab.tool("Bash", push)  # the project's own hooks read the edited copy
+    finally:
+        rules.write_text(original, encoding="utf-8")
+    must(
+        project_copy.actual == "allow",
+        f"the edited project copy should switch the rule off, it was {project_copy.actual}",
+    )
+    machine_lab.record("MACH-1", obs)
+    manifest = sb / setup_guard.MANIFEST_REL
+    calls = [
+        machine_lab.tool("Write", {"file_path": str(manifest), "content": "{}\n"}),
+        machine_lab.tool("Edit", {"file_path": str(manifest), "old_string": '"version"', "new_string": '"v"'}),
+        machine_lab.tool("Bash", {"command": f"rm {setup_guard.MANIFEST_REL}"}),
+    ]
+    machine_lab.record("MACH-2", combine(calls))
+    must(manifest.is_file(), "the setup manifest is gone after MACH-2")
+
+
+def changed_names(before: list[str], after: list[str]) -> str:
+    return ", ".join(sorted(set(before) ^ set(after)))
+
+
+def scenario_machine_unguarded(
+    runner: it.Runner, root: Path, results: dict[str, Result], settings: dict, env: dict[str, str]
+) -> None:
+    """MACH-C1 and MACH-C2: projects the guard was never set up in. Nothing is blocked and nothing is written."""
+    prompt = f"Use this token: {FAKE_KEY}"
+    plain = it.new_sandbox(runner, root, "mach-plain")
+    lab = Lab(runner, plain, results, settings, env)
+    before = it.tree_names(plain)
+    wanted = ("DESTR-3", "GATE-1", "SEC-1")  # a force push, a source write with no plan, a fake key in a file
+    calls = [lab.tool(c.tool, c.tool_input) for c in stateless_calls(plain) if c.id in wanted]
+    calls += [lab.prompt(prompt), lab.fire("SessionStart", start_payload(plain, SESSIONS["main"]))]
+    obs = combine(calls)
+    if obs.actual == "allow" and it.tree_names(plain) != before:
+        obs.actual, obs.note = "wrote files", changed_names(before, it.tree_names(plain))
+    lab.record("MACH-C1", obs, (FAKE_KEY,))
+
+    bmad = it.new_sandbox(runner, root, "mach-bmad")
+    (bmad / "_bmad").mkdir()
+    lab = Lab(runner, bmad, results, settings, env)
+    before = it.tree_names(bmad)
+    obs = combine([lab.tool("Bash", {"command": "git push --force origin main"}), lab.prompt(prompt)])
+    notice = lab.fire("SessionStart", start_payload(bmad, SESSIONS["main"]))
+    if obs.actual == "allow" and not ("not installed" in notice.text and "guards are off" in notice.text):
+        obs.actual, obs.note = "no notice", "session start did not say that bmad-guard is not installed"
+    if obs.actual == "allow" and it.tree_names(bmad) != before:
+        obs.actual, obs.note = "wrote files", changed_names(before, it.tree_names(bmad))
+    lab.record("MACH-C2", obs, (FAKE_KEY,))
+
+
+def scenario_machine_review(lab: Lab, machine_lab: Lab) -> None:
+    """MACH-3: the hook running from the machine folder records the review for a command that names the PROJECT copy of
+    review_record.py (what the bmad-code-review override says), and the pre-push hook accepts that record."""
+    runner, sb = lab.runner, lab.sb
+    it.git(runner, sb, "checkout", "-q", "-b", "rt-mach")
+    source = {"file_path": str(sb / "src/mach.py"), "content": "print('machine')\n"}
+    write = machine_lab.tool("Write", source, SESSIONS["build"])
+    must(write.actual == "allow", f"the write gate (machine copy) did not let the build session write: {write.actual}")
+    (sb / "src/mach.py").write_text(source["content"], encoding="utf-8")
+    build_record = "_bmad-output/guard/builds/spec-redteam.json"
+    made = lab.commit_staged(["src/mach.py", build_record], "source change, machine hooks")
+    must(made.actual != "block", "source did not commit")
+    review_record = "_bmad-output/guard/reviews/spec-redteam.json"
+    review = machine_lab.tool("Bash", {"command": review_command(sb)}, SESSIONS["review"])
+    sessions = record_sessions(sb / review_record)
+    made = lab.commit_staged([review_record], "review by a fresh session, machine hooks")
+    must(made.actual != "block", "review record did not commit")
+    obs = lab.push("rt-mach")
+    if obs.actual == "allow" and review.actual != "allow":
+        obs.actual, obs.note = "review blocked", f"the review command was {review.actual}"
+    elif obs.actual == "allow" and sessions != [SESSIONS["review"]]:
+        obs.actual, obs.note = "wrong record", f"the record holds sessions {sessions}"
+    elif obs.actual == "allow" and "REVIEW_RECORDED" not in review.seen:
+        obs.actual, obs.note = "no event", "the machine hook wrote no REVIEW_RECORDED event"
+    lab.record("MACH-3", obs)
+
+
+def scenario_machine(lab: Lab, root: Path) -> None:
+    """Machine scripts (ADR 0008): the same hooks, started from a temp machine folder through the managed-template
+    commands. The general sandbox is set up and guarded; the controls are projects the guard was never set up in."""
+    machine, settings = install_machine_folder(lab.runner, root)
+    env = {"PYTHONDONTWRITEBYTECODE": "1"}  # the folder stays exactly as installed
+    machine_lab = Lab(lab.runner, lab.sb, lab.results, settings, env)
+    scenario_machine_rules(lab, machine_lab)
+    scenario_machine_unguarded(lab.runner, root, lab.results, settings, env)
+    scenario_machine_review(lab, machine_lab)
+    check = ["--target", str(machine), "--check", "--expect-owner", str(os.getuid())]
+    proc, _ = lab.runner.run([sys.executable, str(HERE / "install_machine.py"), *check], root)
+    lab.runner.add(
+        "Machine scripts", "the hooks left the machine folder as installed", proc.returncode == 0, it.tail(proc)
+    )
 
 
 def scenario_privacy(results: dict[str, Result], runners: list[tuple[it.Runner, Path]]) -> None:
