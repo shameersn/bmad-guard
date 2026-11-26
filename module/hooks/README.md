@@ -118,7 +118,7 @@ How it works, in order, for each ref in git's input (`local-ref local-sha remote
 - **Only records committed in the push get a reason of their own.** An old record for another story, left in the tree (stale after a squash merge, say), would otherwise block every later push. A valid old record still counts as coverage; a bad one that is not in the push is ignored.
 - **Read the pushed tree, not the work tree.** What is pushed is what is checked. The price: the review record must be committed (the override tells the developer so), in its own commit, after the code.
 - **Which verdicts pass.** Only the exact value `pass`. `fail` and any other word block.
-- **Events: local queue only**, same as pre-commit. Stage `pre-push`, the rule id, the commit count and the source commit count, and the rule ids as detail. No ref name, no story, no SHA, no session id, no path.
+- **Events: queued, then sent once.** Pre-commit only queues (it never waits on the network). Pre-push queues its own event and then sends the whole queue once, best effort (GUARD-3 T4): no endpoint means no network and no message; a collector that is down costs one warning, at most the sender's 3 s timeout and then 5 minutes of backoff, and never stops the push. Stage `pre-push`, the rule id, the commit count and the source commit count, and the rule ids as detail. No ref name, no story, no SHA, no session id, no path.
 - **The tool-guard skill must be installed.** The hook loads `write_gate.py` from `.claude/skills` (or `.agents/skills`) for the source definition. If it is missing the push is blocked with `PUSH_ERROR` and a message to run the setup script.
 
 ### Known limits

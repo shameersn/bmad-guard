@@ -40,8 +40,9 @@ Event only: PUSH_ALLOWED, PUSH_NOTHING_TO_CHECK.
 Only records committed IN the push get a reason of their own: an old record for another story, left in the tree, is not
 the push's business. A valid old record still counts as coverage.
 
-Events go to the local queue only (guard_hook_lib.emit). They hold the rule id, the commit counts and a detail (rule ids
-or an error type). No path, no ref name, no session id, no content.
+Events go to the local queue (guard_hook_lib.emit); at the end the hook sends the queue once, best effort
+(guard_hook_lib.flush: no endpoint, no send; a failure never changes the answer). They hold the rule id, the commit
+counts and a detail (rule ids or an error type). No path, no ref name, no session id, no content.
 """
 
 from __future__ import annotations
@@ -354,6 +355,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         ]
     record(root, [r for _, r in blocked], commits, source, nothing=source == 0)
+    lib.flush(root)  # best effort, after the push event is queued; never changes the answer
     if blocked:
         print(render(blocked), file=sys.stderr)
         return 1

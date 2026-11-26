@@ -118,3 +118,17 @@ def emit(stage: str, verdict: str, reason_code: str, root: Path, agent: str, **f
         ge.emit(event, ge.Config.for_project(root))
     except Exception as err:  # logging never changes a decision
         print(f"bmad-guard: warning: event not recorded ({type(err).__name__})", file=sys.stderr)
+
+
+def flush(root: Path) -> None:
+    """Send the queue once (best effort). No endpoint or no queue: nothing happens. Respects the sender's backoff and
+    3 s timeout. Never raises."""
+    try:
+        ge = _guard_events()
+        if ge is None:
+            return
+        config = ge.Config.for_project(root)
+        if config.sending_enabled and config.queue.is_file():
+            ge.emit(None, config)
+    except Exception as err:  # logging never changes a decision
+        print(f"bmad-guard: warning: events not sent ({type(err).__name__})", file=sys.stderr)

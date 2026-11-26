@@ -17,7 +17,7 @@ What makes this hard:
 - Phase 1 (open item 1, raised by Shameer on 25 Nov) already proposed a per-user file outside every repo.
 - Phase 2 already denies the agent access to `~/.config/bmad-guard/**` (`PATH_GUARD_CONFIG` in `hook_wiring.py:56`; red-team case SENS-3). So the folder is reserved and protected now. Nothing is stored there yet.
 
-Who sends events: the Claude Code hooks (L1) call `emit()` with `Config.for_project()`. The git hooks (L2) never send (`guard_hook_lib.py`, `emit()`; test `test_the_hook_never_sends_events`). So the credentials are read by L1 hook processes and by `guard_events.py flush`.
+Who sends events: the Claude Code hooks (L1) call `emit()` with `Config.for_project()`. The git hooks (L2) only queue, except pre-push, which sends the queue once at its end (`guard_hook_lib.flush()`, GUARD-3 T4; pre-commit never sends). The `SessionStart` hook also sends the queue once. So the credentials are read by L1 hook processes, by the pre-push hook and by `guard_events.py flush`.
 
 Constraints:
 - No database credentials on laptops (ADR 0003).
