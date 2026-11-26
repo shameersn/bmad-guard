@@ -34,10 +34,10 @@ sys.modules[spec.name] = im
 spec.loader.exec_module(im)
 
 wiring = im.load_hook_wiring(ROOT)
-UID = os.getuid()
+UID = getattr(os, "getuid", lambda: 1)()
 VERSION = "v9.9.9-test"
 FAKE_KEY = "gh" + "p_" + "b7" * 18
-NOT_ROOT = unittest.skipIf(os.geteuid() == 0, "a root user can write anywhere")
+NOT_ROOT = unittest.skipIf(getattr(os, "geteuid", lambda: 1)() == 0, "a root user can write anywhere")
 
 
 class Base(unittest.TestCase):

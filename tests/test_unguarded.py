@@ -196,7 +196,7 @@ class StateTableTests(Base):
         os.chdir(self.base / "home")
         self.check(hc.UNGUARDED, ".")
 
-    @unittest.skipIf(os.geteuid() == 0, "root can read everything")
+    @unittest.skipIf(getattr(os, "geteuid", lambda: 1)() == 0, "root can read everything")
     def test_an_unreadable_folder_on_the_way_is_guarded(self):
         """lstat fails with a permission error: not 'absent', so the project counts as guarded."""
         root = self.project("locked", bmad=True)
