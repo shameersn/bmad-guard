@@ -20,6 +20,7 @@ pg = importlib.import_module("path_guard")
 dg = importlib.import_module("document_guard")
 bwg = importlib.import_module("bash_write_guard")
 cg = importlib.import_module("command_guard")
+wg = importlib.import_module("write_gate")
 
 PROJECT = "C:\\proj"
 ROOT = Path(PROJECT)
@@ -436,6 +437,109 @@ class WindowsCommandGuardTests(unittest.TestCase):
         self.assertEqual(found, ["CMD_RM_RECURSIVE"])
         found = [v.code for v in cg.check(call("Bash", {"command": "rm -rf 'tmp\\x'"}, cwd="/work"), root)]
         self.assertEqual(found, ["CMD_RM_RECURSIVE"])  # one odd name with a backslash, not the folder tmp
+
+
+class WindowsWriteGateTests(unittest.TestCase):
+    """Which writes need the gate (an approved plan): inside the project, not in an allowed or a scratch folder."""
+
+    def gated(self, tool: str, tool_input: dict, **extra) -> bool:
+        with windows():
+            return wg.gated(call(tool, tool_input, **extra), ROOT)
+
+    def file(self, path: str) -> bool:
+        return self.gated("Write", {"file_path": path, "content": "x"})
+
+    def bash(self, command: str, **extra) -> bool:
+        return self.gated("Bash", {"command": command}, **extra)
+
+    def test_source_writes_are_gated_in_every_spelling(self):
+        for path in (
+            "C:\\proj\\src\\app.py",
+            "C:/proj/src/app.py",
+            "C:/proj\\src/app.py",
+            "/c/proj/src/app.py",
+            "c:\\PROJ\\SRC\\app.py",
+            "C:\\proj\\src\\app.py.",
+            "C:\\proj\\src\\app.py ",
+            "C:\\proj\\src\\app.py::$DATA",
+            "src\\app.py",
+            "C:\\proj\\README.md",
+            "C:\\proj\\_bmad-output\\..\\src\\app.py",
+            "C:\\proj\\docs\\..\\src\\app.py",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.file(path))
+
+    def test_allowed_scratch_and_outside_writes_are_not_gated(self):
+        for path in (
+            "C:\\proj\\docs\\a.md",
+            "C:\\proj\\DOCS\\a.md",
+            "C:\\proj\\docs.\\a.md",  # Windows reads `docs.` as `docs`
+            "/c/proj/docs/a.md",
+            "C:\\proj\\_bmad-output\\a.md",
+            "C:\\proj\\_bmad\\custom\\x.json",
+            "C:\\proj\\.Claude\\skills\\x\\SKILL.md",
+            "C:\\proj\\.agents\\x",
+            "C:\\proj\\tmp\\x",
+            "C:\\proj\\TMP\\x",
+            "C:\\proj\\src\\node_modules\\x",
+            "C:\\other\\src\\app.py",
+            "C:\\proj2\\src\\app.py",  # a folder with the same prefix
+            "/c/Users/tester/notes.txt",
+            "~\\notes.txt",
+            "$USERPROFILE\\notes.txt",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(self.file(path))
+
+    def test_bash_write_targets_are_gated_with_git_bash_and_quoted_windows_paths(self):
+        for command in (
+            "echo x > /c/proj/src/app.py",
+            "echo x > 'src\\app.py'",
+            "echo x > 'C:\\proj\\src\\app.py'",
+            "tee /c/proj/src/app.py",
+            "cp a.py /c/proj/src/",
+            "cp a.py 'src\\'",
+            "sed -i s/a/b/ /c/proj/src/app.py",
+            "echo x > /c/proj/src/*.py",
+            "echo x > 'src\\*.py'",
+            "cd /c/proj/src && echo x > a.py",
+            "cd 'C:\\proj\\src' && echo x > a.py",
+            "cd \"$X\" && echo x > 'C:\\proj\\src\\a.py'",  # a cd we cannot follow: absolute targets still count
+            'cd "$X" && echo x > /c/proj/src/a.py',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.bash(command))
+
+    def test_bash_writes_that_need_no_gate(self):
+        for command in (
+            "echo x > /c/proj/docs/a.md",
+            "echo x > 'docs\\a.md'",
+            "echo x > nul",
+            "echo x > NUL",
+            "echo x > /dev/null",
+            "cd 'C:\\proj\\docs' && echo x > a.md",
+            "cd /c/proj/tmp && echo x > a.py",
+            "echo x > /c/Users/tester/notes.txt",
+            'cd "$X" && echo x > src/a.py',  # a relative target after a cd we cannot follow is not judged
+            "cat /c/proj/src/app.py",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.bash(command))
+
+    def test_a_git_bash_cwd_is_made_native(self):
+        self.assertTrue(self.bash("echo x > a.py", cwd="/c/proj/src"))
+        self.assertFalse(self.bash("echo x > a.md", cwd="/c/proj/docs"))
+
+    def test_the_same_texts_on_this_os_do_not_change(self):
+        """Control: off Windows a Git Bash path is outside the project, and `C:\\proj\\src\\app.py` is one odd file
+        name in the project folder."""
+        root = Path("/work")
+        outside = call("Write", {"file_path": "/c/proj/src/app.py"}, cwd="/work")
+        odd = call("Write", {"file_path": "C:\\proj\\src\\app.py"}, cwd="/work")
+        self.assertFalse(wg.gated(outside, root))
+        self.assertTrue(wg.gated(odd, root))
+        self.assertTrue(wg.gated(call("Bash", {"command": "echo x > nul"}, cwd="/work"), root))  # a file named nul
 
 
 if __name__ == "__main__":

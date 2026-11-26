@@ -86,6 +86,17 @@ def split_last(text: str) -> tuple[str, str]:
     return (text[:cut], text[cut + 1 :]) if cut >= 0 else ("", text)
 
 
+def is_null_device(text: str) -> bool:
+    """Windows only: `nul` (any case, also `NUL:`) is the null device, also from Git Bash. `> nul` writes no file."""
+    return IS_WINDOWS and text.lower() in ("nul", "nul:")
+
+
+def anchored(text: str) -> bool:
+    """Windows only: the text is an absolute path (`C:\\x`, `C:/x`, `/c/x`) or starts with a home form (`~\\`,
+    `$USERPROFILE`, `%USERPROFILE%`). It does not depend on the working folder."""
+    return IS_WINDOWS and (os.path.isabs(native(text)) or expand_home(text, "~") != text)
+
+
 def start_dir(cwd, root):
     """The folder a hook call starts in: the input's `cwd` when it is an absolute path text (Windows: a Git Bash form
     is made native first), else `root`. POSIX: what the guards did before (an absolute `cwd` text, else `root`)."""
