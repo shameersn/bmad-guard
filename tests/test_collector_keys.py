@@ -204,9 +204,31 @@ class CommittedFilesTests(unittest.TestCase):
             "user.email",
             "user.account_uuid",
             "user.account_id",
+            "user.id",
+            "organization.id",
+            "workspace.host_paths",
+            "host.name",
+            "resource/scrub",
             "create_schema: false",
         ):
             self.assertIn(needle, config)
+        pipeline = config[config.index("pipelines:") :]
+        self.assertLess(pipeline.index("attributes/who"), pipeline.index("attributes/scrub"))
+        self.assertIn("resource/scrub", pipeline)
+
+    def test_dashboard_has_the_t4_panels_and_every_query_is_a_select(self):
+        import json
+
+        dash = json.loads((COLLECTOR / "grafana" / "dashboards" / "guard-events.json").read_text())
+        titles = [p["title"] for p in dash["panels"]]
+        for needle in ("per user and verdict", "Blocks per rule", "Warnings per rule", "Claude Code events"):
+            self.assertTrue(any(needle in t for t in titles), needle)
+        for panel in dash["panels"]:
+            sql = panel["targets"][0]["rawSql"]
+            self.assertTrue(sql.startswith("SELECT"), panel["title"])
+            self.assertNotRegex(sql, r"(?i)\b(insert|alter|drop|truncate|delete)\b")
+        claude = next(p for p in dash["panels"] if "Claude Code" in p["title"])
+        self.assertIn("Body", claude["targets"][0]["rawSql"])  # the event name is in Body (spike finding 3)
 
     def test_schema_has_ttl_and_least_privilege_users(self):
         sql = (COLLECTOR / "clickhouse" / "init" / "01-schema.sh").read_text()

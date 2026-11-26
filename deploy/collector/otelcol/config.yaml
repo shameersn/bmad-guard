@@ -27,8 +27,9 @@ processors:
       - key: user
         from_context: auth.username
         action: upsert
-  # Claude Code telemetry carries the developer's email and account ids. We already
-  # know the user from the key, so drop them (no personal data in the event store).
+  # Claude Code telemetry carries personal and machine data. We already know the user from the key, so drop it
+  # (no personal data in the event store). Reviewed 2026-11-26 against Claude Code 2.1.332; the list and the
+  # keep/drop decision for each attribute are in README.md ("Scrub list"). Review it on each Claude Code upgrade.
   attributes/scrub:
     actions:
       - key: user.email
@@ -36,6 +37,20 @@ processors:
       - key: user.account_uuid
         action: delete
       - key: user.account_id
+        action: delete
+      - key: user.id            # Claude Code's anonymous id (in ~/.claude.json): a second id for the same person
+        action: delete
+      - key: organization.id
+        action: delete
+      - key: workspace.host_paths   # folders on the laptop: they hold the developer's account name
+        action: delete
+  # Resource attributes (not log attributes). Off by default in Claude Code (OTEL_RESOURCE_INCLUDE_HOST); removed
+  # here in case someone turns them on.
+  resource/scrub:
+    attributes:
+      - key: host.name
+        action: delete
+      - key: host.id
         action: delete
   batch:
     timeout: 2s
@@ -57,5 +72,5 @@ service:
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, attributes/who, attributes/scrub, batch]
+      processors: [memory_limiter, attributes/who, attributes/scrub, resource/scrub, batch]
       exporters: [clickhouse]

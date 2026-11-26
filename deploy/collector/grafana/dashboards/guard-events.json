@@ -2,22 +2,120 @@
   "uid": "guard-events",
   "title": "Guard events",
   "schemaVersion": 39,
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "type": "table",
-      "title": "Events per user and verdict",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "guard-clickhouse" },
+      "title": "Guard events per user and verdict",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "guard-clickhouse" },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
           "rawSql": "SELECT User AS user, Verdict AS verdict, count() AS events FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName = 'bmad-guard' GROUP BY user, verdict ORDER BY user, verdict"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Blocks per rule",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT LogAttributes['reason_code'] AS rule_id, Guard AS guard, count() AS blocks, uniqExact(User) AS users FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName = 'bmad-guard' AND Verdict = 'block' GROUP BY rule_id, guard ORDER BY blocks DESC"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Warnings per rule",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT LogAttributes['reason_code'] AS rule_id, Guard AS guard, count() AS warnings, uniqExact(User) AS users FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName = 'bmad-guard' AND Verdict = 'warn' GROUP BY rule_id, guard ORDER BY warnings DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Claude Code events by name (name is in Body, not EventName)",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "guard-clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "guard-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT Body AS event, User AS user, count() AS events FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName != 'bmad-guard' GROUP BY event, user ORDER BY events DESC"
         }
       ]
     }
