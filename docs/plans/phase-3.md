@@ -240,8 +240,8 @@ Findings:
 | B   | A secret built by a shell command (`python3 -c` string joins) is written without a tool-guard block; pre-commit catches it | Accepted as a known limit (pre-commit holds). Phase 4 todo: PostToolUse scan that warns after the write |
 | C1  | `DOC_GUARD_SCRIPTS` message lists "hook scripts, guard skills, git hooks, .claude/settings.json" but the file was `_bmad/custom/prompt-guard.toml` | message names the file that was hit and includes `_bmad/custom/` guard config |
 | C2  | "Approve with Warden": Claude cannot find a skill named Warden | messages say `agent-approval-grant (Warden)` |
-| C3  | Claude Code shows every correct block as `PreToolUse:Bash hook error` | Spike, 1 hour: does `permissionDecision: deny` show a cleaner message and still block in `bypassPermissions`? Switch only if both are true; else explain the label in the guides |
-| D   | A blocked prompt is echoed locally as `Original prompt: <value>` (not sent to the model) | Check whether the value is stored in the local `~/.claude` transcript; document the result (HIPAA relevant) |
+| C3  | Claude Code shows every correct block as `PreToolUse:Bash hook error` | Spike, 1 hour: does `permissionDecision: deny` show a cleaner message and still block in `bypassPermissions`? Switch only if both are true; else explain the label in the guides. **Result: not switched.** Claude Code 2.1.332, test hook in a throwaway project, `claude -p`, `--setting-sources project,local`. Exit 2 + stderr and the JSON deny form (exit 0) both block in default and in `bypassPermissions` (the command did not run), and the model got the reason each time. Message: exit 2 `PreToolUse:Bash hook error: [python3 ".../hook.py"]: <reason>`; JSON `PreToolUse:Bash hook error: <reason>`. Only the command path is dropped; the label stays. No real gain, so the dispatcher is unchanged (fail-closed stays exit 2). The label is explained in the developer guide |
+| D   | A blocked prompt is echoed locally as `Original prompt: <value>` (not sent to the model) | Check whether the value is stored in the local `~/.claude` transcript; document the result (HIPAA relevant). **Result: stored.** Claude Code 2.1.332, `claude -p` in a HIPAA-mode throwaway project, fake SSN not allow-listed plus a marker: the prompt was blocked, and the transcript `~/.claude/projects/<path>/<session>.jsonl` holds the marker on 2 lines and the fake SSN on 2 lines; the `stream-json` stdout holds each on 2 lines. Documented in the developer guide (no real PHI, even to test; delete the session transcript if it happens) |
 | E1  | Trial script step 13 undo also throws away the 12b reword | undo with `git restore --staged`, then remove the line by hand |
 | E2  | Global `~/.claude` deny/ask rules and hooks hide the project guard (4b, 5b, 6b) | trial guide says so and shows `--setting-sources project,local` |
 | E3  | Installed module older than the source (1a) | install guide: re-run setup after each bmad-guard update; tag `pilot-2` |
@@ -252,6 +252,15 @@ Order:
 2. **T7b docs and checks**: E1–E3, the D transcript check, the C3 spike, B recorded as a known limit.
 3. **Tag `pilot-2`.** Re-run setup in clinic-booking, then the pending developer steps (1b, 13, 18a, 19, 15, 14/16/17/20) and the three wrong-block cases again.
 4. **T7c decisions** with the new numbers: the false-block decision list above. The rest moves to Phase 4 with an owner and a date.
+
+**Built (T7b, `fix/GUARD-3-pilot-followups`).**
+
+- [x] **E1** trial-run step 13 undo is `git restore --staged docs/trial-fixture.md`, then the line is removed by hand (the 12b reword stays).
+- [x] **E2** trial-run rules and developer guide say that global `~/.claude` settings can block first, and show `claude --setting-sources project,local`.
+- [x] **E3** install guide: after an update, run setup, then `--check` must say `up to date`; the next tag is `pilot-2` (not created yet).
+- [x] **B** recorded as a known limit in `architecture.md` and the developer guide; the Phase 4 todo (PostToolUse scan) is in the Todos list.
+- [x] **D** checked, result above; developer guide has a section on it. No code change.
+- [x] **C3** spiked, result above; not switched; developer guide explains the "hook error" label.
 
 Moved to Phase 4 (owner Shameer, date set in the Phase 4 plan): the rules not yet written, the approver role check, the re-review shortcut for rewritten branches, the PostToolUse scan (B).
 
