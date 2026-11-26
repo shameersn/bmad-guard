@@ -117,6 +117,19 @@ Main components, data and integrations.
 
 There is no check for "link between screens" (team decision).
 
+**Epic FRD.** When the same folder holds `frd.md` (the epic's Functional Requirements Document,
+written by Fenn, `experion-frd`), the FRD is the functional part and the summary needs only
+`## Technical`. The gate then also checks the FRD, and blocks **every story of the epic** until:
+
+- the FRD's front matter says `approval_status: approved` (only Warden writes it; `FRD_UNAPPROVED`);
+- its `## 12. Open Questions` list and its assumption tags have nothing open, every resolution has
+  who and when, and no id is missing or used twice (`FRD_OPEN_ITEMS`).
+
+The markup in the FRD is the same as in a story. A numbered heading (`## 12. Open Questions`) counts
+like `## Open questions`, in an FRD and in a story. Figma links and Jira IDs in an FRD are optional:
+"Not linked" is not a question. An FRD edited after approval is caught by Sentry in `bmad-build`
+(doc_type `frd-epic-<n>`) and by the pre-commit check.
+
 ## Worked example
 
 `_bmad-output/implementation-artifacts/2-3-export-report.md` (fake data):

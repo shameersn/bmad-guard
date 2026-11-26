@@ -321,6 +321,119 @@ class EpicSummaryTests(Base):
         self.assertEqual(self.gate()["result"], "allow")
 
 
+FRD = """---
+title: FRD - EP-2 - Monthly report
+epic: 2
+version: 1
+approval_status: approved
+---
+
+# FRD - EP-2 - Monthly report
+
+## 4. Requirement Details
+
+Export runs nightly [ASSUMPTION-RESOLVED A-1: a 24-hour delay is fine — Test Owner, 2026-11-22].
+
+## 12. Open Questions
+
+- Q-1: Which roles can export? (raised by Test Analyst)
+  Resolved: Managers and admins. — Test Analyst, 2026-11-20
+
+## 13. List of Identified User Stories
+
+- Not a question, outside the section.
+"""
+
+
+class FrdTests(Base):
+    """An frd.md beside the epic summary is the functional part and must be approved and settled."""
+
+    def setUp(self):
+        super().setUp()
+        self.frd = self.project / "epics/epic-2/frd.md"
+        self.summary = self.project / "epics/epic-2/epic-summary.md"
+        self.frd.write_text(FRD)
+
+    def edit_frd(self, old: str, new: str) -> None:
+        text = self.frd.read_text()
+        self.assertIn(old, text)
+        self.frd.write_text(text.replace(old, new))
+
+    def test_approved_settled_frd_passes(self):
+        result = self.gate()
+        self.assertEqual(result["result"], "allow", result)
+        self.assertEqual(result["counts"]["frd_open_items"], 0)
+
+    def test_no_frd_keeps_the_old_rule(self):
+        self.frd.unlink()
+        result = self.gate()
+        self.assertEqual(result["result"], "allow", result)
+        self.assertIsNone(result["counts"]["frd_open_items"])
+
+    def test_frd_replaces_the_functional_part_only(self):
+        self.summary.write_text("## Technical\nA nightly export job.\n")
+        self.assertEqual(self.gate()["result"], "allow")
+        self.summary.write_text("## Functional\nReports.\n")
+        result = self.blocked_with("EPIC_SUMMARY_INCOMPLETE")
+        self.assertIn("Technical", result["reasons"][0]["detail"])
+
+    def test_frd_without_a_summary_still_needs_the_summary(self):
+        self.summary.unlink()
+        self.blocked_with("MISSING_EPIC_SUMMARY")
+
+    def test_unapproved_frd_blocks(self):
+        for status in ("draft", "review", ""):
+            with self.subTest(status=status):
+                self.frd.write_text(FRD.replace("approval_status: approved", f"approval_status: {status}"))
+                result = self.blocked_with("FRD_UNAPPROVED")
+                self.assertEqual(codes(result), ["FRD_UNAPPROVED"])
+        self.frd.write_text(FRD.replace("approval_status: approved\n", ""))
+        self.assertIn("missing", self.blocked_with("FRD_UNAPPROVED")["reasons"][0]["detail"])
+
+    def test_broken_frd_frontmatter_blocks(self):
+        self.frd.write_text("---\napproval_status: approved\n# no closing line\n")
+        self.blocked_with("FRD_UNAPPROVED")
+
+    def test_open_frd_question_blocks_with_its_id(self):
+        self.edit_frd("2026-11-20\n", "2026-11-20\n- Q-2: How long is a slot? (raised by Test Owner)\n")
+        result = self.blocked_with("FRD_OPEN_ITEMS")
+        self.assertIn("Q-2", result["reasons"][0]["detail"])
+        self.assertEqual(result["counts"]["frd_open_items"], 1)
+        self.assertEqual(result["counts"]["open_questions"], 0)  # the story's own counts stay separate
+
+    def test_open_frd_assumption_blocks(self):
+        self.edit_frd("## 13.", "Slots are 30 minutes [ASSUMPTION A-2: 30 minutes].\n\n## 13.")
+        self.assertIn("A-2", self.blocked_with("FRD_OPEN_ITEMS")["reasons"][0]["detail"])
+
+    def test_frd_resolution_without_who_or_when_blocks(self):
+        self.edit_frd("— Test Analyst, 2026-11-20", "")
+        self.assertIn("Q-1", self.blocked_with("FRD_OPEN_ITEMS")["reasons"][0]["detail"])
+
+    def test_frd_id_gap_and_duplicate_block(self):
+        self.edit_frd("- Q-1: Which", "- Q-3: Which")
+        self.assertIn("Q-1, Q-2", self.blocked_with("FRD_OPEN_ITEMS")["reasons"][0]["detail"])
+        self.frd.write_text(FRD)
+        self.edit_frd("## 13.", "Again [ASSUMPTION-RESOLVED A-1: same id — Test Owner, 2026-11-22].\n\n## 13.")
+        self.assertIn("used more than once", self.blocked_with("FRD_OPEN_ITEMS")["reasons"][0]["detail"])
+
+    def test_frd_found_with_the_epic_number_too(self):
+        self.edit("epic_summary: epics/epic-2/epic-summary.md", "epic: 2")
+        self.edit_frd("approval_status: approved", "approval_status: draft")
+        self.blocked_with("FRD_UNAPPROVED", "--epics-dir", str(self.project / "epics"))
+
+    def test_numbered_open_questions_heading_counts_in_a_story(self):
+        self.edit("## Open questions", "## 7. Open Questions\n\n- Q-3: Is CSV enough?\n\n## 7.1. Open questions")
+        self.assertIn("Q-3", self.blocked_with("OPEN_QUESTIONS")["reasons"][0]["detail"])
+
+    def test_frd_text_never_reaches_the_event(self):
+        self.edit_frd("Which roles can export?", "Which roles can export? giraffe-mango")
+        self.edit_frd("approval_status: approved", "approval_status: draft")
+        self.gate()
+        raw = (self.project / ".bmad-guard/events/queue.jsonl").read_text()
+        self.assertIn("FRD_UNAPPROVED", raw)
+        self.assertNotIn("giraffe-mango", raw)
+
+
 class EventTests(Base):
     def test_event_has_counts_and_codes_but_no_document_text(self):
         self.edit("confidence: 84", "confidence: 70")

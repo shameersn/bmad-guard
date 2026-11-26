@@ -17,7 +17,8 @@ folder. The reason code is the rule id:
   GATE_READY_<CODE>         the ready-for-dev gate (ready_for_dev.py) blocks the story. One id per reason it gives:
                             GATE_READY_OPEN_QUESTIONS, _OPEN_ASSUMPTIONS, _LOW_CONFIDENCE, _MISSING_CONFIDENCE,
                             _RESOLUTION_MISSING_WHO_OR_WHEN, _DELETED_ITEMS, _DUPLICATE_IDS, _MALFORMED_FRONTMATTER,
-                            _MISSING_EPIC_SUMMARY, _EPIC_SUMMARY_INCOMPLETE, _UNREADABLE_STORY, _BASELINE_UNAVAILABLE.
+                            _MISSING_EPIC_SUMMARY, _EPIC_SUMMARY_INCOMPLETE, _FRD_UNAPPROVED, _FRD_OPEN_ITEMS,
+                            _UNREADABLE_STORY, _BASELINE_UNAVAILABLE.
   GATE_RECORD_FAILED        the build session record could not be written (T7 needs it), so the write is blocked.
   GATE_ERROR                the gate cannot run (a sibling skill is missing, too many files to scan).
 
