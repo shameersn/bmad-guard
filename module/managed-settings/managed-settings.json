@@ -61,5 +61,19 @@
       "Read(~/.config/bmad-guard/**)"
     ]
   },
-  "allowManagedHooksOnly": true
+  "allowManagedHooksOnly": true,
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_METRICS_EXPORTER": "none",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://REPLACE-WITH-COLLECTOR-HOST",
+    "OTEL_LOG_USER_PROMPTS": "0",
+    "OTEL_LOG_ASSISTANT_RESPONSES": "0",
+    "OTEL_LOG_TOOL_DETAILS": "0",
+    "OTEL_LOG_TOOL_CONTENT": "0",
+    "OTEL_LOG_RAW_API_BODIES": "0",
+    "OTEL_METRICS_INCLUDE_ACCOUNT_UUID": "false"
+  },
+  "otelHeadersHelper": "python3 \"/Library/Application Support/ClaudeCode/bmad-guard/otel_headers.py\""
 }
