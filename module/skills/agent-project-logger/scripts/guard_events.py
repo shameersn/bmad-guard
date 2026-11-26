@@ -172,8 +172,10 @@ def _backing_off(config: Config) -> bool:
 
 
 def _set_backoff(config: Config) -> None:
-    try:
-        config.send_after_file.write_text(f"{time.time() + config.backoff:.0f}\n", encoding="utf-8")
+    if config.backoff <= 0:
+        return  # no backoff: every call tries
+    try:  # full precision: a rounded time could start a backoff that was not asked for
+        config.send_after_file.write_text(f"{time.time() + config.backoff!r}\n", encoding="utf-8")
     except OSError:
         pass  # no marker: the next emit tries again, which is only slower
 

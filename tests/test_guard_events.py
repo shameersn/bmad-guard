@@ -222,6 +222,21 @@ class BackoffTests(unittest.TestCase):
                 result = ge.emit(None, self.cfg(tmp, fc.url), stderr=io.StringIO(), force=True)
                 self.assertEqual(result["sent"], 1)
 
+    def test_zero_backoff_writes_no_marker(self):
+        """Regression: the marker time was rounded to whole seconds, so backoff=0 could still back off."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = config(tmp, unused_port_url())
+            with mock.patch.object(ge.time, "time", return_value=1000.6):
+                ge.emit(event(), cfg, stderr=io.StringIO())
+            self.assertFalse(cfg.send_after_file.exists())
+
+    def test_the_marker_keeps_sub_second_precision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp, unused_port_url())
+            with mock.patch.object(ge.time, "time", return_value=1000.6):
+                ge.emit(event(), cfg, stderr=io.StringIO())
+            self.assertEqual(float(cfg.send_after_file.read_text()), 1300.6)
+
     def test_a_broken_marker_means_no_backoff(self):
         with tempfile.TemporaryDirectory() as tmp, FakeCollector() as fc:
             cfg = self.cfg(tmp, fc.url)
