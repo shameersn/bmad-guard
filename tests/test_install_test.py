@@ -20,6 +20,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.fake_home import isolated_env
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("install_test", ROOT / "scripts" / "install_test.py")
 it = importlib.util.module_from_spec(spec)
@@ -241,7 +243,7 @@ class PreToolSmokeTests(unittest.TestCase):
 
     def test_the_smoke_table_matches_the_hook(self):
         script = ROOT / "module/skills/tool-guard/scripts/pre_tool_use.py"
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
+        env = isolated_env()
         with tempfile.TemporaryDirectory() as tmp:
             sandbox = Path(tmp).resolve()
             for label, tool, tool_input, want_exit, want_code in it.PRE_TOOL_SMOKE:

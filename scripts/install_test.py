@@ -215,6 +215,20 @@ class Runner:
         self.checks: list[Check] = []
         # No collector, and no project dir from an outer Claude Code session: the hooks must use the sandbox.
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
+        # A temp HOME, so no hook can read a real file under ~/.config/bmad-guard (ADR 0007). npm and uv keep their
+        # real caches and settings (pinned when not set), or every run would download everything again.
+        real_home = Path(self.env.get("HOME") or Path.home())
+        home = log.parent / "home"
+        home.mkdir(parents=True, exist_ok=True)
+        self.env["HOME"] = str(home)
+        for name, rel in (
+            ("npm_config_cache", ".npm"),
+            ("NPM_CONFIG_USERCONFIG", ".npmrc"),
+            ("UV_CACHE_DIR", ".cache/uv"),
+            ("UV_PYTHON_INSTALL_DIR", ".local/share/uv/python"),
+        ):
+            if name not in self.env and (real_home / rel).exists():
+                self.env[name] = str(real_home / rel)
 
     def run(
         self, cmd: list[str], cwd: Path, stdin: str | None = None, timeout: int = 300, extra_env: dict | None = None

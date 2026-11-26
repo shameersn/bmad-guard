@@ -17,6 +17,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.fake_home import isolated_env
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "module/skills/tool-guard/scripts"
 if str(SCRIPTS) not in sys.path:
@@ -37,7 +39,7 @@ pt = load("pre_tool_use")
 ss = load("session_start")
 REAL_MANAGED_DIR = ss.managed_dir  # SessionStartTests patch ss.managed_dir; keep the real one for its own tests
 
-CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
+CLEAN_ENV = isolated_env()  # no collector settings, and a temp HOME so no real credential file is read
 CALL = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": "s-1"}
 
 
