@@ -30,7 +30,7 @@ Usage:
     python3 scripts/install_machine.py [--target DIR] [--version V] [--dry-run]       install or update
     python3 scripts/install_machine.py [--target DIR] --check                         is the folder right and safe?
     python3 scripts/install_machine.py [--target DIR] [--dry-run] --uninstall [--force]
-    python3 scripts/install_machine.py [--target DIR] --print-template [macos|linux]   the managed settings file
+    python3 scripts/install_machine.py [--target DIR] --print-template [macos|linux|windows]   the managed settings file
 
 `--target` is for tests (a temp folder: no root needed; the folder is then yours, which --check reports as unsafe unless
 `--expect-owner` says so) and for a site that keeps the folder elsewhere (then also `--managed-dir`). The version is
@@ -66,7 +66,7 @@ SKILLS = ("tool-guard", "prompt-guard", "ready-for-dev-gate", "agent-project-log
 TOP_FILES = ("otel_headers.py", "guard_events.py")
 TOP_FILES_SKILL = "agent-project-logger"
 VERSION_NAME, MANIFEST_NAME = "VERSION", "manifest.json"
-PLATFORM_NAMES = {"macos": "darwin", "linux": "linux"}
+PLATFORM_NAMES = {"macos": "darwin", "linux": "linux", "windows": "win32"}
 FILE_MODE, DIR_MODE = 0o644, 0o755
 MIN_PYTHON = (3, 10)
 SHOW = 6  # problems of one kind listed before "(+N more)"
@@ -570,7 +570,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         nargs="?",
         const="current",
         choices=["current", *PLATFORM_NAMES],
-        metavar="macos|linux",
+        metavar="macos|linux|windows",
         help="print the managed settings file for this folder and exit",
     )
     args = parser.parse_args(argv)
@@ -590,8 +590,10 @@ def main(argv: list[str] | None = None) -> int:
         wiring = load_hook_wiring(module_dir)
         if args.print_template is not None:
             platform = sys.platform if args.print_template == "current" else PLATFORM_NAMES[args.print_template]
-            base = os.path.abspath(args.target) if args.target is not None else str(default_target(wiring, platform))
-            print(wiring.render(wiring.managed_settings(base)), end="")
+            base = (
+                os.path.abspath(args.target) if args.target is not None else default_target(wiring, platform).as_posix()
+            )
+            print(wiring.render(wiring.managed_settings(base, windows=platform == "win32")), end="")
             return 0
         target, managed = resolve_places(args, wiring)
         refuse_project_places(target, module_dir)

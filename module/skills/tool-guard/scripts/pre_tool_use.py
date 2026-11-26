@@ -27,7 +27,7 @@ error in this script blocks the call and records a GUARD_ERROR / BAD_HOOK_INPUT 
 
 Each guard is a module with `GUARDS = [Guard(...)]`, listed by name in GUARD_MODULES
 (T2: command_guard, path_guard; T3: document_guard, bash_write_guard; T4: write_gate; T5: content_scan;
-T7: review_record).
+T7: review_record; GUARD-3 T9: powershell_guard).
 content_scan is the one guard that does not fail closed in every project: it catches its own errors and decides
 by the HIPAA setting (see content_scan.py). The dispatcher still fails closed for every other guard.
 """
@@ -52,6 +52,7 @@ GUARD_MODULES: tuple[str, ...] = (
     "write_gate",
     "content_scan",
     "review_record",
+    "powershell_guard",
 )
 # module names next to this file
 STAGE = "tool"

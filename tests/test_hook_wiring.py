@@ -48,6 +48,19 @@ class FreshMergeTests(unittest.TestCase):
         self.assertEqual(hooks["UserPromptSubmit"][0]["hooks"][0]["command"], PROMPT)
         self.assertNotIn("matcher", hooks["SessionStart"][0])
 
+    def test_the_matcher_reaches_the_powershell_tool(self):
+        """ADR 0009: without it the PowerShell tool skips every L1 guard."""
+        self.assertIn("PowerShell", hw.PRE_TOOL_MATCHER.split("|"))
+        self.assertEqual(hw.desired_hooks()["PreToolUse"][0]["matcher"], hw.PRE_TOOL_MATCHER)
+
+    def test_a_project_set_up_before_the_powershell_matcher_is_updated_by_a_second_run(self):
+        old = full()
+        old["hooks"]["PreToolUse"][0]["matcher"] = "Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit"
+        again = hw.merge(old)
+        self.assertEqual(again.conflicts, [])
+        self.assertEqual(again.changes, ["update hook PreToolUse pre_tool_use.py"])
+        self.assertEqual(again.settings["hooks"]["PreToolUse"][0]["matcher"], hw.PRE_TOOL_MATCHER)
+
     def test_empty_dict_and_none_are_the_same(self):
         self.assertEqual(hw.merge({}).settings, hw.merge(None).settings)
 
@@ -345,6 +358,7 @@ class LoadSettingsTests(unittest.TestCase):
 
 MAC = "/Library/Application Support/ClaudeCode/bmad-guard"
 LINUX = "/etc/claude-code/bmad-guard"
+WIN = "C:/Program Files/ClaudeCode/bmad-guard"
 
 
 class MachineCommandTests(unittest.TestCase):
@@ -362,7 +376,24 @@ class MachineCommandTests(unittest.TestCase):
         self.assertEqual(hw.command("tool-guard", "pre_tool_use.py", None), PRE)
 
     def test_a_base_that_could_break_the_quoting_is_refused(self):
-        for base in ('/x"y', "/x$HOME", "/x`id`", "/x\\y", "/x\ny", "relative/path", ""):
+        for base in (
+            '/x"y',
+            "/x$HOME",
+            "/x`id`",
+            "/x\\y",
+            "/x\ny",
+            "relative/path",
+            "",
+            "C:\\Program Files\\x",  # a backslash is not safe inside the command
+            'C:/x"y',
+            "C:/x$HOME",
+            "C:/x`id`",
+            "C:/x\ny",
+            "C:x",  # drive-relative
+            "C:",
+            "CC:/x",
+            "1:/x",
+        ):
             with self.subTest(base=base), self.assertRaises(ValueError):
                 hw.command("tool-guard", "pre_tool_use.py", base)
 
@@ -391,9 +422,27 @@ class MachineCommandTests(unittest.TestCase):
     def test_machine_bases_come_from_the_managed_folders(self):
         self.assertEqual(hw.machine_base("darwin"), MAC)
         self.assertEqual(hw.machine_base("linux"), LINUX)
-        self.assertIsNone(hw.machine_base("win32"))
+        self.assertEqual(hw.machine_base("win32"), WIN)  # forward slashes, also on Windows (ADR 0009)
         self.assertIsNone(hw.machine_base("plan9"))
         self.assertEqual(hw.MANAGED_DIRS["darwin"], "/Library/Application Support/ClaudeCode")
+
+    def test_a_windows_base_makes_an_absolute_quoted_command_with_forward_slashes(self):
+        cmd = hw.command("tool-guard", "pre_tool_use.py", WIN)
+        self.assertEqual(
+            cmd, 'python3 "C:/Program Files/ClaudeCode/bmad-guard/skills/tool-guard/scripts/pre_tool_use.py"'
+        )
+        self.assertNotIn("\\", cmd)
+        self.assertEqual(
+            hw.command("tool-guard", "pre_tool_use.py", "d:/x/"),
+            'python3 "d:/x/skills/tool-guard/scripts/pre_tool_use.py"',
+        )
+        self.assertEqual(hw.script_paths(WIN)[2], f"{WIN}/skills/tool-guard/scripts/pre_tool_use.py")
+
+    def test_a_windows_machine_command_is_a_lookalike_in_a_project_and_merges_idempotently(self):
+        result = hw.merge(None, base=WIN)
+        self.assertEqual((result.conflicts, result.settings["hooks"]), ([], hw.desired_hooks(WIN)))
+        self.assertTrue(hw.merge(result.settings, base=WIN).ok)
+        self.assertTrue(hw.merge(result.settings).conflicts)
 
     def test_merge_with_a_base_writes_machine_commands_and_is_idempotent(self):
         result = hw.merge(None, base=LINUX)
@@ -449,6 +498,7 @@ class MachineTemplatesTests(unittest.TestCase):
     FILES = {
         "macos": ("managed-settings.macos.json", MAC),
         "linux": ("managed-settings.linux.json", LINUX),
+        "windows": ("managed-settings.windows.json", WIN),
     }
 
     def load(self, os_name: str) -> tuple[str, dict, str]:
@@ -460,7 +510,7 @@ class MachineTemplatesTests(unittest.TestCase):
         for os_name in self.FILES:
             with self.subTest(os=os_name):
                 text, _, base = self.load(os_name)
-                self.assertEqual(text, hw.render(hw.managed_settings(base)))
+                self.assertEqual(text, hw.render(hw.managed_settings(base, windows=os_name == "windows")))
 
     def test_each_file_matches_the_wiring_piece_by_piece(self):
         for os_name in self.FILES:
@@ -468,13 +518,13 @@ class MachineTemplatesTests(unittest.TestCase):
                 _, data, base = self.load(os_name)
                 self.assertEqual(data["hooks"], hw.desired_hooks(base))
                 self.assertEqual(data["permissions"]["deny"], list(hw.DENY_RULES))
-                self.assertEqual(data["env"], hw.TELEMETRY_ENV)
+                self.assertEqual(data["env"], {**hw.TELEMETRY_ENV, **(hw.WINDOWS_ENV if os_name == "windows" else {})})
                 self.assertEqual(data["otelHeadersHelper"], f'python3 "{base}/otel_headers.py"')
                 self.assertIs(data["allowManagedHooksOnly"], True)
                 self.assertNotIn("disableAllHooks", data)
 
     def test_the_base_is_the_managed_folder_of_the_os(self):
-        for os_name, platform in (("macos", "darwin"), ("linux", "linux")):
+        for os_name, platform in (("macos", "darwin"), ("linux", "linux"), ("windows", "win32")):
             self.assertEqual(self.FILES[os_name][1], hw.machine_base(platform))
 
     def test_no_script_path_uses_the_project_dir_and_every_one_is_absolute(self):
@@ -493,15 +543,33 @@ class MachineTemplatesTests(unittest.TestCase):
         command = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         self.assertEqual(command.count('"'), 2)
 
+    def test_only_the_windows_file_turns_the_powershell_tool_off(self):
+        for os_name in self.FILES:
+            with self.subTest(os=os_name):
+                _, data, _ = self.load(os_name)
+                self.assertEqual(
+                    data["env"].get("CLAUDE_CODE_USE_POWERSHELL_TOOL"), "0" if os_name == "windows" else None
+                )
+
+    def test_the_windows_file_has_forward_slashes_and_the_powershell_matcher(self):
+        text, data, _ = self.load("windows")
+        self.assertIn("C:/Program Files/ClaudeCode/bmad-guard/skills/tool-guard/scripts/pre_tool_use.py", text)
+        for command in [h["command"] for groups in data["hooks"].values() for g in groups for h in g["hooks"]]:
+            self.assertNotIn("\\", command)
+        self.assertIn("PowerShell", data["hooks"]["PreToolUse"][0]["matcher"].split("|"))
+
     def test_the_machine_files_differ_from_the_project_form_file_only_in_the_three_commands(self):
         old = json.loads((ROOT / "module/managed-settings/managed-settings.json").read_text())
         for os_name in self.FILES:
             with self.subTest(os=os_name):
                 _, data, base = self.load(os_name)
+                extra_env = hw.WINDOWS_ENV if os_name == "windows" else {}
                 self.assertEqual(
-                    {k: v for k, v in data.items() if k != "hooks"},
-                    {k: v for k, v in old.items() if k != "hooks"} | {"otelHeadersHelper": data["otelHeadersHelper"]},
+                    {k: v for k, v in data.items() if k not in ("hooks", "env")},
+                    {k: v for k, v in old.items() if k not in ("hooks", "env")}
+                    | {"otelHeadersHelper": data["otelHeadersHelper"]},
                 )
+                self.assertEqual(data["env"], {**old["env"], **extra_env})
                 self.assertEqual(data["hooks"], hw.desired_hooks(base))
 
     def test_no_secrets_or_real_paths(self):

@@ -79,6 +79,7 @@ CODE_PREFIXES = (
     "GUARD_",
     "BAD_",
     "EXT_",
+    "PS_",
 )
 CODE_RE = re.compile(r"\b(?:(?:" + "|".join(CODE_PREFIXES) + r")[A-Z0-9_]+|(?:secret|phi|injection)\.[a-z0-9-]+)")
 
@@ -173,6 +174,9 @@ NV-1  | L1 | PreToolUse Bash | block | CMD_GIT_NO_VERIFY  | git commit --no-veri
 NV-2  | L1 | PreToolUse Bash | block | CMD_GIT_NO_VERIFY  | git push --no-verify by the agent
 NV-3  | L1 | PreToolUse Bash | block | CMD_GIT_HOOKS_PATH | git config core.hooksPath by the agent
 NV-C1 | L1 | PreToolUse Bash | allow |                    | Control: plain git commit
+## PowerShell tool (GUARD-3 T9, ADR 0009): the tool is blocked in a guarded project, on every OS
+PS-1  | L1 | PreToolUse PowerShell | block | PS_TOOL_UNSUPPORTED | PowerShell tool call (it would skip every other guard)
+PS-C1 | L1 | PreToolUse Bash       | allow |                     | Control: a plain Bash command still goes through
 ## Guard self-protection
 SELF-1  | L1 | PreToolUse Edit  | block | DOC_GUARD_SCRIPTS  | Agent edits pre_tool_use.py
 SELF-2  | L1 | PreToolUse Write | block | DOC_GUARD_SCRIPTS  | Agent writes the HIPAA setting (prompt-guard.toml)
@@ -447,6 +451,8 @@ def stateless_calls(sb: Path) -> list[Call]:
         bash("DESTR-3", "git push --force origin main"),
         bash("DESTR-C1", "git reset --soft HEAD~1"),
         bash("DESTR-C2", "rm -rf tmp/build-1"),
+        Call("PS-1", "PowerShell", {"command": "Get-Content docs/readme.md"}),
+        bash("PS-C1", "git status"),
         Call("SENS-1", "Read", {"file_path": path(".env")}),
         bash("SENS-2", "cat ~/.ssh/id_ed25519"),
         Call("SENS-3", "Read", {"file_path": "~/.config/bmad-guard/credentials"}),

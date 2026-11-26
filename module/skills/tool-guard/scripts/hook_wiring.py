@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,17 +31,19 @@ HOOKS_REL = "_bmad/custom/guard/hooks"  # git hooks folder (core.hooksPath); sam
 SKILLS_REL = ".claude/skills"
 
 # Managed settings folder per OS (docs/managed-settings-rollout.md). WSL reports linux. The machine folder (ADR 0008)
-# is a sibling of the managed file. Windows has a managed folder but no machine folder yet (Phase 3 decision D10).
+# is a sibling of the managed file. On Windows the machine folder is built and unit-tested but not run on a real machine
+# (ADR 0009).
 MANAGED_DIRS = {
     "darwin": "/Library/Application Support/ClaudeCode",
     "linux": "/etc/claude-code",
     "win32": "C:\\Program Files\\ClaudeCode",
 }
 MACHINE_DIR_NAME = "bmad-guard"
-MACHINE_PLATFORMS = ("darwin", "linux")
+MACHINE_PLATFORMS = ("darwin", "linux", "win32")
 
 # Tools that reach the PreToolUse dispatcher. A guard added later for another tool needs this list changed.
-PRE_TOOL_MATCHER = "Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit"
+# PowerShell: a guarded project blocks the tool (powershell_guard.py, ADR 0009); no guard can read its commands yet.
+PRE_TOOL_MATCHER = "Bash|PowerShell|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit"
 
 # (event, matcher or None for all, skill folder, script, extra hook fields).
 # PreToolUse: "onFailure": "block" turns a crash or timeout of the hook (exit 1, no exit 2) into a block.
@@ -90,15 +93,19 @@ MARKERS = ("/skills/tool-guard/scripts/", "prompt_guard_hook.py")
 
 
 def machine_base(platform: str) -> str | None:
-    """The machine folder for an OS (`sys.platform` value), or None when there is none (Windows, unknown)."""
+    """The machine folder for an OS (`sys.platform` value), or None when there is none (unknown). It is written with
+    forward slashes, also on Windows (`C:/Program Files/...`): a backslash is not safe inside the hook command."""
     if platform not in MACHINE_PLATFORMS:
         return None
-    return f"{MANAGED_DIRS[platform]}/{MACHINE_DIR_NAME}"
+    return f"{MANAGED_DIRS[platform]}/{MACHINE_DIR_NAME}".replace("\\", "/")
+
+
+_ABSOLUTE_RE = re.compile(r"^(?:/|[A-Za-z]:/)")  # `/x` or `C:/x`
 
 
 def _check_base(base: str) -> str:
-    """A machine base must be an absolute path that stays one word inside double quotes in a shell."""
-    if not base.startswith("/") or any(ch in base for ch in '"\\$`\n\r\0'):
+    """A machine base must be an absolute path (`/x` or `C:/x`) that stays one word inside double quotes in a shell."""
+    if not _ABSOLUTE_RE.match(base) or any(ch in base for ch in '"\\$`\n\r\0'):
         raise ValueError(f"not a usable machine folder path: {base!r}")
     return base.rstrip("/") or "/"
 
@@ -159,14 +166,18 @@ TELEMETRY_ENV = {
 }
 
 
-def managed_settings(base: str) -> dict:
+# Windows only: turn the PowerShell tool off. It is on by default for claude.ai accounts; no guard reads its commands.
+WINDOWS_ENV = {"CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"}
+
+
+def managed_settings(base: str, windows: bool = False) -> dict:
     """The managed settings file for a machine folder `base` (ADR 0008): the three hooks with absolute script paths,
-    the deny rules, the lock, and the telemetry block with its helper in the same folder."""
+    the deny rules, the lock, and the telemetry block with its helper in the same folder. `windows` adds WINDOWS_ENV."""
     return {
         "hooks": desired_hooks(base),
         "permissions": {"deny": list(DENY_RULES)},
         "allowManagedHooksOnly": True,
-        "env": dict(TELEMETRY_ENV),
+        "env": {**TELEMETRY_ENV, **(WINDOWS_ENV if windows else {})},
         "otelHeadersHelper": f'python3 "{_check_base(base)}/otel_headers.py"',
     }
 
