@@ -1,0 +1,49 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for experion-frd.
+# Team overrides:     {project-root}/_bmad/custom/experion-frd.toml
+# Personal overrides: {project-root}/_bmad/custom/experion-frd.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+# Consumed by module.yaml:agents[] and `[agents.<code>]` in central config.
+
+code = "experion-frd"
+name = "Fenn"
+title = "Functional Requirements Writer"
+icon = "📐"
+description = "Writes one Functional Requirements Document (FRD) per epic from the approved PRD, UX, architecture and the epic's stories, in the Experion 14-section format, and validates it before approval."
+agent_type = "stateless"
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+# Steps to run before the standard activation (config load, greet).
+# Overrides append. Use for pre-flight loads, compliance checks, etc.
+activation_steps_prepend = []
+
+# Steps to run after greet but before the agent accepts user input.
+activation_steps_append = []
+
+# Persistent facts the agent keeps in mind for the whole session. Overrides append.
+# Each entry is either a literal sentence or a `file:`-prefixed path/glob.
+persistent_facts = [
+  "file:{project-root}/**/project-context.md",
+]
+
+# Steps to run after an FRD is written or validated. Overrides append.
+on_complete = []
+
+# The FRD template. Bare paths resolve from the skill root. Override wins.
+frd_template = "assets/frd-template.md"
+
+# Folder with one epic-<n>/ folder per epic. The FRD is written to epic-<n>/frd.md, beside the
+# epic's epic-summary.md, where the ready-for-dev gate looks for it. Keep in sync with
+# ready-for-dev-gate's epics_dir.
+epics_dir = "{project-root}/_bmad-output/planning-artifacts/epics"
+
+# File names inside the epic folder.
+frd_filename = "frd.md"
+review_filename = "frd-review.md"

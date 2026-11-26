@@ -221,9 +221,10 @@ Guard **skills** that BMAD workflows call (L0, not hooks):
 |---|---|---|
 | `agent-approval-grant` | Warden | Two confirmations from a person, then marks a document approved and records it in `approval-state.json`. Also reopens a document. |
 | `agent-approval-gate-check` | Sentry | Checks that an upstream document is approved and unchanged. |
-| `ready-for-dev-gate` | Gatekeeper | Counts open questions and assumptions, checks who and when, confidence and the epic summary. |
+| `ready-for-dev-gate` | Gatekeeper | Counts open questions and assumptions, checks who and when, confidence and the epic summary. With an epic FRD, also checks the FRD is approved and has nothing open. |
 | `agent-project-logger` | Ledger | Writes events to the local queue. Sends them to a collector when one is set (not in the pilot start). |
 | `experion-brief-review` | Voss | Adversarial review of the brief before approval. |
+| `experion-frd` | Fenn | Writes one FRD per epic in the Experion 14-section format and validates it; Warden approves it as `frd-epic-<n>`. |
 | `confidence-scorer` | Audit | Scores each changed file after a build. |
 
 ## 7. Data and approval files

@@ -24,7 +24,7 @@ STOCK = FIXTURE["skills"]
 TOML_FILES = sorted(OVERRIDES.glob("*.toml"))
 
 # Skills whose SKILL.md documents a list for on_complete (checked against 6.12.4 in T6).
-ON_COMPLETE_LIST_OK = {"bmad-product-brief", "bmad-prd", "bmad-architecture", "bmad-ux"}
+ON_COMPLETE_LIST_OK = {"bmad-product-brief", "bmad-prd", "bmad-architecture", "bmad-ux", "experion-frd"}
 REMOVED_IN_6_12 = {"bmad-dev-story", "bmad-quick-dev", "bmad-create-story"}
 PROJECT_SPECIFIC = ("/api/ideas", "ideaService", ".ai-context", "onrender.com", "token optimiz")
 FILE_REF = re.compile(r"file:\{project-root\}/(_bmad/custom/[^\"\s]+)")
