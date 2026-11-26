@@ -28,3 +28,7 @@ spikes/**/data/
 .DS_Store
 .idea/
 .vscode/
+
+# Collector stack (deploy/collector): the real key-hash file stays local
+deploy/collector/local/
+*.local.ini

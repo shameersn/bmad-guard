@@ -1,0 +1,25 @@
+{
+  "uid": "guard-events",
+  "title": "Guard events",
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Events per user and verdict",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "guard-clickhouse" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "guard-clickhouse" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT User AS user, Verdict AS verdict, count() AS events FROM guard.guard_events WHERE $__timeFilter(Timestamp) AND ServiceName = 'bmad-guard' GROUP BY user, verdict ORDER BY user, verdict"
+        }
+      ]
+    }
+  ]
+}

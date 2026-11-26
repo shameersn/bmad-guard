@@ -1,0 +1,8 @@
+# Entry point: "docker compose up -d" from this folder.
+# The stack is in stack.yml. The passwords for its ${...} values come from secrets.local.ini
+# (git-ignored; create it from secrets.local.ini.example or with "python3 keys.py init").
+name: bmad-guard-collector
+
+include:
+  - path: stack.yml
+    env_file: secrets.local.ini

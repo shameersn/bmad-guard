@@ -1,0 +1,69 @@
+# Guard event stack: OTel collector -> ClickHouse -> Grafana (local Docker, D4).
+# Loaded by docker-compose.yml, which also loads the local password file for the ${...} values.
+# - Every image has an exact version tag. Change them only through the upgrade steps in README.md.
+# - All ports bind to 127.0.0.1 only.
+# - Developer keys: only their bcrypt hashes live in local/devkeys.htpasswd (git-ignored). Use keys.py.
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.45.6
+    environment:
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:?set the passwords in secrets.local.ini}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      OTEL_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:?set the passwords in secrets.local.ini}
+      GRAFANA_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:?set the passwords in secrets.local.ini}
+    volumes:
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ./clickhouse/config.d/backup-disk.xml:/etc/clickhouse-server/config.d/backup-disk.xml:ro
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-backups:/backups
+    ports:
+      - "127.0.0.1:8123:8123"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      retries: 20
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.165.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:?set the passwords in secrets.local.ini}
+    volumes:
+      - ./otelcol/config.yaml:/etc/otelcol/config.yaml:ro
+      # The folder is mounted (not the file) so keys.py can rewrite the htpasswd file safely.
+      - ./local:/etc/otelcol/keys:ro
+    ports:
+      - "127.0.0.1:4318:4318"
+    depends_on:
+      clickhouse: { condition: service_healthy }
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set the passwords in secrets.local.ini}
+      # Plugins: every plugin Grafana downloads is pinned, and automatic updates are off (verified for 13.3.1, see
+      # README). Grafana adds its own default apps to the install list, so they are pinned here too.
+      GF_PLUGINS_PREINSTALL_SYNC: >-
+        grafana-clickhouse-datasource@4.23.5,grafana-advisor-app@1.1.4,grafana-exploretraces-app@3.2.0,
+        grafana-lokiexplore-app@3.2.0,grafana-metricsdrilldown-app@3.2.0,grafana-pyroscope-app@3.2.0
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GRAFANA_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:?set the passwords in secrets.local.ini}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      clickhouse: { condition: service_healthy }
+
+volumes:
+  clickhouse-data:
+  clickhouse-backups:
+  grafana-data:
