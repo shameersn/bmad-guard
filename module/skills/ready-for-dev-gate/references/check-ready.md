@@ -15,10 +15,10 @@ A story moves to planning or coding only when the script says `allow`. On `block
 
 ## The markup (short version)
 
-- Frontmatter: `confidence: <0-100>`; optional `gate: generic` for setup and chore stories (skips the gate); `epic_summary: <path from project root>` or `epic: <n>`.
+- Frontmatter: `confidence: <0-100>`; optional `gate: generic` for setup and chore stories (skips the gate); `epic_summary: <path from project root>` or `epic: <n>`; `feature: F-<nnn>` for a story built from a PRD feature's FRD.
 - Open questions: list items under `## Open questions`, each starting with an id `Q-1`, `Q-2`, ... Resolved when the item has a line `Resolved: <answer> — <name>, <YYYY-MM-DD>`.
 - Assumptions: inline `[ASSUMPTION A-1: ...]`; resolved as `[ASSUMPTION-RESOLVED A-1: ... — <name>, <YYYY-MM-DD>]`.
-- Epic FRD: when the epic folder (beside `epic-summary.md`) holds `frd.md`, the FRD is the functional part. It must have `approval_status: approved` (`FRD_UNAPPROVED`) and no open question, open assumption, unrecorded resolution, id gap or duplicate id (`FRD_OPEN_ITEMS`). The summary then needs only its technical part.
+- Feature FRD: when the story has `feature: F-<nnn>`, the FRD at `{agent.frds_dir}/F-<nnn>/frd.md` is the functional part. It must exist and have `approval_status: approved` (`FRD_UNAPPROVED`, also for a missing FRD or a `feature` not in the `F-<nnn>` format) and no open question, open assumption, unrecorded resolution, id gap or duplicate id (`FRD_OPEN_ITEMS`). The epic summary then needs only its technical part.
 - Ids are never reused or removed. A missing id (a gap, or an id present in the baseline version) counts as open.
 - `--` may be typed instead of `—`.
 
@@ -34,6 +34,7 @@ The script records the decision as a guard event itself (guard `ready-for-dev`, 
 python3 {skill-root}/scripts/ready_for_dev.py "<story_path>" \
   --min-confidence {agent.min_confidence} \
   --epics-dir "{agent.epics_dir}" \
+  --frds-dir "{agent.frds_dir}" \
   --baseline "{agent.baseline}"
 ```
 
