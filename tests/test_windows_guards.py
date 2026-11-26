@@ -19,6 +19,7 @@ from tests.windows_flavour import HOME, windows
 pg = importlib.import_module("path_guard")
 dg = importlib.import_module("document_guard")
 bwg = importlib.import_module("bash_write_guard")
+cg = importlib.import_module("command_guard")
 
 PROJECT = "C:\\proj"
 ROOT = Path(PROJECT)
@@ -364,6 +365,77 @@ class WindowsBashWriteGuardTests(unittest.TestCase):
                 self.assertEqual([v.code for v in found], [])
         found = bwg.check(call("Bash", {"command": "echo x > _bmad/custom/approval-state.json"}, cwd="/work"), root)
         self.assertEqual([v.code for v in found], ["DOC_APPROVAL_STATE"])
+
+
+class WindowsCommandGuardTests(unittest.TestCase):
+    """Scratch folders (where a recursive delete is allowed) in Windows and Git Bash spellings."""
+
+    def codes(self, command: str, **extra) -> list[str]:
+        with windows():
+            return [v.code for v in cg.check(call("Bash", {"command": command}, **extra), ROOT)]
+
+    def test_a_recursive_delete_in_a_scratch_folder_is_allowed_in_every_spelling(self):
+        for command in (
+            "rm -rf tmp/build-1",
+            "rm -rf 'tmp\\build-1'",
+            "rm -rf TMP/build-1",  # Windows ignores case
+            "rm -rf /c/proj/tmp/x",
+            "rm -rf C:/proj/build/x",
+            "rm -rf 'C:\\proj\\dist\\x'",
+            "rm -rf /c/proj/src/node_modules",
+            "rm -rf /c/proj/src/NODE_MODULES",
+            "rm -rf /tmp/x",  # the temp folder in Git Bash
+            "rm -rf /c/Users/tester/AppData/Local/Temp/x",
+            "rm -rf 'C:\\Users\\tester\\AppData\\Local\\Temp\\x'",
+            "rm -rf tmp/*",
+            "rm -rf 'tmp\\*'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.codes(command), [])
+
+    def test_a_recursive_delete_outside_the_scratch_folders_is_blocked_in_every_spelling(self):
+        for command in (
+            "rm -rf src",
+            "rm -rf /c/proj/src",
+            "rm -rf 'C:\\proj\\src'",
+            "rm -rf /c/proj",
+            "rm -rf /c/Windows/x",
+            "rm -rf tmp/../src",  # leaves the scratch folder
+            "rm -rf 'tmp\\..\\src'",
+            "rm -rf /c/proj/tmpx/x",  # another folder with the same prefix
+            "rm -rf /c/proj/src/tmp/../../x",
+            "rm -rf /c/Users/tester/AppData/Local/TempX/x",
+            "rm -rf *",
+            "rm -rf /c/proj/*",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.codes(command), ["CMD_RM_RECURSIVE"])
+
+    def test_find_delete_uses_the_same_scratch_rule(self):
+        self.assertEqual(self.codes("find /c/proj/tmp -delete"), [])
+        self.assertEqual(self.codes("find /c/proj/TMP/x -name '*.o' -delete"), [])
+        self.assertEqual(self.codes("find /c/proj/src -delete"), ["CMD_FIND_DELETE"])
+        self.assertEqual(self.codes("find 'C:\\proj\\src' -delete"), ["CMD_FIND_DELETE"])
+
+    def test_a_git_bash_cwd_is_made_native(self):
+        self.assertEqual(self.codes("rm -rf build/x", cwd="/c/proj"), [])
+        self.assertEqual(self.codes("rm -rf x", cwd="/c/proj"), ["CMD_RM_RECURSIVE"])
+
+    def test_the_other_rules_are_unaffected(self):
+        self.assertEqual(self.codes("git push --force origin main"), ["CMD_GIT_FORCE_PUSH"])
+        self.assertEqual(self.codes("git reset --hard HEAD~1"), ["CMD_GIT_RESET_HARD"])
+        self.assertEqual(self.codes("git status"), [])
+
+    def test_the_same_commands_on_this_os_do_not_change(self):
+        """Control: off Windows `/tmp` is the system scratch folder, and a Git Bash path is an ordinary folder."""
+        root = Path("/work")
+        scratch = "/" + "tmp"  # the system scratch folder on POSIX
+        found = [v.code for v in cg.check(call("Bash", {"command": f"rm -rf {scratch}/x"}, cwd="/work"), root)]
+        self.assertEqual(found, [])
+        found = [v.code for v in cg.check(call("Bash", {"command": "rm -rf /c/proj/tmp/x"}, cwd="/work"), root)]
+        self.assertEqual(found, ["CMD_RM_RECURSIVE"])
+        found = [v.code for v in cg.check(call("Bash", {"command": "rm -rf 'tmp\\x'"}, cwd="/work"), root)]
+        self.assertEqual(found, ["CMD_RM_RECURSIVE"])  # one odd name with a backslash, not the folder tmp
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ if str(HERE) not in sys.path:
 import guard_config as gc  # noqa: E402 - sibling modules, found through the line above
 import hook_common as hc  # noqa: E402
 import shell_parse as sp  # noqa: E402
+import winpaths as wp  # noqa: E402
 
 GUARD = "command-guard"
 MAX_SQL_FILE = 1_000_000  # bytes of an SQL script we read to look for DROP and friends
@@ -69,13 +70,13 @@ class Context:
 
     def __post_init__(self):
         self.relative_scratch: list[tuple[bool, tuple[str, ...]]] = []  # (any depth, folder parts)
-        self.absolute_scratch: list[str] = [os.path.realpath(tempfile.gettempdir())]  # $TMPDIR
+        self.absolute_scratch: list[str] = [wp.key(tempfile.gettempdir())]  # $TMPDIR
         for entry in self.rules.scratch:
             if entry.startswith("/"):
-                self.absolute_scratch.append(os.path.realpath(entry))
+                self.absolute_scratch.append(wp.key(entry))
             else:
                 anywhere = entry.startswith("**/")
-                parts = tuple(p for p in (entry[3:] if anywhere else entry).split("/") if p)
+                parts = tuple(os.path.normcase(p) for p in (entry[3:] if anywhere else entry).split("/") if p)
                 self.relative_scratch.append((anywhere, parts))
 
     def in_scratch(self, word: sp.Word) -> bool:
@@ -83,26 +84,29 @@ class Context:
         text = word.text
         if word.dynamic or not text:
             return False
-        if text == "~" or text.startswith("~/"):
+        if text == "~" or text.startswith("~/") or (wp.IS_WINDOWS and text.startswith("~\\")):
             text = str(self.home) + text[1:]
         elif text.startswith("~"):
             return False
+        text = wp.fwd(
+            wp.clean(text)
+        )  # Windows only: Git Bash paths, tricks and backslashes, so the "/" logic below holds
         if word.glob:  # tmp/* is fine, tmp* or */x is not: the folder part must be written out
             first = min(text.index(c) for c in "*?[" if c in text)
             if "/" not in text[:first] or ".." in text[first:].split("/"):
                 return False
             text = text[:first].rsplit("/", 1)[0] or "/"
-        path = os.path.realpath(os.path.join(self.cwd, text))
-        root = str(self.root)
-        if path == root or path.startswith(root.rstrip(os.sep) + os.sep):
-            parts = tuple(p for p in path[len(root) :].split(os.sep) if p)
+        path = os.path.normcase(os.path.realpath(os.path.join(self.cwd, text)))
+        root = os.path.normcase(str(self.root))
+        if path == root or path.startswith(root.rstrip(os.path.sep) + os.path.sep):
+            parts = tuple(p for p in path[len(root) :].split(os.path.sep) if p)
             for anywhere, folder in self.relative_scratch:
                 if parts[: len(folder)] == folder and parts:
                     return True
                 if anywhere and any(parts[i : i + len(folder)] == folder for i in range(len(parts))):
                     return True
             return False
-        return any(path.startswith(folder.rstrip(os.sep) + os.sep) for folder in self.absolute_scratch)
+        return any(path.startswith(folder.rstrip(os.path.sep) + os.path.sep) for folder in self.absolute_scratch)
 
     def is_local(self, host: str) -> bool:
         host = host.strip().strip("[]").lower()
@@ -529,8 +533,7 @@ def rule_matches(rule: dict, inv: sp.Invocation, ctx: Context) -> bool:
 
 
 def make_context(payload: dict, root: Path, rules: gc.Rules) -> Context:
-    cwd = payload.get("cwd")
-    start = Path(cwd) if isinstance(cwd, str) and cwd and Path(cwd).is_absolute() else root
+    start = wp.start_dir(payload.get("cwd"), root)
     return Context(
         Path(os.path.realpath(root)),
         Path(os.path.realpath(start)),
