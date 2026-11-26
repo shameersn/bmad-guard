@@ -23,8 +23,18 @@ Status: Phase 2 (enforcement) is built and the red-team suite passes in a throwa
 | `docs/plans/` | One plan per phase. Each plan is approved by PR before its work starts. |
 | `docs/reports/` | Generated test reports: `phase-1-install-test.md` (install test), `phase-2-red-team.md` (red-team suite). |
 | `docs/adr/` | Architecture decision records. |
+| `docs/guides/`, `docs/architecture.md` | Pilot pack: install and role guides, trial run, architecture with diagrams. |
 | `docs/hooks.md` | How Claude Code hooks behave in the pinned version, with sources. `docs/managed-settings-rollout.md`: what IT installs. Command, path, document, write gate, review record and content scan rules and limits: `module/skills/tool-guard/references/guard-rules.md`. |
 | `spikes/` | Throwaway experiments from Phase 0. Each has a `REPORT.md`. Not linted. |
+
+## Pilot pack
+
+Guides for pilot users (Phase 3, T0): [`docs/guides/`](docs/guides/README.md).
+
+- [Install guide](docs/guides/install.md), then a guide for your role: [developer](docs/guides/developer.md), [BA / PM](docs/guides/ba-pm.md), [reviewer](docs/guides/reviewer.md).
+- [Architecture](docs/architecture.md): layers, guards, process flow with diagrams, events and privacy, limits.
+- [Trial run](docs/guides/trial-run.md): the clinic-booking trial script.
+- Deck: link added after review.
 
 ## Checks
 
