@@ -17,6 +17,9 @@ Config: each value comes from the environment first, then from the per-user file
 `~/.config/bmad-guard/credentials` (INI, section [collector]; written by scripts/setup_guard.py --credentials).
 The file is read only when a value is missing, and only if it is safe: a regular file you own, mode 600, in a folder
 others cannot write. Otherwise it is not used, events queue, and the reason is shown by `flush` (ADR 0007).
+On Windows (ADR 0009) the file is `%USERPROFILE%/.config/bmad-guard/credentials`; there are no mode bits, so the check
+is: a regular file, and neither it nor its folder is a link or junction. There is no queue lock either: `emit()` only
+appends one line there, and `flush` (the SessionStart hook, `guard_events.py flush`) sends.
   BMAD_GUARD_ENDPOINT   (file: endpoint) base URL, e.g. https://guard-events.example.internal
                         (BMAD_GUARD_COLLECTOR is read when it is not set: deprecated, one release; ADR 0007)
   BMAD_GUARD_USER       (file: user) developer id (the collector stamps the real user from the key)
@@ -43,10 +46,12 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-try:  # file locking: macOS and Linux; Windows runs without a lock (Phase 3 follow-up)
+try:  # file locking: macOS and Linux; Windows runs without a lock (ADR 0009; msvcrt is a later step)
     import fcntl
 except ImportError:  # pragma: no cover - Windows only
     fcntl = None
+
+IS_WINDOWS = os.name == "nt"  # tests set it: there are no POSIX mode bits to check, and HOME is not the home folder
 
 QUEUE_REL = Path(".bmad-guard/events/queue.jsonl")
 CREDENTIALS_REL = Path(".config/bmad-guard/credentials")  # under HOME; ADR 0007
@@ -58,12 +63,53 @@ EVENT_NAME = "guard.decision"
 
 
 def credentials_path(env: dict[str, str] | None = None) -> Path | None:
-    """`<HOME>/.config/bmad-guard/credentials`. With an explicit `env` that has no HOME: None (no file)."""
-    if env is None:
+    """`<HOME>/.config/bmad-guard/credentials`. With an explicit `env` that has no HOME: None (no file).
+    On Windows the home folder is `Path.home()` (USERPROFILE), not HOME: in Git Bash HOME can be `/c/Users/x`."""
+    if IS_WINDOWS:
+        home = str(Path.home()) if env is None else env.get("USERPROFILE", "")
+    elif env is None:
         home = os.environ.get("HOME") or str(Path.home())
     else:
         home = env.get("HOME", "")
     return Path(home) / CREDENTIALS_REL if home else None
+
+
+def _is_reparse_point(path: Path) -> bool:
+    """True for a link or junction on Windows (`st_file_attributes`). Raises OSError when the path cannot be read."""
+    return bool(getattr(os.lstat(path), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _windows_problem(path: Path) -> str:
+    """Windows has no mode bits to check. The file and its folder must not be a link or a junction (it could point
+    anywhere). The ACL is set by setup (`icacls`, best effort) and is not read here (ADR 0009)."""
+    for what, item in (("file", path), ("folder", path.parent)):
+        try:
+            if _is_reparse_point(item):
+                return f"credential {what} {item} is a link or junction (not used)"
+        except (FileNotFoundError, NotADirectoryError):
+            continue  # missing: the open below says so, and a missing file is not a problem
+        except OSError as err:
+            return f"credential {what} {item} cannot be checked ({type(err).__name__})"
+    return ""
+
+
+def _posix_problem(info: os.stat_result, path: Path) -> str:
+    """Owner, file mode and folder mode of the open file, or "" when all are fine."""
+    if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+        return f"credential file {path} is not owned by you (not used)"
+    if info.st_mode & 0o077:
+        mode = stat.S_IMODE(info.st_mode)
+        return (
+            f"credential file {path} has mode {mode:03o}; group and others must have no access (not used). "
+            f"Fix: chmod 600 {path}"
+        )
+    try:
+        folder_mode = stat.S_IMODE(os.stat(path.parent).st_mode)
+    except OSError as err:
+        return f"credential folder {path.parent} cannot be checked ({type(err).__name__})"
+    if folder_mode & 0o022:
+        return f"folder {path.parent} can be written by group or others (not used). Fix: chmod 700 {path.parent}"
+    return ""
 
 
 def read_credential_file(path: Path) -> tuple[dict[str, str], str]:
@@ -73,8 +119,15 @@ def read_credential_file(path: Path) -> tuple[dict[str, str], str]:
     yours, open to group or others, in a folder others can write) or that cannot be parsed gives ({}, reason).
     The file is judged by its open handle (`fstat`), so it cannot be swapped between the check and the read. The
     reason never holds file content: for a parse error only the error type.
+
+    On Windows (ADR 0009) there are no mode bits: the owner and mode checks are skipped, and the file and its folder
+    must not be a link or junction (checked just before the open). Still a regular file, parsed the same way.
     """
     path = Path(path)
+    if IS_WINDOWS:
+        problem = _windows_problem(path)
+        if problem:
+            return {}, problem
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     except (FileNotFoundError, NotADirectoryError):
@@ -87,22 +140,9 @@ def read_credential_file(path: Path) -> tuple[dict[str, str], str]:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             return {}, f"credential file {path} is not a regular file (not used)"
-        if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
-            return {}, f"credential file {path} is not owned by you (not used)"
-        if info.st_mode & 0o077:
-            mode = stat.S_IMODE(info.st_mode)
-            return {}, (
-                f"credential file {path} has mode {mode:03o}; group and others must have no access (not used). "
-                f"Fix: chmod 600 {path}"
-            )
-        try:
-            folder_mode = stat.S_IMODE(os.stat(path.parent).st_mode)
-        except OSError as err:
-            return {}, f"credential folder {path.parent} cannot be checked ({type(err).__name__})"
-        if folder_mode & 0o022:
-            return {}, (
-                f"folder {path.parent} can be written by group or others (not used). Fix: chmod 700 {path.parent}"
-            )
+        problem = "" if IS_WINDOWS else _posix_problem(info, path)
+        if problem:
+            return {}, problem
         parser = configparser.ConfigParser(interpolation=None)
         with os.fdopen(fd, "r", encoding="utf-8") as handle:
             fd = -1  # the file object owns it now
@@ -286,6 +326,8 @@ def emit(event: dict | None, config: Config, stderr=None, force: bool = False) -
             if event is not None:
                 handle.write(json.dumps(event) + "\n")
                 handle.flush()
+                if fcntl is None:  # no lock (Windows): only append one line; sending is `flush`'s job (ADR 0009)
+                    return {"sent": 0, "queued": -1, "error": None}  # -1: not counted
             events = _read_queue(handle)
             if not events or not config.sending_enabled:
                 return {"sent": 0, "queued": len(events), "error": config.credential_problem or None}
@@ -305,7 +347,9 @@ def emit(event: dict | None, config: Config, stderr=None, force: bool = False) -
                     file=stderr,
                 )
                 return {"sent": 0, "queued": len(events), "error": err.reason}
+            tail = handle.read() if fcntl is None else ""  # no lock: lines appended since the read stay in the queue
             handle.truncate(0)
+            handle.write(tail)
             _clear_backoff(config)
             return {"sent": len(events), "queued": 0, "error": None}
     except Exception as err:  # never block the caller
