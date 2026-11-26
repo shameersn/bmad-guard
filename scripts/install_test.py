@@ -72,6 +72,8 @@ NO_ARGPARSE_SMOKE = {
     "guard_config.py": None,  # library
     "command_guard.py": None,  # library
     "path_guard.py": None,  # library
+    "powershell_guard.py": None,  # library (run through pre_tool_use.py)
+    "winpaths.py": None,  # library
     "document_guard.py": None,  # library
     "bash_write_guard.py": None,  # library
     "content_scan.py": None,  # library (run through pre_tool_use.py)
