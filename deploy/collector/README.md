@@ -52,7 +52,8 @@ You need Docker with Compose v2.20 or newer, and Python 3.10+.
 
 ```sh
 cd deploy/collector
-python3 keys.py init            # creates secrets.local.ini with random passwords (or copy the .example and edit)
+python3 keys.py init            # creates secrets.local.ini with random passwords and an empty local/devkeys.htpasswd
+                                # (or copy the .example files and edit)
 python3 keys.py add dev-a       # first developer. Copy the key it prints: it is shown once.
 docker compose up -d
 docker compose ps               # clickhouse should be "healthy"
@@ -230,9 +231,12 @@ the reader's password and run where the stack runs, not on developer laptops (AD
 
 ```sh
 export GUARD_REPORT_PASSWORD=...          # the CLICKHOUSE_READER_PASSWORD value; never on the command line
-python3 reports/guard_reports.py commits --repo <project> --range origin/main..HEAD
+python3 reports/guard_reports.py commits --repo <project> --range origin/main..<feature branch>
 python3 reports/guard_reports.py reviews --repo <project> --ref origin/main
 ```
+
+**Routine `commits` runs use `origin/main..<feature branch>`, before any rebase** (a rebase gives new trees, so its
+commits would show up as `no-event`). `--range` defaults to `origin/main..HEAD`.
 
 Defaults: `GUARD_REPORT_URL=http://127.0.0.1:8123`, `GUARD_REPORT_USER=grafana_reader`. Exit 0 = nothing to report, 1 =
 findings, 2 = the report could not run.

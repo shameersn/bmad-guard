@@ -14,7 +14,8 @@ reviews   Review records (`_bmad-output/guard/reviews/*.json`) in the repo that 
           the hook wrote it, has no event with its hash.
 
 Both exit 0 when nothing is reported, 1 when something is, 2 when a report cannot run (no query, bad repo).
-What they cannot see is in the output footer and in deploy/collector/README.md ("Audit reports").
+Routine `commits` runs: `--range origin/main..<feature branch>`, BEFORE any rebase (a rebase makes new trees, which
+would be reported as false alarms). What they cannot see is in the output footer and in deploy/collector/README.md ("Audit reports").
 
 The database is read through the ClickHouse HTTP interface as a READ-ONLY user (`grafana_reader` or one like it),
 never as `otel_writer`. Settings come from the environment, never from the command line (a command line is visible in
@@ -272,7 +273,12 @@ def main(argv: list[str] | None = None, query: QueryFn | None = None) -> int:
     sub = parser.add_subparsers(dest="report", required=True)
     commits = sub.add_parser("commits", help="commits that no pre-commit hook saw")
     commits.add_argument("--repo", type=Path, default=Path.cwd())
-    commits.add_argument("--range", default="origin/main..HEAD", dest="rev_range", help="a git revision range")
+    commits.add_argument(
+        "--range",
+        default="origin/main..HEAD",
+        dest="rev_range",
+        help="a git revision range, e.g. origin/main..<feature branch>; run it before any rebase",
+    )
     commits.add_argument("--project", default="", help="only events of this project name (as in project.json)")
     commits.add_argument("--include-merges", action="store_true")
     reviews = sub.add_parser("reviews", help="review records with no REVIEW_RECORDED event")

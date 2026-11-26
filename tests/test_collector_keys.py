@@ -166,6 +166,30 @@ class InitSecretsTests(unittest.TestCase):
             self.assertNotIn(value, out.getvalue())
 
 
+class InitHtpasswdTests(unittest.TestCase):
+    def test_creates_an_empty_readable_file_once_and_never_touches_an_existing_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "local" / "devkeys.htpasswd"
+            self.assertTrue(keys.init_htpasswd(target, io.StringIO()))
+            self.assertEqual(target.read_text(), "")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o644)  # the non-root collector must read it
+            target.write_text("dev-a:$2y$10$" + "x" * 53 + "\n")
+            self.assertFalse(keys.init_htpasswd(target, io.StringIO()))
+            self.assertIn("dev-a:", target.read_text())
+
+    def test_init_command_makes_both_files_and_a_later_add_still_works(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "local" / "devkeys.htpasswd"
+            secrets_file = Path(tmp) / "secrets.local.ini"
+            out = io.StringIO()
+            with mock.patch.object(keys, "SECRETS_FILE", secrets_file):
+                self.assertEqual(keys.main(["init"], path=target, out=out), 0)
+                self.assertTrue(secrets_file.is_file() and target.is_file())
+                self.assertEqual(keys.main(["add", "dev-a"], hasher=fake_hasher, path=target, out=io.StringIO()), 0)
+            self.assertIn("dev-a:", target.read_text())
+            self.assertNotIn(target.read_text().split(":")[1].strip(), out.getvalue())
+
+
 class CommittedFilesTests(unittest.TestCase):
     def test_every_image_has_an_exact_version_tag(self):
         text = (COLLECTOR / "stack.yml").read_text()
