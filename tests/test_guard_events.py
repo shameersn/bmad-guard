@@ -12,9 +12,11 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "module/skills/agent-project-logger/scripts"
@@ -73,7 +75,8 @@ def unused_port_url() -> str:
 
 
 def config(tmp: str, endpoint: str = "", user: str = GOOD[0], key: str = GOOD[1]) -> ge.Config:
-    return ge.Config(queue=Path(tmp) / ge.QUEUE_REL, endpoint=endpoint, user=user, key=key, timeout=1)
+    """backoff=0: each call tries, as the older tests expect. BackoffTests set it."""
+    return ge.Config(queue=Path(tmp) / ge.QUEUE_REL, endpoint=endpoint, user=user, key=key, timeout=1, backoff=0)
 
 
 def event(n: int = 0) -> dict:
@@ -183,12 +186,81 @@ class EmitTests(unittest.TestCase):
             self.assertEqual(ge.emit(event(), cfg, stderr=io.StringIO())["sent"], 1)
 
 
+class BackoffTests(unittest.TestCase):
+    def cfg(self, tmp: str, endpoint: str) -> ge.Config:
+        return ge.Config(queue=Path(tmp) / ge.QUEUE_REL, endpoint=endpoint, user=GOOD[0], key=GOOD[1], timeout=1)
+
+    def test_default_backoff_is_five_minutes(self):
+        self.assertEqual(ge.Config(queue=Path("/q")).backoff, 300.0)
+
+    def test_after_a_failure_later_calls_only_queue_without_trying_or_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            first = ge.emit(event(0), self.cfg(tmp, unused_port_url()), stderr=err)
+            self.assertIsNotNone(first["error"])
+            self.assertEqual(err.getvalue().count("warning"), 1)
+            with FakeCollector() as fc:  # the collector is back, but the backoff still runs
+                later = ge.emit(event(1), self.cfg(tmp, fc.url), stderr=err)
+                self.assertEqual(later, {"sent": 0, "queued": 2, "error": None})
+                self.assertEqual(fc.requests, [])
+            self.assertEqual(err.getvalue().count("warning"), 1, "no second warning while backing off")
+
+    def test_sending_resumes_after_the_backoff_and_clears_the_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ge.emit(event(0), self.cfg(tmp, unused_port_url()), stderr=io.StringIO())
+            marker = self.cfg(tmp, "").send_after_file
+            self.assertTrue(marker.is_file())
+            with FakeCollector() as fc, mock.patch.object(ge.time, "time", return_value=time.time() + 301):
+                result = ge.emit(event(1), self.cfg(tmp, fc.url), stderr=io.StringIO())
+            self.assertEqual(result["sent"], 2)
+            self.assertFalse(marker.exists())
+
+    def test_flush_tries_during_the_backoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ge.emit(event(0), self.cfg(tmp, unused_port_url()), stderr=io.StringIO())
+            with FakeCollector() as fc:
+                result = ge.emit(None, self.cfg(tmp, fc.url), stderr=io.StringIO(), force=True)
+                self.assertEqual(result["sent"], 1)
+
+    def test_a_broken_marker_means_no_backoff(self):
+        with tempfile.TemporaryDirectory() as tmp, FakeCollector() as fc:
+            cfg = self.cfg(tmp, fc.url)
+            cfg.queue.parent.mkdir(parents=True)
+            cfg.send_after_file.write_text("not a number\n")
+            self.assertEqual(ge.emit(event(), cfg, stderr=io.StringIO())["sent"], 1)
+
+    def test_a_failed_attempt_waits_at_most_one_timeout_for_many_events(self):
+        """The point of the backoff: ten hook calls against a dead collector try once."""
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = []
+            real_send = ge.send
+
+            def counting_send(events, config):
+                calls.append(len(events))
+                real_send(events, config)
+
+            with mock.patch.object(ge, "send", counting_send):
+                for i in range(10):
+                    ge.emit(event(i), self.cfg(tmp, unused_port_url()), stderr=io.StringIO())
+            self.assertEqual(calls, [1])
+
+
 class ConfigTests(unittest.TestCase):
     def test_for_project_reads_env_and_places_queue(self):
-        cfg = ge.Config.for_project(Path("/p"), {"BMAD_GUARD_COLLECTOR": "https://c", "BMAD_GUARD_USER": "u"})
+        cfg = ge.Config.for_project(Path("/p"), {"BMAD_GUARD_ENDPOINT": "https://c", "BMAD_GUARD_USER": "u"})
         self.assertEqual(cfg.queue, Path("/p/.bmad-guard/events/queue.jsonl"))
+        self.assertEqual(cfg.endpoint, "https://c")
         self.assertTrue(cfg.sending_enabled)
         self.assertFalse(ge.Config.for_project(Path("/p"), {}).sending_enabled)
+
+    def test_old_collector_name_is_a_deprecated_alias(self):
+        self.assertEqual(
+            ge.Config.for_project(Path("/p"), {"BMAD_GUARD_COLLECTOR": "https://old"}).endpoint, "https://old"
+        )
+
+    def test_new_name_wins_over_the_alias(self):
+        env = {"BMAD_GUARD_ENDPOINT": "https://new", "BMAD_GUARD_COLLECTOR": "https://old"}
+        self.assertEqual(ge.Config.for_project(Path("/p"), env).endpoint, "https://new")
 
 
 if __name__ == "__main__":

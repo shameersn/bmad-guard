@@ -243,7 +243,7 @@ The agent cannot write `approval-state.json` (`DOC_APPROVAL_STATE`), the build a
 
 ## 8. Events and privacy
 
-Every guard decision is one event in the local queue (JSON lines). Today events **stay on the laptop**: with no collector set, they only queue and nothing is sent. Leave `BMAD_GUARD_COLLECTOR` unset in the pilot.
+Every guard decision is one event in the local queue (JSON lines). Today events **stay on the laptop**: with no collector set, they only queue and nothing is sent. Leave `BMAD_GUARD_ENDPOINT` unset in the pilot (`BMAD_GUARD_COLLECTOR` is its old name, still read for one release). When a collector is set and cannot be reached, the guards try again only after 5 minutes, so hooks do not slow down.
 
 **What an event holds:** the guard, the stage, the verdict (`allow`, `warn`, `block`, `info`), the **rule id**, the tool name, the **session id**, and a few counts or short codes. Warden, Sentry, the ready-for-dev gate and the commit approval check also record the project-relative path and the SHA-256 of the document.
 

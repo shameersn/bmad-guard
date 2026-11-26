@@ -8,11 +8,14 @@
 tries to send the whole queue as OTLP/HTTP JSON to `<collector>/v1/logs`.
 
 - No collector configured (Phase 1 default): events only queue. No warning.
-- Collector configured but down or refusing: events stay queued, one warning on stderr.
+- Collector configured but down or refusing: events stay queued, one warning on stderr, and no new
+  attempt for BACKOFF_SECONDS (a marker file next to the queue), so an unreachable collector does not
+  slow every hook by the send timeout. `flush` always tries.
 - `emit()` never raises, so a guard or a git commit never waits on logging.
 
 Config (environment variables):
-  BMAD_GUARD_COLLECTOR  base URL, e.g. https://guard-events.example.internal
+  BMAD_GUARD_ENDPOINT   base URL, e.g. https://guard-events.example.internal
+                        (BMAD_GUARD_COLLECTOR is read when it is not set: deprecated, one release; ADR 0007)
   BMAD_GUARD_USER       developer id (the collector stamps the real user from the key)
   BMAD_GUARD_KEY        developer ingest key (never printed)
 
@@ -41,6 +44,8 @@ except ImportError:  # pragma: no cover - Windows only
 
 QUEUE_REL = Path(".bmad-guard/events/queue.jsonl")
 SEVERITY = {"info": 9, "allow": 9, "warn": 13, "block": 17}  # OTel INFO, WARN, ERROR
+SEND_AFTER_NAME = "send-after"  # marker next to the queue: no send attempt before this Unix time
+BACKOFF_SECONDS = 300.0
 SERVICE_NAME = "bmad-guard"
 EVENT_NAME = "guard.decision"
 
@@ -52,6 +57,11 @@ class Config:
     user: str = ""
     key: str = ""
     timeout: float = 3.0
+    backoff: float = BACKOFF_SECONDS
+
+    @property
+    def send_after_file(self) -> Path:
+        return self.queue.with_name(SEND_AFTER_NAME)
 
     @property
     def sending_enabled(self) -> bool:
@@ -62,7 +72,7 @@ class Config:
         env = os.environ if env is None else env
         return cls(
             queue=project_root / QUEUE_REL,
-            endpoint=env.get("BMAD_GUARD_COLLECTOR", ""),
+            endpoint=env.get("BMAD_GUARD_ENDPOINT") or env.get("BMAD_GUARD_COLLECTOR", ""),
             user=env.get("BMAD_GUARD_USER", ""),
             key=env.get("BMAD_GUARD_KEY", ""),
         )
@@ -153,10 +163,34 @@ def _read_queue(handle) -> list[dict]:
     return events
 
 
-def emit(event: dict | None, config: Config, stderr=None) -> dict:
+def _backing_off(config: Config) -> bool:
+    """True while an earlier failure's backoff runs. A missing or unreadable marker means no backoff."""
+    try:
+        return time.time() < float(config.send_after_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+
+
+def _set_backoff(config: Config) -> None:
+    try:
+        config.send_after_file.write_text(f"{time.time() + config.backoff:.0f}\n", encoding="utf-8")
+    except OSError:
+        pass  # no marker: the next emit tries again, which is only slower
+
+
+def _clear_backoff(config: Config) -> None:
+    try:
+        config.send_after_file.unlink()
+    except OSError:
+        pass
+
+
+def emit(event: dict | None, config: Config, stderr=None, force: bool = False) -> dict:
     """Queue the event (if any), then send the queue when a collector is configured. Never raises.
 
-    Returns {"sent": n, "queued": n, "error": str | None}; queued = events still waiting.
+    After a failed send, later calls only queue until the backoff ends (no wait, no warning). `force` (the
+    `flush` command) tries anyway. Returns {"sent": n, "queued": n, "error": str | None}; queued = events still
+    waiting.
     """
     stderr = sys.stderr if stderr is None else stderr  # looked up per call, so redirection works
     try:
@@ -170,17 +204,21 @@ def emit(event: dict | None, config: Config, stderr=None) -> dict:
             events = _read_queue(handle)
             if not events or not config.sending_enabled:
                 return {"sent": 0, "queued": len(events), "error": None}
+            if not force and _backing_off(config):
+                return {"sent": 0, "queued": len(events), "error": None}
             try:
                 send(events, config)
             except SendError as err:
+                _set_backoff(config)
                 hint = " (check BMAD_GUARD_KEY)" if err.status == 401 else ""
                 print(
                     f"bmad-guard: warning: could not send {len(events)} event(s): {err.reason}{hint}. "
-                    f"Kept in {QUEUE_REL}; they will be sent next time.",
+                    f"Kept in {QUEUE_REL}; next try in {config.backoff / 60:.0f} min or with `guard_events.py flush`.",
                     file=stderr,
                 )
                 return {"sent": 0, "queued": len(events), "error": err.reason}
             handle.truncate(0)
+            _clear_backoff(config)
             return {"sent": len(events), "queued": 0, "error": None}
     except Exception as err:  # never block the caller
         print(f"bmad-guard: warning: event logging failed: {type(err).__name__}", file=stderr)
@@ -193,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     flush = sub.add_parser("flush", help="send what is queued (no-op when no collector is configured)")
     flush.add_argument("--project-root", type=Path, default=Path.cwd())
     args = parser.parse_args(argv)
-    print(json.dumps(emit(None, Config.for_project(args.project_root.resolve()))))
+    print(json.dumps(emit(None, Config.for_project(args.project_root.resolve()), force=True)))
     return 0  # logging never blocks
 
 
