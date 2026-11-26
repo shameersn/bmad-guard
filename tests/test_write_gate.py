@@ -962,3 +962,39 @@ class DocsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourceCheckerTests(unittest.TestCase):
+    """The pre-push hook's view of "source": the write gate's allowed paths, plus the files BMAD and setup install."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.is_source = wg.source_checker(Path(tmp.name))
+
+    def test_install_and_setup_files_are_not_source(self):
+        for rel in (
+            ".gitignore",
+            ".github/agents/bmad-agent-dev.agent.md",
+            ".github/agents/bmad-agent-ux-designer.agent.md",
+        ):
+            self.assertFalse(self.is_source(rel), rel)
+
+    def test_other_files_stay_source(self):
+        for rel in (
+            "src/app.py",
+            "README.md",
+            ".github/workflows/ci.yml",
+            ".github/agents/my-agent.agent.md",
+            ".github/agents/bmad-agent-dev.md",
+            ".github/agents/sub/bmad-agent-dev.agent.md",
+            ".github/bmad-agent-dev.agent.md",
+            "src/.gitignore",
+        ):
+            self.assertTrue(self.is_source(rel), rel)
+
+    def test_the_write_gate_still_gates_install_files(self):
+        """Only pre-push skips them: an agent write to .github/agents still needs an approved plan."""
+        entries = wg.allowed_entries(())
+        self.assertFalse(wg.in_allowed(entries, (".github", "agents", "bmad-agent-dev.agent.md")))
+        self.assertFalse(wg.in_allowed(entries, (".gitignore",)))
