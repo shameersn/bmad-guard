@@ -260,6 +260,29 @@ class PreToolSmokeTests(unittest.TestCase):
                     self.assertIn(want_code, proc.stderr)
 
 
+class RunnerTests(unittest.TestCase):
+    """Runner.run: the environment of a sandbox command (extra_env is used by scripts/red_team.py)."""
+
+    def run_probe(self, **kwargs):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = it.Runner(Path(tmp) / "commands.log")
+            code = (
+                "import os; print(os.environ.get('RT_PROBE', 'unset'), os.environ.get('CLAUDE_PROJECT_DIR', 'unset'))"
+            )
+            proc, _ = runner.run([sys.executable, "-c", code], Path(tmp), **kwargs)
+            return proc.stdout.strip()
+
+    def test_no_extra_env_leaves_the_variable_unset(self):
+        self.assertEqual(self.run_probe(), "unset unset")
+
+    def test_extra_env_is_added_for_one_call(self):
+        self.assertEqual(self.run_probe(extra_env={"RT_PROBE": "yes"}), "yes unset")
+
+    def test_outer_project_dir_is_still_removed(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": "/outer"}):
+            self.assertEqual(self.run_probe(extra_env={"RT_PROBE": "yes"}), "yes unset")
+
+
 class MainTests(unittest.TestCase):
     def test_missing_tool_exits_2_without_creating_sandboxes(self):
         err = io.StringIO()
