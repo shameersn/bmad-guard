@@ -15,7 +15,8 @@ reviews   Review records (`_bmad-output/guard/reviews/*.json`) in the repo that 
 
 Both exit 0 when nothing is reported, 1 when something is, 2 when a report cannot run (no query, bad repo).
 Routine `commits` runs: `--range origin/main..<feature branch>`, BEFORE any rebase (a rebase makes new trees, which
-would be reported as false alarms). What they cannot see is in the output footer and in deploy/collector/README.md ("Audit reports").
+would be reported as false alarms). What they cannot see is in the output footer and in
+deploy/collector/README.md ("Audit reports").
 
 The database is read through the ClickHouse HTTP interface as a READ-ONLY user (`grafana_reader` or one like it),
 never as `otel_writer`. Settings come from the environment, never from the command line (a command line is visible in
