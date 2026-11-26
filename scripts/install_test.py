@@ -216,12 +216,13 @@ class Runner:
         # No collector, and no project dir from an outer Claude Code session: the hooks must use the sandbox.
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
 
-    def run(self, cmd: list[str], cwd: Path, stdin: str | None = None, timeout: int = 300):
+    def run(
+        self, cmd: list[str], cwd: Path, stdin: str | None = None, timeout: int = 300, extra_env: dict | None = None
+    ):
         start = time.monotonic()
+        env = {**self.env, **extra_env} if extra_env else self.env
         try:
-            proc = subprocess.run(
-                cmd, cwd=cwd, input=stdin, capture_output=True, text=True, env=self.env, timeout=timeout
-            )
+            proc = subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, text=True, env=env, timeout=timeout)
         except subprocess.TimeoutExpired:
             proc = subprocess.CompletedProcess(cmd, 124, "", f"timed out after {timeout}s")
         took = time.monotonic() - start
