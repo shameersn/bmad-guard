@@ -116,6 +116,7 @@ PHI-3  | L2 | git commit       | block | COMMIT_PHI     | Fake patient SSN in a 
 PHI-C1 | L1 | UserPromptSubmit | allow |                | Control: allow-listed fake SSN in a prompt
 PHI-C2 | L1 | PreToolUse Write | allow |                | Control: allow-listed fake SSN in a written file
 PHI-C3 | L2 | git commit       | allow | COMMIT_ALLOWED | Control: allow-listed fake SSN in a commit
+PHI-C4 | L1 | PreToolUse Write | allow |                | Control: escaped newline before a decorator in a written file
 ## PHI, project that is not HIPAA (info)
 PHI-N1 | L1 | UserPromptSubmit | warn | phi.us-ssn  | Fake patient SSN in a prompt only warns
 PHI-N2 | L1 | PreToolUse Write | warn | CONTENT_PHI | Fake patient SSN in a written file only warns
@@ -768,6 +769,8 @@ def scenario_hipaa(lab: Lab) -> None:
     lab.record("PHI-C1", lab.prompt(f"The test patient has SSN {ALLOWED_SSN}."))
     lab.record("PHI-C2", lab.tool("Write", {"file_path": str(lab.sb / "docs/fixture-note.txt"), "content": fake}))
     lab.record("PHI-C3", lab.commit({"docs/fixture-note.txt": fake}, "fixture note"))
+    route = {"file_path": str(lab.sb / "docs/route-note.txt"), "content": 'text = "a\\n@app.get(1)"\n'}
+    lab.record("PHI-C4", lab.tool("Write", route))
 
 
 def scenario_general(lab: Lab, remote: Path) -> None:
