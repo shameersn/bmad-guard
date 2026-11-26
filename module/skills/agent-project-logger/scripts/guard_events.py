@@ -13,11 +13,14 @@ tries to send the whole queue as OTLP/HTTP JSON to `<collector>/v1/logs`.
   slow every hook by the send timeout. `flush` always tries.
 - `emit()` never raises, so a guard or a git commit never waits on logging.
 
-Config (environment variables):
-  BMAD_GUARD_ENDPOINT   base URL, e.g. https://guard-events.example.internal
+Config: each value comes from the environment first, then from the per-user file
+`~/.config/bmad-guard/credentials` (INI, section [collector]; written by scripts/setup_guard.py --credentials).
+The file is read only when a value is missing, and only if it is safe: a regular file you own, mode 600, in a folder
+others cannot write. Otherwise it is not used, events queue, and the reason is shown by `flush` (ADR 0007).
+  BMAD_GUARD_ENDPOINT   (file: endpoint) base URL, e.g. https://guard-events.example.internal
                         (BMAD_GUARD_COLLECTOR is read when it is not set: deprecated, one release; ADR 0007)
-  BMAD_GUARD_USER       developer id (the collector stamps the real user from the key)
-  BMAD_GUARD_KEY        developer ingest key (never printed)
+  BMAD_GUARD_USER       (file: user) developer id (the collector stamps the real user from the key)
+  BMAD_GUARD_KEY        (file: key) developer ingest key (never printed)
 
 CLI:
   python3 guard_events.py flush [--project-root DIR]   send what is queued
@@ -27,8 +30,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+import configparser
+import errno
 import json
 import os
+import stat
 import sys
 import time
 import urllib.error
@@ -43,11 +49,72 @@ except ImportError:  # pragma: no cover - Windows only
     fcntl = None
 
 QUEUE_REL = Path(".bmad-guard/events/queue.jsonl")
+CREDENTIALS_REL = Path(".config/bmad-guard/credentials")  # under HOME; ADR 0007
 SEVERITY = {"info": 9, "allow": 9, "warn": 13, "block": 17}  # OTel INFO, WARN, ERROR
 SEND_AFTER_NAME = "send-after"  # marker next to the queue: no send attempt before this Unix time
 BACKOFF_SECONDS = 300.0
 SERVICE_NAME = "bmad-guard"
 EVENT_NAME = "guard.decision"
+
+
+def credentials_path(env: dict[str, str] | None = None) -> Path | None:
+    """`<HOME>/.config/bmad-guard/credentials`. With an explicit `env` that has no HOME: None (no file)."""
+    if env is None:
+        home = os.environ.get("HOME") or str(Path.home())
+    else:
+        home = env.get("HOME", "")
+    return Path(home) / CREDENTIALS_REL if home else None
+
+
+def read_credential_file(path: Path) -> tuple[dict[str, str], str]:
+    """Read the credential file (ADR 0007). Returns (values, problem).
+
+    A missing file is not a problem: ({}, ""). A file that is not safe to use (a link, not a regular file, not
+    yours, open to group or others, in a folder others can write) or that cannot be parsed gives ({}, reason).
+    The file is judged by its open handle (`fstat`), so it cannot be swapped between the check and the read. The
+    reason never holds file content: for a parse error only the error type.
+    """
+    path = Path(path)
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except (FileNotFoundError, NotADirectoryError):
+        return {}, ""
+    except OSError as err:
+        if err.errno == errno.ELOOP:
+            return {}, f"credential file {path} is a symbolic link (not used)"
+        return {}, f"credential file {path} cannot be opened ({type(err).__name__})"
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return {}, f"credential file {path} is not a regular file (not used)"
+        if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+            return {}, f"credential file {path} is not owned by you (not used)"
+        if info.st_mode & 0o077:
+            mode = stat.S_IMODE(info.st_mode)
+            return {}, (
+                f"credential file {path} has mode {mode:03o}; group and others must have no access (not used). "
+                f"Fix: chmod 600 {path}"
+            )
+        try:
+            folder_mode = stat.S_IMODE(os.stat(path.parent).st_mode)
+        except OSError as err:
+            return {}, f"credential folder {path.parent} cannot be checked ({type(err).__name__})"
+        if folder_mode & 0o022:
+            return {}, (
+                f"folder {path.parent} can be written by group or others (not used). Fix: chmod 700 {path.parent}"
+            )
+        parser = configparser.ConfigParser(interpolation=None)
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1  # the file object owns it now
+            try:
+                parser.read_string(handle.read())
+            except (configparser.Error, UnicodeDecodeError) as err:  # the library's message quotes the bad line
+                return {}, f"credential file {path} cannot be parsed ({type(err).__name__}); run setup again"
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    values = {name: parser.get("collector", name, fallback="").strip() for name in ("endpoint", "user", "key")}
+    return values, ""
 
 
 @dataclass
@@ -58,6 +125,8 @@ class Config:
     key: str = ""
     timeout: float = 3.0
     backoff: float = BACKOFF_SECONDS
+    key_source: str = "env"  # "env" or "file": where the key came from (for the 401 hint)
+    credential_problem: str = ""  # why the credential file was not used, if it was refused
 
     @property
     def send_after_file(self) -> Path:
@@ -68,13 +137,26 @@ class Config:
         return bool(self.endpoint)
 
     @classmethod
-    def for_project(cls, project_root: Path, env: dict[str, str] | None = None) -> Config:
+    def for_project(
+        cls, project_root: Path, env: dict[str, str] | None = None, credentials_file: Path | None = None
+    ) -> Config:
+        """Each of endpoint, user and key: the environment first, then the credential file (ADR 0007). The file is
+        read only when a value is missing. With an explicit `env` that has no HOME the file is skipped."""
+        path = credentials_file or credentials_path(env)
         env = os.environ if env is None else env
+        endpoint = env.get("BMAD_GUARD_ENDPOINT") or env.get("BMAD_GUARD_COLLECTOR", "")
+        user, key = env.get("BMAD_GUARD_USER", ""), env.get("BMAD_GUARD_KEY", "")
+        values: dict[str, str] = {}
+        problem = ""
+        if path is not None and not (endpoint and user and key):
+            values, problem = read_credential_file(path)
         return cls(
             queue=project_root / QUEUE_REL,
-            endpoint=env.get("BMAD_GUARD_ENDPOINT") or env.get("BMAD_GUARD_COLLECTOR", ""),
-            user=env.get("BMAD_GUARD_USER", ""),
-            key=env.get("BMAD_GUARD_KEY", ""),
+            endpoint=endpoint or values.get("endpoint", ""),
+            user=user or values.get("user", ""),
+            key=key or values.get("key", ""),
+            key_source="env" if key or not values.get("key") else "file",
+            credential_problem=problem,
         )
 
 
@@ -129,7 +211,8 @@ def to_otlp(events: list[dict]) -> dict:
 def send(events: list[dict], config: Config) -> None:
     """POST events to the collector. Raises SendError on any failure."""
     if not (config.endpoint and config.user and config.key):
-        raise SendError("collector URL, user or key not set")
+        why = f": {config.credential_problem}" if config.credential_problem else ""
+        raise SendError(f"collector URL, user or key not set{why}")
     if not config.endpoint.startswith(("https://", "http://127.0.0.1", "http://localhost")):
         raise SendError("collector URL must use https (plain http only for localhost)")
     auth = base64.b64encode(f"{config.user}:{config.key}".encode()).decode()
@@ -205,14 +288,17 @@ def emit(event: dict | None, config: Config, stderr=None, force: bool = False) -
                 handle.flush()
             events = _read_queue(handle)
             if not events or not config.sending_enabled:
-                return {"sent": 0, "queued": len(events), "error": None}
+                return {"sent": 0, "queued": len(events), "error": config.credential_problem or None}
             if not force and _backing_off(config):
                 return {"sent": 0, "queued": len(events), "error": None}
             try:
                 send(events, config)
             except SendError as err:
                 _set_backoff(config)
-                hint = " (check BMAD_GUARD_KEY)" if err.status == 401 else ""
+                hint = ""
+                if err.status == 401:
+                    where = "BMAD_GUARD_KEY" if config.key_source == "env" else "the credential file"
+                    hint = f" (the key is from {where})"
                 print(
                     f"bmad-guard: warning: could not send {len(events)} event(s): {err.reason}{hint}. "
                     f"Kept in {QUEUE_REL}; next try in {config.backoff / 60:.0f} min or with `guard_events.py flush`.",

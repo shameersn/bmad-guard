@@ -9,12 +9,15 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("setup_guard", ROOT / "scripts" / "setup_guard.py")
@@ -71,6 +74,10 @@ class Base(unittest.TestCase):
         (tmp / "proj").mkdir()
         self.module = make_module(tmp / "mod")
         self.project = make_project(tmp / "proj")
+        (tmp / "home").mkdir()  # `--check` looks at ~/.config/bmad-guard: never the real one
+        patcher = mock.patch.dict(os.environ, {"HOME": str(tmp / "home")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -532,6 +539,239 @@ class ManifestAndVersionTests(Base):
     def test_module_without_git_is_unknown(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(sg.module_version(Path(tmp)), "unknown")
+
+
+EVENTS_REL = "module/skills/agent-project-logger/scripts/guard_events.py"
+FAKE_KEY = "fake-setup-secret-7"
+
+
+class FakeHomeMixin:
+    """HOME is a temp folder and no collector settings leak in, so a test never touches the real home."""
+
+    def use_fake_home(self, tmp: Path) -> None:
+        self.home = tmp / "home"
+        self.home.mkdir(exist_ok=True)
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in ("BMAD_GUARD_KEY", "BMAD_GUARD_ENDPOINT", "BMAD_GUARD_USER", "BMAD_GUARD_COLLECTOR"):
+            os.environ.pop(name, None)
+        self.folder = self.home / ".config" / "bmad-guard"
+        self.cred = self.folder / "credentials"
+
+
+class CredentialSetupTests(FakeHomeMixin, unittest.TestCase):
+    """`--credentials`: writes the per-user file once (ADR 0007). Fake values only."""
+
+    ARGS = ("--credentials", "--endpoint", "https://collector.example.invalid", "--user", "dev-a")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.use_fake_home(Path(tmp.name).resolve())
+
+    def go(self, *args: str, key: str | None = FAKE_KEY, prompt: str | None = None):
+        out, err = io.StringIO(), io.StringIO()
+        env = {"BMAD_GUARD_KEY": key} if key is not None else {}
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sg.getpass, "getpass", return_value=prompt or "") as asked,
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = sg.main(list(args or self.ARGS))
+        self.asked = asked
+        return code, out.getvalue(), err.getvalue()
+
+    def mode(self, path: Path) -> int:
+        return stat.S_IMODE(path.stat().st_mode)
+
+    def test_writes_the_file_with_mode_600_in_a_700_folder(self):
+        code, out, err = self.go()
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertEqual((self.mode(self.folder), self.mode(self.cred)), (0o700, 0o600))
+        text = self.cred.read_text()
+        self.assertIn("[collector]", text)
+        self.assertIn("endpoint = https://collector.example.invalid", text)
+        self.assertIn("user = dev-a", text)
+        self.assertIn(f"key = {FAKE_KEY}", text)
+        self.assertNotIn(FAKE_KEY, out)
+        self.assertTrue(out.rstrip().endswith("done"))
+
+    def test_the_file_is_created_with_the_mode_not_changed_afterwards(self):
+        with mock.patch.object(sg.os, "chmod", side_effect=AssertionError("chmod")):
+            self.assertEqual(self.go()[0], 0)
+        self.assertEqual(self.mode(self.cred), 0o600)
+
+    def test_a_loose_umask_does_not_open_the_file(self):
+        old = os.umask(0)
+        self.addCleanup(os.umask, old)
+        self.assertEqual(self.go()[0], 0)
+        self.assertEqual((self.mode(self.folder), self.mode(self.cred)), (0o700, 0o600))
+
+    def test_the_sender_accepts_what_setup_wrote(self):
+        self.go()
+        ge = sg.load_events(sg.DEFAULT_MODULE)
+        values, problem = ge.read_credential_file(self.cred)
+        self.assertEqual(problem, "")
+        self.assertEqual(values, {"endpoint": "https://collector.example.invalid", "user": "dev-a", "key": FAKE_KEY})
+
+    def test_the_second_run_with_the_same_values_changes_nothing(self):
+        self.go()
+        before = (self.cred.read_text(), self.cred.stat().st_ino, self.cred.stat().st_mtime_ns)
+        code, out, _ = self.go()
+        self.assertEqual(code, 0, out)
+        self.assertIn("keep", out)
+        self.assertEqual(before, (self.cred.read_text(), self.cred.stat().st_ino, self.cred.stat().st_mtime_ns))
+
+    def test_different_values_are_a_conflict_without_force(self):
+        self.go()
+        before = self.cred.read_text()
+        code, out, _ = self.go(key="fake-other-secret-8")
+        self.assertEqual(code, 1)
+        self.assertIn("conflict", out)
+        self.assertIn("--force", out)
+        self.assertIn("key", out)
+        self.assertNotIn(FAKE_KEY, out)
+        self.assertNotIn("fake-other-secret-8", out)
+        self.assertEqual(self.cred.read_text(), before)
+
+    def test_force_replaces_the_file_and_keeps_the_mode(self):
+        self.go()
+        code, out, _ = self.go(
+            "--credentials", "--endpoint", "https://other.example.invalid", "--user", "dev-a", "--force"
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("endpoint = https://other.example.invalid", self.cred.read_text())
+        self.assertEqual(self.mode(self.cred), 0o600)
+
+    def test_force_repairs_a_file_that_is_too_open(self):
+        self.go()
+        self.cred.chmod(0o644)
+        self.assertEqual(self.go()[0], 1)  # refused without --force, even with the same values
+        self.assertEqual(self.go(*self.ARGS, "--force")[0], 0)
+        self.assertEqual(self.mode(self.cred), 0o600)
+
+    def test_the_key_comes_from_the_prompt_when_the_variable_is_not_set(self):
+        code, out, _ = self.go(key=None, prompt=FAKE_KEY)
+        self.assertEqual(code, 0, out)
+        self.asked.assert_called_once()
+        self.assertIn(f"key = {FAKE_KEY}", self.cred.read_text())
+
+    def test_the_variable_is_used_without_asking(self):
+        self.go()
+        self.asked.assert_not_called()
+
+    def test_there_is_no_key_option_on_the_command_line(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as stop:
+            sg.main([*self.ARGS, "--key", FAKE_KEY])
+        self.assertEqual(stop.exception.code, 2)
+        self.assertFalse(self.cred.exists())
+
+    def test_an_empty_key_is_refused(self):
+        code, _, err = self.go(key=None, prompt="  ")
+        self.assertEqual(code, 2)
+        self.assertIn("key", err)
+        self.assertFalse(self.cred.exists())
+
+    def test_values_with_control_characters_are_refused_without_echoing_them(self):
+        code, _, err = self.go(key="bad\nkey = injected")
+        self.assertEqual(code, 2)
+        self.assertNotIn("injected", err)
+        self.assertFalse(self.cred.exists())
+
+    def test_an_endpoint_the_sender_would_refuse_is_refused(self):
+        code, _, err = self.go("--credentials", "--endpoint", "http://collector.example.invalid", "--user", "dev-a")
+        self.assertEqual(code, 2)
+        self.assertIn("https", err)
+
+    def test_endpoint_and_user_are_required(self):
+        for args in (
+            ("--credentials", "--user", "dev-a"),
+            ("--credentials", "--endpoint", "https://c.example.invalid"),
+        ):
+            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                sg.main(list(args))
+
+    def test_it_never_writes_into_a_project_and_refuses_project_flags(self):
+        for extra in (("--project", "."), ("--check",), ("--dry-run",)):
+            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                sg.main([*self.ARGS, *extra])
+
+    def test_endpoint_and_user_need_credentials_mode(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            sg.main(["--project", ".", "--endpoint", "https://c.example.invalid"])
+
+    def test_project_is_still_required_without_credentials_mode(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as stop:
+            sg.main([])
+        self.assertEqual(stop.exception.code, 2)
+        self.assertIn("--project", err.getvalue())
+
+    def test_windows_is_refused(self):
+        with mock.patch.object(sg.sys, "platform", "win32"):
+            code, _, err = self.go()
+        self.assertEqual(code, 2)
+        self.assertIn("not supported yet", err)
+        self.assertFalse(self.cred.exists())
+
+    def test_a_folder_others_can_write_is_reported_as_a_problem(self):
+        self.folder.mkdir(parents=True)
+        self.folder.chmod(0o777)
+        code, out, _ = self.go()
+        self.assertEqual(code, 1)
+        self.assertIn("chmod 700", out)
+
+
+class CheckCredentialTests(FakeHomeMixin, Base):
+    """`--check` in a project: a note for a missing credential file, a problem line for a bad one, a Windows warning."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = Path(self._tmp.name)
+        self.home, self.folder = tmp / "home", tmp / "home" / ".config" / "bmad-guard"
+        self.cred = self.folder / "credentials"
+        shutil.copy2(ROOT / EVENTS_REL, write(self.module / EVENTS_REL, ""))
+        git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "-A")
+        git(self.module, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "events")
+        run(self.project, self.module)
+
+    def test_a_missing_file_is_a_note_and_not_a_failure(self):
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 0, out)
+        self.assertIn("note", out)
+        self.assertIn("no credential file", out)
+        self.assertIn("up to date", out)
+
+    def test_a_good_file_says_nothing(self):
+        self.folder.mkdir(parents=True)
+        self.folder.chmod(0o700)
+        self.cred.write_text("[collector]\nendpoint = https://c.example.invalid\nuser = u\nkey = fake-secret\n")
+        self.cred.chmod(0o600)
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("credential", out)
+
+    def test_a_file_that_is_too_open_is_a_problem_line_with_the_fix_and_no_content(self):
+        self.folder.mkdir(parents=True)
+        self.folder.chmod(0o700)
+        self.cred.write_text("[collector]\nendpoint = https://c.example.invalid\nuser = u\nkey = fake-secret\n")
+        self.cred.chmod(0o644)
+        code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 0, "the exit code is about the project, not the machine's file")
+        self.assertIn("problem", out)
+        self.assertIn("chmod 600", out)
+        self.assertNotIn("fake-secret", out)
+
+    def test_windows_gets_a_warning(self):
+        with mock.patch.object(sg.sys, "platform", "win32"):
+            code, out, _ = run(self.project, self.module, "--check")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Windows is not supported yet", out)
+
+    def test_other_platforms_get_no_windows_warning(self):
+        self.assertNotIn("Windows", run(self.project, self.module, "--check")[1])
 
 
 if __name__ == "__main__":

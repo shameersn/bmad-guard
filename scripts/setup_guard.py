@@ -24,14 +24,25 @@ Safety rules:
 - --dry-run prints the plan (and the settings.json diff) and changes nothing. --check reports whether the project
   is up to date and exits 1 if not.
 
+Per-user credential file (ADR 0007, optional: without it events only queue):
+- `--credentials --endpoint URL --user ID` writes ~/.config/bmad-guard/credentials once (folder 700, file 600,
+  created with that mode). The key comes from a hidden prompt, or from BMAD_GUARD_KEY for that run; never from the
+  command line. Same values: nothing changes. Different values: a conflict, replaced only with --force. It never
+  writes into a project, and needs no --project.
+- `--check` also notes a missing file, reports a file that is too open (with the fix), and warns on Windows
+  (not supported yet, D10). These lines do not change the exit code.
+
 Usage:
     python3 scripts/setup_guard.py --project <dir> [--module <dir>] [--dry-run | --check] [--force]
+    python3 scripts/setup_guard.py --credentials --endpoint <url> --user <id> [--force]
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
+import getpass
 import hashlib
 import importlib.util
 import json
@@ -49,6 +60,8 @@ MANIFEST_REL = f"{GUARD_DIR}/manifest.json"
 SETTINGS_REL = ".claude/settings.json"
 WIRING_REL = "module/skills/tool-guard/scripts/hook_wiring.py"
 WIRING_TRIGGER = ".claude/skills/tool-guard/scripts/pre_tool_use.py"  # installed only when .claude/skills exists
+EVENTS_REL = "module/skills/agent-project-logger/scripts/guard_events.py"  # Ledger's sender: reads the credential file
+CREDENTIALS_REL = ".config/bmad-guard/credentials"  # under HOME; ADR 0007
 GITIGNORE_LINE = ".bmad-guard/"
 SKIP_NAMES = {"__pycache__", "tests", ".DS_Store"}
 DEFAULT_MODULE = Path(__file__).resolve().parents[1]
@@ -319,15 +332,148 @@ def describe(plan: Plan) -> list[str]:
     return lines
 
 
+def load_events(module_dir: Path):
+    """The module's Ledger sender (guard_events), loaded by path, or None when the module does not ship it."""
+    path = module_dir / EVENTS_REL
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("bmad_guard_events_for_setup", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look the module up while it loads
+    spec.loader.exec_module(module)
+    return module
+
+
+def credentials_file() -> Path:
+    return Path(os.environ.get("HOME") or Path.home()) / CREDENTIALS_REL
+
+
+def credential_report(module_dir: Path) -> list[str]:
+    """Lines for `--check`: the Windows warning (D10), and a note or a problem about the per-user credential file.
+    Never reads the key into the output. Sending is optional, so a missing file is only a note."""
+    lines = []
+    if sys.platform == "win32":
+        lines.append("warning  Windows is not supported yet (macOS and Linux only; Phase 3 decision D10)")
+    events = load_events(module_dir)
+    if events is None:
+        return lines
+    path = credentials_file()
+    _, problem = events.read_credential_file(path)
+    if problem:
+        lines.append(f"problem  {problem}")
+    elif not os.path.lexists(path):
+        lines.append(
+            f"note     no credential file at ~/{CREDENTIALS_REL}: events are only queued "
+            "(sending is optional; see docs/guides/install.md)"
+        )
+    return lines
+
+
+def _clean_value(name: str, value: str) -> str:
+    """A value for the file: trimmed, not empty, no control characters (a newline would add a line). Never echoes it."""
+    value = value.strip()
+    if not value or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise SetupError(f"{name} is empty or has control characters")
+    return value
+
+
+def write_credentials(endpoint: str, user: str, key: str, force: bool, module_dir: Path) -> tuple[int, list[str]]:
+    """Write ~/.config/bmad-guard/credentials once (ADR 0007). Returns (exit code, output lines)."""
+    events = load_events(module_dir)
+    if events is None:
+        raise SetupError(f"not a bmad-guard checkout: {module_dir} (no {EVENTS_REL})")
+    new = {"endpoint": endpoint, "user": user, "key": key}
+    path = credentials_file()
+    shown = f"~/{CREDENTIALS_REL}"
+    kind = "create"
+    if os.path.lexists(path):
+        old, problem = events.read_credential_file(path)
+        if problem and not force:
+            return 1, [f"conflict {shown}: {problem}", "use --force to replace it"]
+        if not problem and old == new:
+            return 0, [f"keep     {shown}", "done"]
+        if not problem and not force:
+            differs = ", ".join(name for name in new if old.get(name) != new[name])
+            return 1, [f"conflict {shown} (differs in: {differs}); use --force to replace it"]
+        kind = "update"
+    folder = path.parent
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.mkdir(folder, 0o700)
+    except FileExistsError:
+        pass
+    text = f"[collector]\nendpoint = {endpoint}\nuser = {user}\nkey = {key}\n"
+    temp = folder / f".credentials.{os.getpid()}.tmp"
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temp.unlink()
+        raise
+    lines = [f"{kind:8} {shown}"]
+    _, problem = events.read_credential_file(path)  # what the sender will see
+    if problem:
+        return 1, [*lines, f"problem  {problem}"]
+    return 0, [*lines, "done"]
+
+
+def credentials_main(args: argparse.Namespace) -> int:
+    if sys.platform == "win32":
+        print(
+            "bmad-guard setup: Windows is not supported yet (macOS and Linux only; Phase 3 decision D10)",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        endpoint = _clean_value("endpoint", args.endpoint)
+        user = _clean_value("user", args.user)
+        if not endpoint.startswith(("https://", "http://127.0.0.1", "http://localhost")):
+            raise SetupError("endpoint must use https (plain http only for localhost)")
+        # The key never comes from the command line (shell history, ps): the prompt, or BMAD_GUARD_KEY for this run.
+        key = os.environ.get("BMAD_GUARD_KEY") or getpass.getpass("Ingest key (hidden): ")
+        key = _clean_value("key", key)
+        code, lines = write_credentials(endpoint, user, key, args.force, args.module.resolve())
+    except SetupError as err:
+        print(f"bmad-guard setup: {err}", file=sys.stderr)
+        return 2
+    for line in lines:
+        print(line)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--project", required=True, type=Path, help="project root (git repo with _bmad/)")
+    parser.add_argument("--project", type=Path, help="project root (git repo with _bmad/)")
     parser.add_argument("--module", type=Path, default=DEFAULT_MODULE, help="bmad-guard checkout (default: this repo)")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="print the plan, change nothing")
     mode.add_argument("--check", action="store_true", help="exit 1 unless the project is up to date")
     parser.add_argument("--force", action="store_true", help="overwrite conflicts and replace core.hooksPath")
+    parser.add_argument(
+        "--credentials",
+        action="store_true",
+        help="write the per-user file ~/.config/bmad-guard/credentials (needs --endpoint and --user; "
+        "the key comes from a prompt or BMAD_GUARD_KEY); never writes into a project",
+    )
+    parser.add_argument("--endpoint", help="with --credentials: collector base URL")
+    parser.add_argument("--user", help="with --credentials: your developer id")
     args = parser.parse_args(argv)
+
+    if args.credentials:
+        if args.project or args.dry_run or args.check:
+            parser.error("--credentials cannot be used with --project, --dry-run or --check")
+        if not (args.endpoint and args.user):
+            parser.error("--credentials needs --endpoint and --user")
+        return credentials_main(args)
+    if args.project is None:
+        parser.error("the following arguments are required: --project")
+    if args.endpoint or args.user:
+        parser.error("--endpoint and --user need --credentials")
 
     project_dir, module_dir = args.project.resolve(), args.module.resolve()
     try:
@@ -340,6 +486,8 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
 
     if args.check:
+        for line in credential_report(module_dir):
+            print(line)
         print("up to date" if plan.up_to_date() else "NOT up to date: run setup_guard.py without --check")
         return 0 if plan.up_to_date() else 1
     if args.dry_run:

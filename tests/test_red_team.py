@@ -25,6 +25,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests import guard_harness  # noqa: F401 - puts module/skills/tool-guard/scripts on sys.path
+from tests.fake_home import isolated_env
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("red_team", ROOT / "scripts" / "red_team.py")
@@ -322,7 +323,7 @@ class OfflineHookTests(unittest.TestCase):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.sb = Path(os.path.realpath(cls._tmp.name))
         cls.script = ROOT / "module/skills/tool-guard/scripts/pre_tool_use.py"
-        cls.env = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
+        cls.env = isolated_env()
 
     @classmethod
     def tearDownClass(cls):

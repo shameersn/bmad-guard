@@ -274,7 +274,7 @@ Dashed boxes are **planned** (Phase 3, T2 to T4; [ADR 0003](adr/0003-event-loggi
 
 - The collector takes the user from the developer's ingest key. The event cannot fake it.
 - No database credentials on laptops. The writer can only insert.
-- The key will live in `~/.config/bmad-guard/credentials` (mode 600), which the agent cannot read (`PATH_GUARD_CONFIG`).
+- The key lives in `~/.config/bmad-guard/credentials` (mode 600, written by `setup_guard.py --credentials`), which the agent cannot read (`PATH_GUARD_CONFIG`). The sender uses the file only when it is safe (regular file, yours, no group or other access).
 - Two reports: commits with no guard events, and review records with no `REVIEW_RECORDED` event.
 
 ## 9. Fail-closed behaviour
@@ -310,7 +310,7 @@ A project where the module is missing (a hook script that does not exist) makes 
 | L0 overrides, guard skills, L1 hooks, L2 hooks, `setup_guard.py`, install test, red-team suite | Built (Phase 1 and 2) |
 | Pilot pack: guides and this page | This task (Phase 3, T0) |
 | Collector, ClickHouse, Grafana in `deploy/collector/`, hosting plan | **Planned** (T2) |
-| Sender, credential file, queue drain | **Planned** (T3) |
+| Sender reads the credential file; setup writes and checks it; queue drain | Built (T3) |
 | Claude Code telemetry, dashboards, the two reports | **Planned** (T4) |
 | Machine-level script location, managed-settings pilot, uninstall | **Planned** (T5) |
 | CI check (L3), `setup_guard.py --with-ci`, default off | **Planned** (T6) |

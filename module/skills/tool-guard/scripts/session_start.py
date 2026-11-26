@@ -6,11 +6,13 @@
 Wired by scripts/setup_guard.py as:
     python3 "${CLAUDE_PROJECT_DIR}/.claude/skills/tool-guard/scripts/session_start.py"
 
-Checks two things and warns the developer (a `systemMessage`, shown by Claude Code) when one is missing:
+Checks these and warns the developer (a `systemMessage`, shown by Claude Code) when one is missing:
   - git config core.hooksPath is not _bmad/custom/guard/hooks (the git hooks would not run);
   - neither the project's .claude/settings.json nor the managed settings file(s) hold the guard hook wiring
     (see hook_wiring.py). Managed settings: the OS file and its managed-settings.d/ drop-ins, read as one.
     A macOS configuration profile, the Windows registry and server-managed settings are not read.
+A third check: the per-user credential file (ADR 0007) is there but not safe to use (too open, not yours, a link,
+unreadable). A missing file is not a warning: with no endpoint, events only queue.
 One `warn` event records it (code SETUP_INCOMPLETE, field `missing`). It always exits 0, even on an error.
 """
 
@@ -35,6 +37,11 @@ FIXES = {
     "hook_wiring": (
         f"neither {hw.SETTINGS_REL} nor the managed settings hold the guard hooks and deny rules, "
         "so Claude Code hooks will not run"
+    ),
+    "credential": (
+        "the bmad-guard credential file (~/.config/bmad-guard/credentials) is not safe to use "
+        "(open to others, not yours, a link or unreadable), so events only queue. Fix: chmod 600 on the file and "
+        "chmod 700 on its folder; run setup_guard.py --check for details"
     ),
 }
 # Managed settings folder per OS (docs/managed-settings-rollout.md). WSL reports linux.
@@ -97,12 +104,24 @@ def wiring_ok(root: Path) -> bool:
     return _wired(lambda: hw.load_settings(root / hw.SETTINGS_REL)) or _wired(lambda: managed_settings(managed_dir()))
 
 
+def credential_ok(root: Path) -> bool:
+    """False when the per-user credential file exists but is not safe to use (ADR 0007). A missing file is fine:
+    with no endpoint, events only queue. Uses Ledger's own check, so the two cannot disagree."""
+    try:
+        ge = hc._guard_events()
+        return ge is None or not ge.Config.for_project(root).credential_problem
+    except Exception:  # never block a session start
+        return True
+
+
 def problems(root: Path) -> list[str]:
     found = []
     if not hooks_path_ok(root):
         found.append("hooks_path")
     if not wiring_ok(root):
         found.append("hook_wiring")
+    if not credential_ok(root):
+        found.append("credential")
     return found
 
 

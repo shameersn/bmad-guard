@@ -130,6 +130,14 @@ Move the spike config (`spikes/collector/`) into `deploy/collector/` with pinned
 - `--check` warns on Windows that it is not supported (D10).
 - Sending stays best effort: a failure queues the event and never blocks a commit or a tool call.
 
+**Built (T3):**
+- `guard_events.py`: `read_credential_file()` (opens with `O_NOFOLLOW`, judges the open handle with `fstat`: regular file, yours, no group or other bits, folder not writable by others; `configparser` with `interpolation=None`; a parse error gives only the error type) and `Config.for_project(root, env=None, credentials_file=None)`. Each value: environment first, then the file, read only when a value is missing. With an explicit `env` and no `HOME`, the file is skipped. `Config` has `key_source` and `credential_problem`; the 401 hint says where the key came from; `flush` shows the reason in `error`.
+- `setup_guard.py --credentials --endpoint URL --user ID`: key from a hidden prompt or `BMAD_GUARD_KEY`, never argv; folder 700 and file 600 created with the mode (temp file, then `os.replace`); same values change nothing; different values need `--force`; the result is re-read with the sender's own check. Refused on Windows (exit 2). `--check` adds a note (no file), a problem line (too open, with the fix) and a Windows warning; none changes the exit code.
+- `session_start.py`: a `credential` item in `problems()` and `FIXES`, using Ledger's check. A missing file is no warning.
+- Tests no longer read the real home: `tests/fake_home.py` gives a temp `HOME` to the subprocess tests, and `scripts/install_test.py` runs its sandbox with a temp `HOME` (npm and uv caches kept at their real places).
+- Docs: `docs/guides/install.md` (optional section), `docs/architecture.md`, the Ledger `SKILL.md`.
+- Not done here: the red-team case for the file itself stays as T1 left it (SENS-3, Bash and Grep cases); the Gate boxes are not ticked.
+
 **Done when:** tests cover key from the environment, from the file, from neither (queue only, no spam), a wrong key (HTTP 401, event kept), no endpoint, and a file with open permissions; a red-team case shows the agent cannot read the credential file (SENS-3 stays green).
 
 ### T4. Claude Code telemetry and dashboards (week 3)

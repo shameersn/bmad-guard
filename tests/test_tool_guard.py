@@ -17,6 +17,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.fake_home import isolated_env
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "module/skills/tool-guard/scripts"
 if str(SCRIPTS) not in sys.path:
@@ -37,7 +39,7 @@ pt = load("pre_tool_use")
 ss = load("session_start")
 REAL_MANAGED_DIR = ss.managed_dir  # SessionStartTests patch ss.managed_dir; keep the real one for its own tests
 
-CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
+CLEAN_ENV = isolated_env()  # no collector settings, and a temp HOME so no real credential file is read
 CALL = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": "s-1"}
 
 
@@ -450,6 +452,41 @@ class SessionStartTests(unittest.TestCase):
         self.wire(settings=False)
         self.assertEqual(json.loads(self.start()[1])["systemMessage"].count("will not run"), 1)
         self.assertEqual(queue(self.root)[0]["missing"], "hook_wiring")
+
+    def put_credential_file(self, mode: int) -> None:
+        home = self.root / "home"
+        folder = home / ".config" / "bmad-guard"
+        folder.mkdir(parents=True)
+        folder.chmod(0o700)
+        path = folder / "credentials"
+        path.write_text("[collector]\nendpoint = https://e.example.invalid\nuser = u\nkey = fake-secret\n")
+        path.chmod(mode)
+        patcher = mock.patch.dict(os.environ, {"HOME": str(home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_missing_credential_file_is_no_warning(self):
+        self.wire()
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.root / "no-home")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertEqual(self.start(), (0, "", ""))
+
+    def test_a_good_credential_file_is_no_warning(self):
+        self.wire()
+        self.put_credential_file(0o600)
+        self.assertEqual(self.start(), (0, "", ""))
+
+    def test_a_credential_file_open_to_others_warns_once_and_never_blocks(self):
+        self.wire()
+        self.put_credential_file(0o644)
+        code, out, _ = self.start()
+        self.assertEqual(code, 0)
+        message = json.loads(out)["systemMessage"]
+        self.assertIn("credential file", message)
+        self.assertIn("chmod 600", message)
+        self.assertNotIn("fake-secret", message)
+        self.assertEqual(queue(self.root)[0]["missing"], "credential")
 
     def test_hooks_path_pointing_elsewhere_warns(self):
         self.wire()
