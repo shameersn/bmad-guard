@@ -173,6 +173,13 @@ These need real use, not code first. Each item is in a Phase 2 todo list with an
 - **False-block numbers** (target under 5%; D12 uses them for the HIPAA project in week 2): command, path, document, write gate, content scan, pre-commit, pre-push. Then decide: person-only resolutions, `git checkout <path>` through the gate, `COMMIT_QUESTION_REMOVED` and `COMMIT_GATE_GENERIC` (warn or block), scanning the old text of an Edit, an unparsable prompt input in HIPAA projects, README and root files counting as source in pre-push.
 - **Rules not yet written:** `git checkout .` / `git restore .`, `UPDATE` without `WHERE`, export rules (`aws s3api get-object`, `gsutil cp`, `az storage blob download`, `scp` / `rsync` from a remote host).
 - **Smaller code todos:** Warden approving a plain TOML file (`tech-stack.toml` carries a `---` block today); a role check for the approver once real identities exist (the key gives one); tell a developer at setup time when `python3` is older than 3.10; read `state_file` and `implementation_artifacts` from the BMAD config if a project moves them.
+- **Found in T0 (pilot pack):**
+  - **First push blocks.** The BMAD install commit (`.github/...`) and the setup commit (`.gitignore`) count as source in pre-push, so the first push of a pilot project needs a review record (`PUSH_NO_RECORD`). Decision: treat the install and setup files as non-source in pre-push. Until then, the install guide tells pilot projects to run one review before the first push. Owner: Shameer. Week 1, before the pilot starts.
+  - `setup_guard.py --project <missing folder>` crashes with a traceback; it should exit 2 with a message, like a folder that is not a git repo.
+  - `setup_guard.py --check` prints `0 conflict(s)` when `core.hooksPath` points elsewhere (it does end with `NOT up to date`): fix the wording.
+  - `epics.md` gets no Warden step. Decision: none for the pilot; the ready-for-dev gate and the plan approval hold stories. Look again with the pilot numbers.
+  - Is `/clear` a fresh session for the review guard? Not verified: the reviewer guide says to quit and restart `claude`. Check in a real session (with open check 7).
+  - Minimum Node version for the BMAD installer: not checked. Owner: Shameer, during the trial run.
 - **Rebase, amend and squash** make a review record stale: decide whether a "re-review a rewritten branch" shortcut is needed.
 
 **Done when:** each item is closed, or moved to a later phase with an owner and a date, and the Phase 2 todo lists are updated.

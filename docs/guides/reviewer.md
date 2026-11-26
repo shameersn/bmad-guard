@@ -53,7 +53,7 @@ git commit -m "Review record for <story>"
 ```
 
 - The commit must hold **no code**. A commit that changes no source never needs a review, so "review, then commit the record" works.
-- The record must be in the history that gets pushed. Either you push it, or the developer pulls it and pushes. Which one the pilot uses is a team choice.
+- The record must be in the history that gets pushed. In the pilot the developer pulls your record commit and pushes it with the code. You can push it yourself if the team agrees.
 - If a developer then adds source commits, they need a new review (`PUSH_COMMITS_AFTER_REVIEW`).
 
 ## What pre-push checks

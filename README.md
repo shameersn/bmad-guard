@@ -34,7 +34,7 @@ Guides for pilot users (Phase 3, T0): [`docs/guides/`](docs/guides/README.md).
 - [Install guide](docs/guides/install.md), then a guide for your role: [developer](docs/guides/developer.md), [BA / PM](docs/guides/ba-pm.md), [reviewer](docs/guides/reviewer.md).
 - [Architecture](docs/architecture.md): layers, guards, process flow with diagrams, events and privacy, limits.
 - [Trial run](docs/guides/trial-run.md): the clinic-booking trial script.
-- Deck: link added after review.
+- Deck: [Guarded BMAD pilot briefing](https://claude.ai/artifact/GZAHhyHojnMoc6Hn2hktkD) (private until shared; exports to .pptx or PDF).
 
 ## Checks
 

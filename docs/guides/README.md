@@ -11,7 +11,7 @@ Guides for the people who use Guarded BMAD in the pilot (GUARD-3, T0). Start wit
 | [trial-run.md](trial-run.md) | Shameer | The clinic-booking trial: set-up, about 20 try-this / expect-that steps, a results table. |
 | [../architecture.md](../architecture.md) | Everyone who wants to know how it works | Layers, guards, process flow, events and privacy, fail-closed behaviour, limits. |
 
-Deck: link added after review.
+Deck: [Guarded BMAD pilot briefing](https://claude.ai/artifact/GZAHhyHojnMoc6Hn2hktkD) (10 slides, a Claude artifact; private until Shameer shares it; exports to .pptx or PDF). Built from these docs: if they change, update the deck.
 
 ## Where the rules are
 

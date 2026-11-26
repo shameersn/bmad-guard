@@ -318,6 +318,10 @@ Steps:
 3. If it says `NOT up to date`, run the same command without `--check` (use `--dry-run` first).
 4. Still blocked? Send the message and the rule id to Shameer. Do **not** switch the hooks off as a fix.
 
+### My first push after setup is blocked with `PUSH_NO_RECORD`
+
+Known issue in the pilot start. The BMAD install commit and the setup commit count as source files, so the push needs a review record. Run one review in a fresh session ([reviewer guide](reviewer.md)) before the first push. A fix is planned (Phase 3 plan, T7, "Found in T0").
+
 ### The session starts with a `[tool-guard]` warning
 
 `SETUP_INCOMPLETE`: `core.hooksPath` is wrong, or the hook wiring is missing. Run the setup script. This warning never blocks.

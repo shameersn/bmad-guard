@@ -387,7 +387,7 @@ Also answer:
 
 ## What to send back
 
-To Shameer's pilot log (this is the first pilot entry):
+To the pilot log, `docs/reports/pilot-log.md` (this is the first pilot entry; Shameer creates the file with it):
 
 - The filled results table and the four answers above.
 - The environment line (Claude Code, Python, bmad-guard commit, OS).
