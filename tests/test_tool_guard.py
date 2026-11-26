@@ -453,6 +453,41 @@ class SessionStartTests(unittest.TestCase):
         self.assertEqual(json.loads(self.start()[1])["systemMessage"].count("will not run"), 1)
         self.assertEqual(queue(self.root)[0]["missing"], "hook_wiring")
 
+    def put_credential_file(self, mode: int) -> None:
+        home = self.root / "home"
+        folder = home / ".config" / "bmad-guard"
+        folder.mkdir(parents=True)
+        folder.chmod(0o700)
+        path = folder / "credentials"
+        path.write_text("[collector]\nendpoint = https://e.example.invalid\nuser = u\nkey = fake-secret\n")
+        path.chmod(mode)
+        patcher = mock.patch.dict(os.environ, {"HOME": str(home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_missing_credential_file_is_no_warning(self):
+        self.wire()
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.root / "no-home")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertEqual(self.start(), (0, "", ""))
+
+    def test_a_good_credential_file_is_no_warning(self):
+        self.wire()
+        self.put_credential_file(0o600)
+        self.assertEqual(self.start(), (0, "", ""))
+
+    def test_a_credential_file_open_to_others_warns_once_and_never_blocks(self):
+        self.wire()
+        self.put_credential_file(0o644)
+        code, out, _ = self.start()
+        self.assertEqual(code, 0)
+        message = json.loads(out)["systemMessage"]
+        self.assertIn("credential file", message)
+        self.assertIn("chmod 600", message)
+        self.assertNotIn("fake-secret", message)
+        self.assertEqual(queue(self.root)[0]["missing"], "credential")
+
     def test_hooks_path_pointing_elsewhere_warns(self):
         self.wire()
         git(self.root, "config", "core.hooksPath", ".husky")
