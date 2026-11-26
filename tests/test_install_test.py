@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.fake_home import isolated_env
+from tests.guarded import mark_guarded
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("install_test", ROOT / "scripts" / "install_test.py")
@@ -246,6 +247,7 @@ class PreToolSmokeTests(unittest.TestCase):
         env = isolated_env()
         with tempfile.TemporaryDirectory() as tmp:
             sandbox = Path(tmp).resolve()
+            mark_guarded(sandbox)
             for label, tool, tool_input, want_exit, want_code in it.PRE_TOOL_SMOKE:
                 with self.subTest(label=label):
                     tool_input = {k: v.replace("{sandbox}", str(sandbox)) for k, v in tool_input.items()}

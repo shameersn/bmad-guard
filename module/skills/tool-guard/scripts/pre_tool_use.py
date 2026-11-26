@@ -16,6 +16,11 @@ Reads the hook JSON ({"tool_name", "tool_input", "session_id", "cwd", ...}) from
            (an "allow" would skip the permission prompt). All warnings are in one message. When a block and a
            warning come together, the block message (exit 2) also lists the warnings.
 
+The first thing it does is the unguarded-project rule (ADR 0008; `hook_common.guard_state`), before any guard is
+imported: a project with no `_bmad/`, or with `_bmad/` and no setup manifest, is allowed at once (exit 0, no output, no
+event, no file written). Only a project with `_bmad/custom/guard/manifest.json` gets the guards below. Any doubt about
+which project it is means guarded.
+
 Fails closed (ADR 0002): bad input, a guard that raises, a guard module that cannot be imported, or any other
 error in this script blocks the call and records a GUARD_ERROR / BAD_HOOK_INPUT event. A crash that exits 1
 (for example a Python syntax error) would not block by itself; the hook entry sets "onFailure": "block" for that.
@@ -132,8 +137,23 @@ def record(payload: dict, verdicts: list[hc.Verdict]) -> None:
         )
 
 
+def unguarded(raw: str) -> bool:
+    """True when the project does not use the guard (ADR 0008). Bad input is looked at as an empty input: the project
+    then comes from CLAUDE_PROJECT_DIR or the process folder. Any error means guarded."""
+    try:
+        try:
+            payload = hc.read_payload(raw)
+        except ValueError:
+            payload = {}
+        return hc.project_state(payload) != hc.GUARDED
+    except Exception:
+        return False
+
+
 def main() -> int:
     raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    if unguarded(raw):
+        return 0
     payload, verdicts = run(raw, load_guards())
     if not verdicts:
         return 0

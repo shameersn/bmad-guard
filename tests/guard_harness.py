@@ -19,6 +19,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.guarded import mark_guarded
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "module/skills/tool-guard/scripts"
 if str(SCRIPTS) not in sys.path:
@@ -56,6 +58,7 @@ class GuardTestCase(unittest.TestCase):
         self.project = base / "project"
         self.home.mkdir()
         self.project.mkdir()
+        mark_guarded(self.project)  # the hook entries guard only a project with the setup manifest (ADR 0008)
         env = {k: v for k, v in os.environ.items() if not k.startswith(ENV_PREFIXES)}
         env["HOME"] = str(self.home)
         patcher = mock.patch.dict(os.environ, env, clear=True)

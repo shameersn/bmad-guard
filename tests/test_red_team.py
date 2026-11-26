@@ -26,6 +26,7 @@ from unittest import mock
 
 from tests import guard_harness  # noqa: F401 - puts module/skills/tool-guard/scripts on sys.path
 from tests.fake_home import isolated_env
+from tests.guarded import mark_guarded
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("red_team", ROOT / "scripts" / "red_team.py")
@@ -322,6 +323,7 @@ class OfflineHookTests(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.sb = Path(os.path.realpath(cls._tmp.name))
+        mark_guarded(cls.sb)
         cls.script = ROOT / "module/skills/tool-guard/scripts/pre_tool_use.py"
         cls.env = isolated_env()
 

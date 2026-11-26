@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.guarded import mark_guarded
 from tests.prompt_guard_fakes import Fakes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -417,6 +418,10 @@ class CliTests(Project):
 
 
 class HookTests(Project):
+    def setUp(self):
+        super().setUp()
+        mark_guarded(self.project)  # the hook guards only a project with the setup manifest (ADR 0008)
+
     def run_hook(self, payload) -> tuple[int, dict | None, str]:
         stdin = payload if isinstance(payload, str) else json.dumps(payload)
         proc = subprocess.run(

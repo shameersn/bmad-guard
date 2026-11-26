@@ -240,6 +240,55 @@ def project_root(cwd: Path | None = None) -> Path:
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else folder
 
 
+# The unguarded-project rule (ADR 0008): a copy of `guard_state` in tool-guard/scripts/hook_common.py (this hook does
+# not import it). A test keeps the two equal.
+GUARD_MANIFEST_REL = "_bmad/custom/guard/manifest.json"  # written by scripts/setup_guard.py: "setup ran here"
+GUARDED, NO_MANIFEST, UNGUARDED = "guarded", "no-manifest", "unguarded"
+
+
+def _exists(path: str) -> bool:
+    """True when something is at `path`. Only "it is not there" counts as absent: any other error (a permission error,
+    a bad name) counts as present, so a guarded project cannot look unguarded."""
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except (OSError, ValueError):
+        return True
+    return True
+
+
+def guard_state(root, cwd=None) -> str:
+    """GUARDED when the setup manifest is in the project, NO_MANIFEST when there is `_bmad/` but no manifest,
+    UNGUARDED when there is no `_bmad/`. Fail closed: the project is looked for in `root`, in the hook input's `cwd` and
+    in the process folder, each also with links resolved, and the manifest also in every parent folder. The manifest in
+    any of those places means GUARDED. A `cwd` of the wrong type, a path that cannot be read, or any error means
+    GUARDED. Reads nothing and writes nothing."""
+    try:
+        places = [root, cwd, os.getcwd()]
+        found = []
+        for place in places:
+            if place in (None, ""):
+                continue
+            if not isinstance(place, (str, os.PathLike)):
+                return GUARDED
+            found += [os.path.abspath(place), os.path.realpath(place)]
+        bmad = False
+        for place in dict.fromkeys(found):
+            bmad = bmad or _exists(os.path.join(place, "_bmad"))
+            folder = place
+            while True:
+                if _exists(os.path.join(folder, GUARD_MANIFEST_REL)):
+                    return GUARDED
+                parent = os.path.dirname(folder)
+                if parent == folder:
+                    break
+                folder = parent
+        return NO_MANIFEST if bmad else UNGUARDED
+    except Exception:
+        return GUARDED
+
+
 def project_name(root: Path) -> str:
     try:
         data = json.loads((root / "_bmad/custom/project.json").read_text(encoding="utf-8"))
