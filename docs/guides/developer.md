@@ -43,7 +43,7 @@ A blocked prompt is not sent to the model. Claude Code still shows `Original pro
 
 ### 1. Start from a ready story
 
-The story must be ready for development, or the write gate blocks (`GATE_READY_*`). The BA owns this: no open question, no open assumption, a who-and-when on every answer, confidence 80 or more, an epic summary. See the [BA / PM guide](ba-pm.md). If you get `GATE_READY_OPEN_QUESTIONS`, ask the BA. Do not edit the story's questions yourself to pass the gate.
+The story must be ready for development, or the write gate blocks (`GATE_READY_*`). The BA owns this: no open question, no open assumption, a who-and-when on every answer, confidence 80 or more, an epic summary. A story built from a PRD feature has `feature: F-<nnn>` in its front matter; that feature's FRD (`_bmad-output/planning-artifacts/frds/F-<nnn>/frd.md`) must also be approved and have nothing open, or the gate blocks with `GATE_READY_FRD_UNAPPROVED` or `GATE_READY_FRD_OPEN_ITEMS` and `bmad-build` stops at Sentry. Never remove `feature` to get past it. See the [BA / PM guide](ba-pm.md). If you get `GATE_READY_OPEN_QUESTIONS`, ask the BA. Do not edit the story's questions yourself to pass the gate.
 
 ### 2. Plan, then approve
 
