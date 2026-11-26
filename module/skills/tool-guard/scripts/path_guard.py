@@ -71,7 +71,27 @@ GIT_TEXT_OPTIONS = {
     "--until",
     "--exec",
 }
-GREP_VALUE_OPTIONS = {"-m", "-A", "-B", "-C", "-d", "-D", "--max-count", "--after-context", "--before-context"}
+GREP_VALUE_OPTIONS = {
+    "-m",
+    "-A",
+    "-B",
+    "-C",
+    "-d",
+    "-D",
+    "--max-count",
+    "--after-context",
+    "--before-context",
+    "-g",
+    "--glob",
+    "--iglob",
+    "--include",
+    "--exclude",
+    "--exclude-dir",
+    "--exclude-from",
+}
+GREP_EXCLUDE_OPTIONS = {"--exclude", "--exclude-dir"}  # the value is a file filter that leaves files out
+GREP_GLOB_OPTIONS = {"-g", "--glob", "--iglob"}  # a value that starts with "!" leaves files out
+FIND_NAME_TESTS = {"-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex"}
 GREP_PATTERN_OPTIONS = {"-e", "--regexp"}
 KEY_VALUE_RE = re.compile(r"^-{0,2}[A-Za-z_][A-Za-z0-9_-]*=")
 ANCHOR_RE = re.compile(r"[a-z0-9_]{2,}")
@@ -206,6 +226,31 @@ def _grep_exempt(args: list[sp.Word]) -> set[int]:
     return skip
 
 
+def _filter_values(name: str, args: list[sp.Word]) -> set[int]:
+    """Positions of words that only leave files out of a search: `--exclude=<glob>`, `-g '!<glob>'`, `find ! -name`.
+
+    A filter that keeps files in (`--include`, `-g <glob>`, `find -name`) is not skipped. Neither is `--exclude-from`:
+    it reads the file."""
+    skip: set[int] = set()
+    for i, word in enumerate(args):
+        text = word.text
+        key, eq, value = text.partition("=")
+        if name in GREP_COMMANDS:
+            if key in GREP_EXCLUDE_OPTIONS and eq:
+                skip.add(i)
+            elif text in GREP_EXCLUDE_OPTIONS:
+                skip.add(i + 1)
+            elif key in GREP_GLOB_OPTIONS and eq and value.startswith("!"):
+                skip.add(i)
+            elif text in GREP_GLOB_OPTIONS and i + 1 < len(args) and args[i + 1].text.startswith("!"):
+                skip.add(i + 1)
+            elif text.startswith("-g!"):
+                skip.add(i)
+        elif name == "find" and text in FIND_NAME_TESTS and i > 0 and args[i - 1].text in ("!", "-not"):
+            skip.add(i + 1)
+    return skip
+
+
 def _git_text(args: list[sp.Word]) -> set[int]:
     """Positions of words in a git command that are text, not paths: messages, -S/-G strings, git grep patterns."""
     skip: set[int] = set()
@@ -234,6 +279,7 @@ def bash_words(invocations: list[sp.Invocation]) -> list[str]:
             skip = _grep_exempt(args)
         elif name == "git":
             skip = _git_text(args)
+        skip |= _filter_values(name, args)
         if name not in TEXT_COMMANDS:
             words += [w.text for i, w in enumerate(args) if i not in skip]
         words += [w.text for op, w in inv.redirects if not op.endswith("&")]

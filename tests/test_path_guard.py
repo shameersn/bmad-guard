@@ -296,6 +296,39 @@ class BashPathTests(GuardTestCase):
             "scp a.txt host:b",
         )
 
+    def test_filter_values_that_leave_files_out_are_not_reads(self):
+        self.assertAllows(
+            "grep -rl seed --exclude='.env*' .",
+            "grep -rl seed --exclude .env .",
+            "grep -rn seed --exclude-dir=.ssh .",
+            "grep -rn seed --exclude-dir .aws .",
+            "rg seed -g '!.env*' .",
+            "rg seed --glob='!.env*' .",
+            "rg seed --glob '!.env' .",
+            "rg -g '!.env*' seed .",
+            "find . ! -name '.env*'",
+            "find . -not -name '.env*' -type f",
+            "find . -type f ! -path '*/.env.local'",
+        )
+
+    def test_filters_that_keep_files_in_and_real_reads_still_block(self):
+        for command in (
+            "grep -rl seed --exclude='.env*' .env",
+            "grep -rl seed --exclude-from=.env .",
+            "grep -rl seed --exclude-from .env .",
+            "grep -rl seed --include='.env*' .",
+            "rg seed -g '.env' .",
+            "rg seed --glob=.env .",
+            "rg -g .env seed .",
+            "rg -g '!*.md' seed .env",
+            "find . -name '.env*'",
+            "find . -name .env -exec cat {} +",
+            "find . ! -name x -exec cat .env \\;",
+            "cat --exclude .env",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command), ["PATH_ENV_FILE"], command)
+
     def test_a_grep_pattern_is_not_a_path_but_the_files_it_reads_are(self):
         self.assertEqual(self.bash("grep -rn 'id_rsa' ."), [])
         self.assertEqual(self.bash("grep -rn 'id_rsa' id_rsa"), ["PATH_PRIVATE_KEY"])
