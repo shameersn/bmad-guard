@@ -18,6 +18,7 @@ developer id and key it prints nothing on stdout, says why on stderr (no value) 
 
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import sys
@@ -38,7 +39,10 @@ def headers(config: ge.Config) -> dict[str, str]:
     return {"Authorization": f"Basic {token}"}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argparse.ArgumentParser(
+        description="Print the Authorization header for Claude Code telemetry (otelHeadersHelper)."
+    ).parse_args(argv)
     try:
         print(json.dumps(headers(ge.Config.for_project(Path.cwd()))))
     except ValueError as err:
