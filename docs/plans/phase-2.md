@@ -221,17 +221,17 @@ From the T1 review (`docs/hooks.md`, `docs/managed-settings-rollout.md`). None o
 
 **Before the managed file goes on any pilot machine:**
 
-- [ ] **Pilot machine check.** Every Claude Code project on the machine has the module installed and `setup_guard.py --check` says `up to date`. A project without it blocks every tool call. Keep a list of pilot machines and their projects. Owner: Shameer with IT.
-- [ ] **Claude Code 2.1.295 or later** on every pilot machine (`onFailure: "block"` needs it). Checked version: 2.1.326. Owner: IT.
-- [ ] **Keep `allowManagedHooksOnly: true` in the pilot.** Tell pilot developers first: it turns off their personal and plugin hooks. Owner: Shameer.
-- [ ] **Run the rollout doc test** ("How to test", steps 1–8) on one machine and record the results. Owner: Shameer.
-- [ ] **Rollback tested** on that machine (delete the file, `/status` no longer shows it).
+- [ ] **Pilot machine check.** Every Claude Code project on the machine has the module installed and `setup_guard.py --check` says `up to date`. A project without it blocks every tool call. Keep a list of pilot machines and their projects. Owner: Shameer with IT. Date: TBD (Shameer to set).
+- [ ] **Claude Code 2.1.295 or later** on every pilot machine (`onFailure: "block"` needs it). Checked version: 2.1.326. Owner: IT. Date: TBD (Shameer to set).
+- [ ] **Keep `allowManagedHooksOnly: true` in the pilot.** Tell pilot developers first: it turns off their personal and plugin hooks. Owner: Shameer. Date: TBD (Shameer to set).
+- [ ] **Run the rollout doc test** ("How to test", steps 1–8) on one machine and record the results. Owner: Shameer. Date: TBD (Shameer to set).
+- [ ] **Rollback tested** on that machine (delete the file, `/status` no longer shows it). Owner: Shameer (same machine test as above). Date: TBD (Shameer to set).
 
 **Before the full IT rollout (open item 3):**
 
-- [ ] **Machine-level script location.** Install the guard scripts once per machine and point the managed hooks there, so projects without the module are not blocked and the scripts cannot be edited per project. Needs an ADR, a setup script change, a template change and an install-test case. Owner: Shameer. Phase 3 at the latest.
-- [ ] **Uninstall for the wiring** in the setup script (rollback is by hand today).
-- [ ] **Open `PreToolUse` checks** from `docs/hooks.md` closed: a real block and a crash with `onFailure` seen in Claude Code, the `.env.example` carve-out, a double run when the same hook is in managed and project settings.
+- [ ] **Machine-level script location.** Install the guard scripts once per machine and point the managed hooks there, so projects without the module are not blocked and the scripts cannot be edited per project. Needs an ADR, a setup script change, a template change and an install-test case. Owner: Shameer. Phase 3 at the latest (`docs/plans/phase-3.md`, T1 and T5). Date: TBD (Shameer to set).
+- [ ] **Uninstall for the wiring** in the setup script (rollback is by hand today). Owner: TBD (the plan names none; Phase 3, T5). Date: TBD (Shameer to set).
+- [ ] **Open `PreToolUse` checks** from `docs/hooks.md` closed: a real block and a crash with `onFailure` seen in Claude Code, the `.env.example` carve-out, a double run when the same hook is in managed and project settings. Owner: TBD (needs a real model session; the plan names none; Phase 3, T5). Date: TBD (Shameer to set).
 
 ## Command guard todos (from T2)
 
