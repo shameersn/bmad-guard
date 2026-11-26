@@ -415,15 +415,35 @@ def in_allowed(entries: list[tuple[bool, tuple[str, ...]]], parts: tuple[str, ..
     return False
 
 
+def install_file(parts: tuple[str, ...]) -> bool:
+    """A file that BMAD's installer or setup_guard.py writes outside the allowed paths: the root `.gitignore` and
+    BMAD's Copilot agent files `.github/agents/bmad-*.agent.md`. Without this the first push of a new project needs a
+    review record. Exact names only: `.github/workflows` and other `.github` files stay source."""
+    if parts == (".gitignore",):
+        return True
+    return (
+        len(parts) == 3
+        and parts[:2] == (".github", "agents")
+        and parts[2].startswith("bmad-")
+        and parts[2].endswith(".agent.md")
+    )
+
+
 def source_checker(root: Path):
-    """A function that says whether a project-relative path (with /) is outside the allowed paths, so a change to it is
-    a source change. The pre-push hook (T7) uses it. A project extension file that cannot be read adds nothing."""
+    """A function that says whether a project-relative path (with /) is a source change: outside the allowed paths and
+    not an install file. The pre-push hook (T7) uses it; the write gate still gates install files (an agent write to
+    them needs a plan). A project extension file that cannot be read adds nothing."""
     try:
         extra = gc.load(root).write_allowed
     except gc.ExtensionError:
         extra = ()
     entries = allowed_entries(extra)
-    return lambda rel: not in_allowed(entries, tuple(p for p in rel.split("/") if p))
+
+    def is_source(rel: str) -> bool:
+        parts = tuple(p for p in rel.split("/") if p)
+        return not (in_allowed(entries, parts) or install_file(parts))
+
+    return is_source
 
 
 class Paths:

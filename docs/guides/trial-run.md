@@ -18,7 +18,7 @@
 - Everything is committed before the risky steps (`rm -rf`, `git reset --hard`), so you can restore with git.
 - You are testing the guards, not the code Claude writes. The code can be rough.
 
-Notation: `<bmad-guard>` is your checkout of this repo. `<name>` is your name.
+Notation: `<bmad-guard>` is your clone of this repo ([install guide](install.md), step 2). `<name>` is your name.
 
 ## Part A. Set up
 
@@ -111,7 +111,7 @@ git add -A && git commit -q -m "Trial fixtures"
 
 ### A6. A local remote
 
-Make the remote **from the finished baseline**, so the first push only has new commits. (A push of the BMAD install and setup commits would block: they change files such as `.github/` and `.gitignore`, which count as source, and have no review record. See "Findings so far" at the end.)
+Make the remote **from the finished baseline**, so the first push only has new commits. (A push of the BMAD install and setup commits alone would also go through: their files do not count as source in pre-push. The baseline keeps step 20 about the code only.)
 
 ```bash
 git clone -q --bare . ../clinic-booking-remote.git
@@ -398,6 +398,6 @@ To the pilot log, `docs/reports/pilot-log.md` (this is the first pilot entry; Sh
 
 These were seen while the commands above were checked. They are not bugs in the script. Decide in the pilot what to do.
 
-- **The first push of a new project blocks.** The BMAD install commit (`.github/...`) and the setup commit (`.gitignore`) change files outside the paths the write gate allows, so `pre-push` treats them as source and wants a review record (`PUSH_NO_RECORD`). In a project that already has a remote, the setup commit hits this at its first push. The trial avoids it by making the remote from the baseline (A6). Candidate fix: treat `.gitignore`, `.github/` and similar root files as non-source (Phase 3 plan, T7: "README and root files counting as source in pre-push").
+- **The first push of a new project blocked (fixed).** The BMAD install commit (`.github/agents/...`) and the setup commit (`.gitignore`) counted as source in `pre-push`. Fixed: the root `.gitignore` and `.github/agents/bmad-*.agent.md` are not source in `pre-push` (`module/hooks/README.md`, step 3). Other `.github` files, such as workflows, stay source.
 - **`ready_for_dev.py` needs `--epics-dir` on the command line.** The skill and the write gate pass the folder from their settings, so the model flow works. The bare command does not find the epic summary without it (step 15).
 - **`setup_guard.py` crashes with a traceback** when `--project` is a folder that does not exist (it should print `bmad-guard setup: ...` and exit 2).

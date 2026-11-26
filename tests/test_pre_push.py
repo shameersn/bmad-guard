@@ -133,6 +133,15 @@ class AllowTests(PushCase):
         self.assertSent(self.push())
         self.assertEqual(self.codes(), ["PUSH_NOTHING_TO_CHECK"])
 
+    def test_bmad_install_and_setup_files_need_no_record(self):
+        """First push of a new pilot project: BMAD's Copilot agent files and setup's .gitignore are not source."""
+        self.write(".github/agents/bmad-agent-dev.agent.md", "# Dev agent\n")
+        self.write(".github/agents/bmad-agent-pm.agent.md", "# PM agent\n")
+        self.write(".gitignore", ".bmad-guard/\n")
+        self.commit_all("install BMAD and bmad-guard")
+        self.assertSent(self.push())
+        self.assertEqual(self.codes(), ["PUSH_NOTHING_TO_CHECK"])
+
     def test_a_branch_delete_is_allowed(self):
         self.reviewed_branch()
         self.assertSent(self.push())
