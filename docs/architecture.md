@@ -62,7 +62,7 @@ flowchart TB
     class ci planned
 ```
 
-Managed settings (a file IT installs, `module/managed-settings/managed-settings.json`) can lock the L1 hooks so a developer cannot turn them off. It is a template only. Rollout: Phase 3, T5 (see [managed-settings-rollout.md](managed-settings-rollout.md)).
+Managed settings (a file IT installs, one template per OS in `module/managed-settings/`) can lock the L1 hooks so a developer cannot turn them off. With the machine templates (ADR 0008) the hook scripts run from a root-owned machine folder (`scripts/install_machine.py`), so they cannot be edited per project, and a project without the module is not blocked: each hook first asks whether the project uses the guard (no `_bmad/`: allow silently; `_bmad/` without `_bmad/custom/guard/manifest.json`: allow and one line at session start; manifest present: all guards, fail closed). Built and tested in temp folders (Phase 3, T5); the real-machine steps are in [managed-settings-rollout.md](managed-settings-rollout.md).
 
 ## 3. The process, end to end
 
@@ -290,7 +290,7 @@ Dashed boxes are **planned** (Phase 3, T2 to T4; [ADR 0003](adr/0003-event-loggi
 | `SessionStart` setup check | Never blocks. Always exit 0. |
 | Event logging | Never blocks. A failure prints a warning. |
 
-A project where the module is missing (a hook script that does not exist) makes Python exit with code 2, which blocks every tool call. This matters for the managed-settings rollout ([managed-settings-rollout.md](managed-settings-rollout.md), "Read this before rolling out").
+A project where the module is missing (a hook script that does not exist) makes Python exit with code 2, which blocks every tool call. This matters for the first managed template (project paths) and for a managed file whose machine folder is missing ([managed-settings-rollout.md](managed-settings-rollout.md), "Read this before rolling out"). With the machine templates a project without the module is allowed (the unguarded-project rule).
 
 ## 10. Known limits
 
@@ -313,7 +313,7 @@ A project where the module is missing (a hook script that does not exist) makes 
 | Collector, ClickHouse, Grafana in `deploy/collector/`, hosting plan | **Planned** (T2) |
 | Sender reads the credential file; setup writes and checks it; queue drain | Built (T3) |
 | Claude Code telemetry, dashboards, the two reports | **Planned** (T4) |
-| Machine-level script location, managed-settings pilot, uninstall | **Planned** (T5) |
+| Machine-level script location (installer, templates, unguarded-project rule), setup `--uninstall` | Built in temp folders (T5); the real-machine rollout test is open |
 | CI check (L3), `setup_guard.py --with-ci`, default off | **Planned** (T6) |
 | Windows L1 hooks | Only if needed (T9) |
 

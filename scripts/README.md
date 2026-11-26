@@ -1,6 +1,6 @@
 # Scripts
 
-Repo tools: setup script (T2), install test (T9), red-team suite (Phase 2, T8). The ready-for-dev gate (T7) is a skill: `module/skills/ready-for-dev-gate/`. The local prompt check (T8) is a skill too: `module/skills/prompt-guard/`.
+Repo tools: setup script (T2) with its `--uninstall` (GUARD-3 T5), machine-folder installer (GUARD-3 T5), install test (T9), red-team suite (Phase 2, T8). The ready-for-dev gate (T7) is a skill: `module/skills/ready-for-dev-gate/`. The local prompt check (T8) is a skill too: `module/skills/prompt-guard/`.
 
 ## Install test (T9, Gate 1)
 
@@ -21,6 +21,23 @@ python3 scripts/install_test.py --skip-upgrade    # fresh 6.12.4 only
 
 Exit code: 0 all checks pass, 1 a check failed, 2 a tool is missing.
 
+A third stage, "machine" (GUARD-3 T5, ADR 0008, cases M-I1 to M-I9), needs no BMAD and no network: it installs a temp machine folder with `install_machine.py` and runs the three hooks from it. `python3 scripts/install_test.py --machine-only` runs just that stage (git only). It is also run by `tests/test_install_test.py`.
+
+## Machine folder installer (GUARD-3 T5, ADR 0008)
+
+`install_machine.py` is for IT or MDM, run as root. It copies the five skills the hooks need (`tool-guard`, `prompt-guard`, `ready-for-dev-gate`, `agent-project-logger`, `agent-approval-gate-check`), `otel_headers.py`, `guard_events.py`, `VERSION` and `manifest.json` into the machine folder (`/Library/Application Support/ClaudeCode/bmad-guard/` on macOS, `/etc/claude-code/bmad-guard/` on Linux), by staging a new folder and renaming it into place. It never calls sudo and never writes into a project. Standard library only.
+
+```bash
+python3 scripts/install_machine.py --dry-run                    # the plan
+python3 scripts/install_machine.py                              # install or update (as root)
+python3 scripts/install_machine.py --check                      # exit 1 unless right and safe
+python3 scripts/install_machine.py --uninstall [--dry-run]      # remove what the manifest lists (refuses while the managed file points here)
+python3 scripts/install_machine.py --print-template macos       # the managed settings file for this folder (macos or linux)
+python3 scripts/install_machine.py --target <temp folder> ...   # for tests: no root needed
+```
+
+Details and the order of the rollout: `docs/managed-settings-rollout.md`. Tests: `tests/test_install_machine.py`.
+
 ## Red-team suite (Phase 2, T8, Gate 2)
 
 `red_team.py` attacks the installed guards in two throwaway BMAD 6.12.4 sandboxes (one HIPAA project with `phi = "block"`, one general), using fake data only. It drives the **real installed entry points**:
@@ -28,7 +45,7 @@ Exit code: 0 all checks pass, 1 a check failed, 2 a tool is missing.
 - **L1, Claude Code hooks:** it reads the hook commands from the sandbox's `.claude/settings.json` and runs them as Claude Code does (a shell, `CLAUDE_PROJECT_DIR` set, the hook JSON on stdin). A call only reaches a hook if the wiring's matcher covers its tool. No model is involved.
 - **L2, git hooks:** real `git commit` and `git push` (to a bare remote in the temp folder) run the installed pre-commit and pre-push hooks.
 
-Every case has an expected answer (block, allow or warn) and an expected rule id, and the report lists layer, entry point, expected, actual, rule seen and PASS / FAIL. Control rows are close-but-safe actions that must pass. The four rollout-doc cases (PHI, wrong DB, edit after approval, same-session review) are listed on their own. A case that did not run is reported as NOT RUN, never as PASS. The last case checks that no fake value and no command text is in any queued event.
+Every case has an expected answer (block, allow or warn) and an expected rule id, and the report lists layer, entry point, expected, actual, rule seen and PASS / FAIL. Control rows are close-but-safe actions that must pass. The four rollout-doc cases (PHI, wrong DB, edit after approval, same-session review) are listed on their own. A case that did not run is reported as NOT RUN, never as PASS. A family "Machine scripts" (MACH-1 to MACH-3, MACH-C1, MACH-C2; GUARD-3 T5) runs the same hooks from a temp machine folder. The last case checks that no fake value and no command text is in any queued event.
 
 Needs network (npx downloads `bmad-method@6.12.4`), Node, `uv` and git. Not part of `python3 -m unittest discover`; its helpers, the case table and every case that needs no state (run against the real hook in an empty project) are tested offline in `tests/test_red_team.py`.
 

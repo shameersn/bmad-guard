@@ -19,6 +19,10 @@ description: The command, path, document, write gate, review record and content 
 
 Each rule has a stable id. The id is the reason code in the message and in the event. Events carry the rule id, the guard name, the tool name and the session id. They never carry the command text, a file path or file content.
 
+## When the guards run at all (the unguarded-project rule, ADR 0008)
+
+Before it imports any guard, `pre_tool_use.py` (and the prompt hook and `session_start.py`) ask whether the project uses the guard. A project with no `_bmad/` folder is allowed silently: exit 0, no output, no event, no file written. A project with `_bmad/` but no `_bmad/custom/guard/manifest.json` is allowed too, and `SessionStart` prints one line (bmad-guard is not installed here, the guards are off). Only a project with the setup manifest gets the seven guards, and it fails closed as described here. The project is the one `CLAUDE_PROJECT_DIR` names, the hook input's `cwd` and the process folder, each with links resolved, and the manifest is looked for in every parent folder too: any of them with a manifest means guarded, and so does any error or a `cwd` of the wrong type. The manifest and its folder are protected from the agent (`DOC_GUARD_SCRIPTS`: Write, Edit, `rm`, `mv` and the other shell targets), but `python -c`, a script file or `rsync --delete` are not seen: removing the marker turns the Claude Code guards off for that project, the same known limit as every other guard (ADR 0002). Prompts and commands in an unguarded project are not checked at all (decided for the pilot, 2026-11-26).
+
 ## Command rules
 
 The list is in `customize.toml` (`[[agent.command_rules]]`). A project adds rules; it cannot remove or change a built-in one.

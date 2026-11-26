@@ -11,4 +11,4 @@ Format: context, options, decision, consequences. Status goes Proposed → Accep
 | 0005 | [Repo layout: module repo, gateway repo, plans and ADRs in the repo](0005-repo-layout.md) | Accepted; gateway repo superseded by 0006 | 2026-11-24 |
 | 0006 | [Local prompt check replaces the prompt gateway](0006-local-prompt-check.md) | Accepted | 2026-11-25 |
 | 0007 | [Credential storage: a per-user file, environment variables override](0007-credential-storage.md) | Proposed | 2026-11-26 |
-| 0008 | [Machine-level script location: guard scripts installed once per machine](0008-machine-level-script-location.md) | Proposed (to be tested in T5) | 2026-11-26 |
+| 0008 | [Machine-level script location: guard scripts installed once per machine](0008-machine-level-script-location.md) | Proposed (built and tested in temp folders in T5; real-machine test open) | 2026-11-26 |

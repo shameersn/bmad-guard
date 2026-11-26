@@ -129,7 +129,7 @@ Verified (docs). Order, highest first: **managed** > command line (`--settings`)
   - `disableAllHooks: true` turns hooks off; a managed hook can only be turned off from the managed level.
   - Managed file paths: macOS `/Library/Application Support/ClaudeCode/managed-settings.json`; Linux and WSL `/etc/claude-code/managed-settings.json`; Windows `C:\Program Files\ClaudeCode\managed-settings.json`. Also a `managed-settings.d/` folder next to it, a macOS configuration profile (domain `com.anthropic.claudecode`) and a Windows registry key. `/status` shows `Setting sources: Enterprise managed settings (file)`.
 - **What this means for our wiring in the project file (not managed):** a developer can switch hooks off with `"disableAllHooks": true` in `.claude/settings.local.json` (local is above shared project). Then `SessionStart` does not run either, so it cannot warn about it. This is the bypass we accept in ADR 0002 until managed settings are rolled out. The setup script reports `disableAllHooks: true` found in the *project* file as a conflict; it does not look at the local file.
-- **Even with `allowManagedHooksOnly`,** our hook commands run scripts under `${CLAUDE_PROJECT_DIR}/.claude/skills/`, which live in the project and can be edited there. Managed settings lock the *entries*, not the *scripts*. A machine-level script location would close that; it is not in T1 (open question in `docs/managed-settings-rollout.md`).
+- **With the first managed template,** our hook commands run scripts under `${CLAUDE_PROJECT_DIR}/.claude/skills/`, which live in the project and can be edited there: managed settings lock the *entries*, not the *scripts*. **The machine templates (GUARD-3 T5, ADR 0008) close that:** the commands are absolute paths into a root-owned machine folder (`/Library/Application Support/ClaudeCode/bmad-guard/` on macOS, `/etc/claude-code/bmad-guard/` on Linux), so the scripts and their built-in rules cannot be edited per project, and a project without the module is not blocked (the hooks first apply the unguarded-project rule). Tested in temp folders; the real-machine steps are in `docs/managed-settings-rollout.md`. Not verified: that Claude Code runs a hook from a path with a space on macOS under `allowManagedHooksOnly` (section 5 verified the space for a project path).
 
 ## 8. Permission deny rules (second layer)
 
@@ -151,8 +151,10 @@ The list we install (`DENY_RULES` in `module/skills/tool-guard/scripts/hook_wiri
 | `"onFailure": "block"` on the `PreToolUse` entry | §2, docs (v2.1.295+); pin Claude Code >= 2.1.295 |
 | `UserPromptSubmit` points straight at `prompt_guard_hook.py` | It already speaks the `decision: block` JSON and owns its fail mode (ADR 0006, T5); a dispatcher would add a layer for nothing |
 | `SessionStart` warns through `systemMessage` only | §3 |
-| Hook command `python3 "${CLAUDE_PROJECT_DIR}/.claude/skills/<skill>/scripts/<script>.py"` | §5, verified with a space in the path |
-| Hooks only wired when `.claude/skills` exists in the project | A hook that points at a missing script exits 2 and would block every tool call |
+| Hook command `python3 "${CLAUDE_PROJECT_DIR}/.claude/skills/<skill>/scripts/<script>.py"` (project wiring and the first managed template) | §5, verified with a space in the path |
+| Hook command `python3 "<machine folder>/skills/<skill>/scripts/<script>.py"` (the machine templates, ADR 0008) | Absolute path in a root-owned folder; same quoting; tested in a temp folder with a space, not yet on a real machine |
+| Hooks only wired when `.claude/skills` exists in the project (project wiring) | A hook that points at a missing script exits 2 and would block every tool call. The machine templates have no such case: the script is always in the machine folder |
+| Each hook entry first asks "does this project use the guard?" (`hook_common.guard_state`) | A project with no `_bmad/` is allowed silently, `_bmad/` without the setup manifest is allowed (SessionStart prints one line), the manifest means all guards, fail closed. Any doubt means guarded (ADR 0008) |
 | Session ids come from hook input | §6 |
 | Managed template carries `allowManagedHooksOnly: true` | §7 |
 

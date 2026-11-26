@@ -138,13 +138,15 @@ These are exactly what `setup_guard.py --help` prints:
 | `--module MODULE` | bmad-guard checkout. Default: the repo that holds the script. |
 | `--dry-run` | Print the plan, change nothing. |
 | `--check` | Exit 1 unless the project is up to date. |
-| `--force` | Overwrite conflicts and replace `core.hooksPath`. |
+| `--force` | Overwrite conflicts and replace `core.hooksPath`. With `--uninstall`: also remove changed files and hook entries that only look like ours. |
+| `--uninstall` | Take out what setup added, using the manifest (see section 8). Run it with `--dry-run` first. |
+| `--machine-dir DIR` | With `--check`: where the machine folder is (default: the OS path). For IT and tests. |
 | `--credentials` | Write your per-user collector file instead of setting up a project (see "Optional: send events to the collector" below). Needs `--endpoint` and `--user`, and cannot be used with `--project`. |
 | `--endpoint URL`, `--user ID` | With `--credentials`: the collector URL and your developer id. |
 
-`--dry-run` and `--check` cannot be used together.
+`--dry-run` and `--check` cannot be used together. `--uninstall` goes with `--dry-run` and `--force`, not with `--check`.
 
-With `--check`, the script may print extra lines about your per-user file: `note` (no file; sending is optional), `problem` (the file is not safe to use, with the fix) or `warning` (Windows). They do not change the exit code.
+With `--check`, the script may print extra lines about your per-user file: `note` (no file; sending is optional), `problem` (the file is not safe to use, with the fix) or `warning` (Windows). It also compares your project with the machine folder that IT may have installed (see "Machine install" below): `warning  machine scripts: <v1>; this project's module: <v2>. They differ` or `note     machine scripts: none (fine unless managed settings point to them)`. None of these lines changes the exit code: you cannot fix a machine folder; tell IT.
 
 ### When setup reports a conflict
 
@@ -199,6 +201,15 @@ python3 <bmad-guard>/scripts/setup_guard.py --credentials \
 - If the file is open to group or others, a link, or not yours, the guards **do not use it**: events keep queueing, and `setup_guard.py --project . --check` and the `SessionStart` warning say how to fix it (`chmod 600 ~/.config/bmad-guard/credentials`). Nothing is lost.
 - If the collector answers HTTP 401, the warning says whether the key came from the environment or from the file. A stale `BMAD_GUARD_KEY` in your environment hides a new key in the file.
 - Not supported on Windows yet.
+
+### Machine install (for IT, not for you)
+
+On a machine with IT's **managed settings**, the Claude Code hooks may run from a root-owned **machine folder** instead of from your project (ADR 0008; macOS `/Library/Application Support/ClaudeCode/bmad-guard/`, Linux `/etc/claude-code/bmad-guard/`). IT installs it with `scripts/install_machine.py` as root, together with the managed file; the steps are in [managed-settings-rollout.md](../managed-settings-rollout.md). You do not run it, and your project's own copies stay (git hooks and the model's scripts use them). What you may notice:
+
+- A project **without** BMAD, or with BMAD but no bmad-guard setup, is not blocked: tool calls work, and a BMAD project without setup shows one line at session start, "bmad-guard is not installed here, the guards are off". Run the setup script to turn the guards on.
+- A project **with** the setup manifest (`_bmad/custom/guard/manifest.json`, committed) is guarded as soon as you clone it, even before you run setup. Run setup anyway: it sets `core.hooksPath` for the git hooks.
+- Removing the manifest turns the Claude Code guards off for that project. The guard blocks the agent from doing it (`DOC_GUARD_SCRIPTS`); a person can. Do not.
+- `setup_guard.py --check` warns when the machine folder and your project's module differ in version. Ask IT to update the machine folder first, then run setup again.
 
 ## 5. What setup changes
 
@@ -291,9 +302,30 @@ Fix this, stage the files again and commit again. Do not use --no-verify.
 
 Inside a project, the rules document is at `.claude/skills/tool-guard/references/guard-rules.md`. The model can read it too.
 
-## 8. Roll back by hand
+## 8. Roll back (uninstall)
 
-**There is no uninstall command yet.** It is planned (Phase 3, T5). Until then, do these steps in **your own terminal**, not through Claude: the guard blocks the agent from editing its own files (`DOC_GUARD_SCRIPTS`).
+Run these in **your own terminal**, not through Claude: the guard blocks the agent from editing its own files (`DOC_GUARD_SCRIPTS`). Uninstall also turns the Claude Code guards off for this project: a project without the manifest is not guarded (ADR 0008).
+
+```bash
+python3 <bmad-guard>/scripts/setup_guard.py --project . --uninstall --dry-run   # read the plan
+python3 <bmad-guard>/scripts/setup_guard.py --project . --uninstall             # do it
+```
+
+It uses `_bmad/custom/guard/manifest.json` and removes only what setup added:
+
+- the files the manifest lists (the guard skills in `.claude/skills` and `.agents/skills`, the overrides in `_bmad/custom/`, the git hooks), if they are unchanged since install;
+- our three hook entries and our 21 `Read(...)` deny rules in `.claude/settings.json`. Your own entries stay. If nothing else was in the file, the file is deleted. A deny rule you had before setup with the same text is removed with ours (setup cannot tell them apart);
+- `core.hooksPath`, if it is `_bmad/custom/guard/hooks` (a different value is kept);
+- the `.bmad-guard/` line in `.gitignore` (and the comment line setup wrote above it). The same line without that comment is yours and stays, unless you use `--force`;
+- `_bmad/custom/guard/`, the manifest last.
+
+It never touches stock BMAD files, your own files, or a path setup does not install. The local event queue `.bmad-guard/`, your approval state (`_bmad/custom/approval-state.json`), the records in `_bmad-output/guard/` and your own settings (`_bmad/custom/prompt-guard.toml`, `_bmad/custom/project/guard/`) are left; delete them yourself if the pilot lead says so.
+
+If any file changed since install, or a hook entry only looks like ours, or something is a link, the script **changes nothing** and lists the conflicts. Look at them. `--force` removes changed files and lookalike hook entries (a link, or a path setup does not install, is never removed). Then commit the result. Check: `git config core.hooksPath` prints nothing, and a new Claude Code session shows no guard hooks.
+
+The by-hand steps below are the same thing, if you cannot run the script.
+
+### By hand
 
 1. Turn off the git hooks:
 
@@ -355,7 +387,9 @@ The guards **fail closed**: if a guard cannot run, it blocks. This is on purpose
 |---|---|---|
 | `GUARD_ERROR` or `BAD_HOOK_INPUT` | A guard file is missing or damaged, or an update is half done. | Run `--check`, then run setup again. |
 | `EXT_BAD_FILE` | `_bmad/custom/project/guard/tool-rules.json` is not valid. | Fix the file by hand. The message names the problem. The agent must not edit it. |
-| Every tool blocked, and the hook script is missing | The project was never set up (for example a managed-settings file is on, but this project has no module). | Run the setup script. |
+| Every tool blocked, and the hook script is missing | The project was never set up and IT's managed file is the **first** template (hook scripts inside each project). | Run the setup script. With the machine templates a project without the module is not blocked. |
+| Every tool blocked, and the hook script is missing, on a machine with a machine folder | The managed file points to a machine folder that is gone or was never installed (ADR 0008). | Tell IT at once: the managed file must go before the folder does. Do not switch the hooks off. |
+| One line at session start: `bmad-guard is not installed here, the guards are off` | BMAD is in the project, but setup was not run (no `_bmad/custom/guard/manifest.json`). | Run the setup script if the project should be guarded. |
 | Every commit blocked, "needs Python 3.10 or later" | `python3` is too old. | Put a newer `python3` first in `PATH`. |
 | `COMMIT_ERROR` or `PUSH_ERROR` | A git hook could not run. The message gives a short cause. | Run setup again. |
 

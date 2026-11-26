@@ -17,7 +17,7 @@ Status: Phase 2 (enforcement) is built and the red-team suite passes in a throwa
 | `module/skills/` | Guard skills, copied into a project's `.claude/skills/` and `.agents/skills/` |
 | `module/hooks/` | Git hooks, plain Python, copied to `_bmad/custom/guard/hooks/` (Phase 2): `pre-commit` (scan, approval fields, tech stack) and `pre-push` (independent review record, T7). Rules and limits: `module/hooks/README.md`. |
 | `module/overrides/` | Files copied into a project's `_bmad/custom/` |
-| `module/managed-settings/` | Managed-settings template for a later IT rollout (not installed by anything here) |
+| `module/managed-settings/` | Managed-settings templates for the IT rollout: one per OS for the machine folder, and the first one with project paths (nothing here installs them; `scripts/install_machine.py` installs the machine folder, run by IT as root) |
 | `scripts/` | Repo tools: setup script (also wires the Claude Code hooks into `.claude/settings.json`), install test (Gate 1), red-team suite (Gate 2). See `scripts/README.md`. |
 | `tests/` | Unit tests and repo rules |
 | `docs/plans/` | One plan per phase. Each plan is approved by PR before its work starts. |
