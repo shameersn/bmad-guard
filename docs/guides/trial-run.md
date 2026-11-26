@@ -18,7 +18,7 @@
 - Everything is committed before the risky steps (`rm -rf`, `git reset --hard`), so you can restore with git.
 - You are testing the guards, not the code Claude writes. The code can be rough.
 
-Notation: `<bmad-guard>` is your checkout of this repo. `<name>` is your name.
+Notation: `<bmad-guard>` is your clone of this repo ([install guide](install.md), step 2). `<name>` is your name.
 
 ## Part A. Set up
 

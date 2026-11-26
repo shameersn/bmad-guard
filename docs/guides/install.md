@@ -23,17 +23,43 @@ This guide puts the guards into one project. It takes about 10 minutes.
 | macOS or Linux | | **Windows is not supported yet** (decision D10 in the Phase 3 plan). `setup_guard.py --check` does not warn about Windows yet; that warning is planned (Phase 3, T3). |
 | Python 3.10 or later, as `python3` | `python3 --version` | The macOS system Python is 3.9 and is **too old**: the pre-commit hook blocks every commit and says so. Put a newer `python3` first in your `PATH`. |
 | git | `git --version` | |
-| BMAD 6.12.4 (exactly) | | Installed in step 2. The guards are tested only with this version. |
+| BMAD 6.12.4 (exactly) | | Installed in step 3. The guards are tested only with this version. |
 | Node.js with `npx` | `npx --version` | Needed by the BMAD installer. Note: the minimum Node version is not checked here; see the BMAD docs. |
-| Claude Code 2.1.295 or later | `claude --version` | The `PreToolUse` hook uses `"onFailure": "block"`, added in 2.1.295 (checked on 2.1.326). With an older version a crashing hook may not block. |
+| Claude Code 2.1.295 or later, installed and signed in | `claude --version` | The `PreToolUse` hook uses `"onFailure": "block"`, added in 2.1.295 (checked on 2.1.326). With an older version a crashing hook may not block. Do the guarded work in Claude Code: it is the only tool with the L1 guards. |
+| GitHub Copilot (optional) | | Only if you also use BMAD from Copilot. Copilot has no blocking hooks, so only the git hooks (L2) guard work done there. |
 | `uv` (recommended) | `uv --version` | BMAD skills run `uv run ...` to read their settings. |
-| A checkout of this repo (bmad-guard) | | In the steps below its folder is written `<bmad-guard>`. |
+| Read access to the bmad-guard GitHub repo | `git ls-remote git@github.com:shameersn/bmad-guard.git` | Ask Shameer for access. You get the code in step 2. |
 
 Use a project that is already a git repository. A new project is fine: run `git init` first.
 
-## 2. Install BMAD
+## 2. Get bmad-guard
+
+bmad-guard is not a package. You clone it once per machine, **outside** your project, and the setup script copies what a project needs into it.
+
+```bash
+git clone git@github.com:shameersn/bmad-guard.git ~/tools/bmad-guard
+cd ~/tools/bmad-guard && git checkout <pilot tag>
+```
+
+- `<pilot tag>`: the version for the pilot. Shameer announces it (for example `pilot-1`). Do not use `main`: every pilot user must have the same version.
+- In the steps below `<bmad-guard>` means this folder, `~/tools/bmad-guard`.
+- Use `git clone`, not a ZIP download. The setup script reads the version from git and writes it into your project; from a ZIP it records `unknown`, and nobody can tell which version you run.
+- One clone serves every project on the machine.
+
+**Update to a new version** when Shameer announces one:
+
+```bash
+cd ~/tools/bmad-guard && git fetch --tags && git checkout <new pilot tag>
+python3 ~/tools/bmad-guard/scripts/setup_guard.py --project <your project> --check
+```
+
+`--check` then says `NOT up to date`. Run the setup script without `--check` (step 4), and commit the result.
+
+## 3. Install BMAD
 
 Run this in the project folder. It is the same command the install test uses.
+
+`--tools` does **not** install Claude Code or Copilot (you have those already, see step 1). It tells the BMAD installer which tools to write BMAD's skills and agents for: `claude-code` writes `.claude/skills/`, `github-copilot` writes `.github/agents/` and `.agents/skills/`. Both are installed so a BMAD agent works the same in either tool (ADR 0001). The guard setup then copies the guard skills into each of those folders.
 
 ```bash
 npx -y bmad-method@6.12.4 install --directory . --modules bmm \
@@ -50,7 +76,7 @@ git add -A && git commit -m "Add BMAD 6.12.4"
 
 Already have BMAD 6.12.4 in the project? Skip this step.
 
-## 3. Run the setup script
+## 4. Run the setup script
 
 The script only changes the project you name. It never touches stock BMAD files.
 
@@ -152,7 +178,7 @@ The first prints `_bmad/custom/guard/hooks`. The second prints a block, because 
 
 Then start Claude Code in the project folder. No `[tool-guard]` warning at the start means the setup is in place.
 
-## 4. What setup changes
+## 5. What setup changes
 
 | Where | What | Why |
 |---|---|---|
@@ -167,7 +193,7 @@ Then start Claude Code in the project folder. No `[tool-guard]` warning at the s
 
 The setup script does **not** create the HIPAA setting (next section) or any file under `_bmad/custom/project/`. Those are yours.
 
-## 5. HIPAA setting
+## 6. HIPAA setting
 
 The setting is `phi` in the prompt-guard customize file. The default is `warn`. A HIPAA project sets `block`.
 
@@ -195,7 +221,7 @@ phi = "block"
 - Values that are already allow-listed: `123-45-6789`, `000-00-0000`, `078-05-1120`, the public card test numbers, `555-01xx` phone numbers, anything with `example`, `@localhost`, `.invalid` or `noreply@`.
 - The same file can add project rules: `{"patterns": [{"id": "mrn", "category": "phi", "regex": "MRN-\\d{8}"}]}`.
 
-## 6. How to read a block message
+## 7. How to read a block message
 
 Every block names a **rule id**. The rule id is the reason code. It is the same in the message, in the event and in the rules document.
 
@@ -243,7 +269,7 @@ Fix this, stage the files again and commit again. Do not use --no-verify.
 
 Inside a project, the rules document is at `.claude/skills/tool-guard/references/guard-rules.md`. The model can read it too.
 
-## 7. Roll back by hand
+## 8. Roll back by hand
 
 **There is no uninstall command yet.** It is planned (Phase 3, T5). Until then, do these steps in **your own terminal**, not through Claude: the guard blocks the agent from editing its own files (`DOC_GUARD_SCRIPTS`).
 
@@ -278,7 +304,7 @@ Inside a project, the rules document is at `.claude/skills/tool-guard/references
 
 Check: `git config core.hooksPath` prints nothing, and a new Claude Code session shows no guard hooks. (These steps were run in a throwaway project: the commands succeed and leave `_bmad/custom/config.toml` and the stock BMAD skills untouched.)
 
-## 8. FAQ
+## 9. FAQ
 
 ### Why was I blocked?
 
