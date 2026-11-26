@@ -318,9 +318,9 @@ Steps:
 3. If it says `NOT up to date`, run the same command without `--check` (use `--dry-run` first).
 4. Still blocked? Send the message and the rule id to Shameer. Do **not** switch the hooks off as a fix.
 
-### My first push after setup is blocked with `PUSH_NO_RECORD`
+### Does the first push after setup need a review?
 
-Known issue in the pilot start. The BMAD install commit and the setup commit count as source files, so the push needs a review record. Run one review in a fresh session ([reviewer guide](reviewer.md)) before the first push. A fix is planned (Phase 3 plan, T7, "Found in T0").
+No. The files BMAD and setup add outside the planning folders (the root `.gitignore` and `.github/agents/bmad-*.agent.md`) do not count as source, so the push goes through with `PUSH_NOTHING_TO_CHECK`. If your project already had source commits that were never pushed, those still need a review record (`PUSH_NO_RECORD`): run one review in a fresh session ([reviewer guide](reviewer.md)).
 
 ### The session starts with a `[tool-guard]` warning
 
