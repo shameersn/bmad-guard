@@ -5,7 +5,13 @@
 
 - `scripts/setup_guard.py` merges it into a project's `.claude/settings.json`;
 - `session_start.py` checks at session start that it is still there;
-- the managed-settings template and the install test compare against it.
+- the managed-settings templates (one per OS) are written from it (`scripts/install_machine.py --print-template`),
+  and the install test compares against it.
+
+Two forms of the hook command (ADR 0008): the project form runs the scripts from the project
+(`${CLAUDE_PROJECT_DIR}/.claude/skills/...`), the machine form from the root-owned machine folder
+(`<base>/skills/...`, an absolute path). `command(..., base)`, `desired_hooks(base)` and `merge(..., base=...)` take
+the base folder; with no base they give the project form. The machine base per OS is defined once, here.
 
 `merge()` is pure: it takes the settings dict and returns a new one plus a list of changes and conflicts.
 Our hook entries are identified by their exact command string, so a second run changes nothing and the
@@ -22,6 +28,16 @@ from pathlib import Path
 SETTINGS_REL = ".claude/settings.json"
 HOOKS_REL = "_bmad/custom/guard/hooks"  # git hooks folder (core.hooksPath); same value as scripts/setup_guard.py
 SKILLS_REL = ".claude/skills"
+
+# Managed settings folder per OS (docs/managed-settings-rollout.md). WSL reports linux. The machine folder (ADR 0008)
+# is a sibling of the managed file. Windows has a managed folder but no machine folder yet (Phase 3 decision D10).
+MANAGED_DIRS = {
+    "darwin": "/Library/Application Support/ClaudeCode",
+    "linux": "/etc/claude-code",
+    "win32": "C:\\Program Files\\ClaudeCode",
+}
+MACHINE_DIR_NAME = "bmad-guard"
+MACHINE_PLATFORMS = ("darwin", "linux")
 
 # Tools that reach the PreToolUse dispatcher. A guard added later for another tool needs this list changed.
 PRE_TOOL_MATCHER = "Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit"
@@ -73,13 +89,30 @@ DENY_RULES = _deny_rules()
 MARKERS = ("/skills/tool-guard/scripts/", "prompt_guard_hook.py")
 
 
-def command(skill: str, script: str) -> str:
-    """The exact hook command. CLAUDE_PROJECT_DIR is set by Claude Code for hooks; the quotes allow spaces."""
+def machine_base(platform: str) -> str | None:
+    """The machine folder for an OS (`sys.platform` value), or None when there is none (Windows, unknown)."""
+    if platform not in MACHINE_PLATFORMS:
+        return None
+    return f"{MANAGED_DIRS[platform]}/{MACHINE_DIR_NAME}"
+
+
+def _check_base(base: str) -> str:
+    """A machine base must be an absolute path that stays one word inside double quotes in a shell."""
+    if not base.startswith("/") or any(ch in base for ch in '"\\$`\n\r\0'):
+        raise ValueError(f"not a usable machine folder path: {base!r}")
+    return base.rstrip("/") or "/"
+
+
+def command(skill: str, script: str, base: str | None = None) -> str:
+    """The exact hook command. Project form (no base): CLAUDE_PROJECT_DIR is set by Claude Code for hooks; the quotes
+    allow spaces. Machine form (ADR 0008): an absolute path in the machine folder `base`."""
+    if base is not None:
+        return f'python3 "{_check_base(base)}/skills/{skill}/scripts/{script}"'
     return f'python3 "${{CLAUDE_PROJECT_DIR}}/{SKILLS_REL}/{skill}/scripts/{script}"'
 
 
-def _hook(skill: str, script: str, extra: dict) -> dict:
-    return {"type": "command", "command": command(skill, script), **extra}
+def _hook(skill: str, script: str, extra: dict, base: str | None = None) -> dict:
+    return {"type": "command", "command": command(skill, script, base), **extra}
 
 
 def _group(matcher: str | None, hook: dict) -> dict:
@@ -88,17 +121,54 @@ def _group(matcher: str | None, hook: dict) -> dict:
     return group
 
 
-def desired_hooks() -> dict[str, list[dict]]:
-    """The `hooks` block we install, in Claude Code settings shape (also used by the managed template)."""
+def desired_hooks(base: str | None = None) -> dict[str, list[dict]]:
+    """The `hooks` block we install, in Claude Code settings shape (also used by the managed templates)."""
     out: dict[str, list[dict]] = {}
     for event, matcher, skill, script, extra in HOOKS:
-        out.setdefault(event, []).append(_group(matcher, _hook(skill, script, extra)))
+        out.setdefault(event, []).append(_group(matcher, _hook(skill, script, extra, base)))
     return out
 
 
-def script_paths() -> list[str]:
-    """Project-relative paths of the scripts the hooks run."""
-    return [f"{SKILLS_REL}/{skill}/scripts/{script}" for _, _, skill, script, _ in HOOKS]
+def script_paths(base: str | None = None) -> list[str]:
+    """Paths of the scripts the hooks run: project-relative, or absolute in the machine folder `base`."""
+    root = f"{_check_base(base)}/skills" if base is not None else SKILLS_REL
+    return [f"{root}/{skill}/scripts/{script}" for _, _, skill, script, _ in HOOKS]
+
+
+# Claude Code telemetry (GUARD-3 T4, docs/managed-settings-rollout.md): the managed templates carry it, the project
+# wiring does not (the docs say a repository's settings ignore the OTel exporter variables).
+ENDPOINT_PLACEHOLDER = "https://REPLACE-WITH-COLLECTOR-HOST"
+TELEMETRY_ENV = {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "delta",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": ENDPOINT_PLACEHOLDER,
+    "OTEL_LOG_USER_PROMPTS": "0",
+    "OTEL_LOG_ASSISTANT_RESPONSES": "0",
+    "OTEL_LOG_TOOL_DETAILS": "0",
+    "OTEL_LOG_TOOL_CONTENT": "0",
+    "OTEL_LOG_RAW_API_BODIES": "0",
+    "OTEL_METRICS_INCLUDE_SESSION_ID": "true",
+    "OTEL_METRICS_INCLUDE_VERSION": "true",
+    "OTEL_METRICS_INCLUDE_ACCOUNT_UUID": "false",
+    "OTEL_METRICS_INCLUDE_ENTRYPOINT": "true",
+    "OTEL_METRICS_INCLUDE_REPOSITORY": "false",
+    "OTEL_METRICS_INCLUDE_RESOURCE_ATTRIBUTES": "false",
+}
+
+
+def managed_settings(base: str) -> dict:
+    """The managed settings file for a machine folder `base` (ADR 0008): the three hooks with absolute script paths,
+    the deny rules, the lock, and the telemetry block with its helper in the same folder."""
+    return {
+        "hooks": desired_hooks(base),
+        "permissions": {"deny": list(DENY_RULES)},
+        "allowManagedHooksOnly": True,
+        "env": dict(TELEMETRY_ENV),
+        "otelHeadersHelper": f'python3 "{_check_base(base)}/otel_headers.py"',
+    }
 
 
 @dataclass
@@ -155,7 +225,7 @@ def _drop(groups: list, commands: list[str]) -> None:
     groups[:] = kept
 
 
-def _merge_hooks(result: Merge, force: bool) -> None:
+def _merge_hooks(result: Merge, force: bool, base: str | None = None) -> None:
     settings = result.settings
     hooks = settings.get("hooks", {})
     if not isinstance(hooks, dict):
@@ -166,7 +236,7 @@ def _merge_hooks(result: Merge, force: bool) -> None:
         hooks = {}
     settings["hooks"] = hooks
     for event, matcher, skill, script, extra in HOOKS:
-        want = command(skill, script)
+        want = command(skill, script, base)
         groups = hooks.get(event, [])
         if not isinstance(groups, list):
             if not force:
@@ -181,7 +251,7 @@ def _merge_hooks(result: Merge, force: bool) -> None:
             _drop(groups, stale)
             result.changes.append(f"remove stale hook {event}: {stale[0]}")
         ours = [(group, hook) for group, hook, cmd in _commands(groups) if cmd == want]
-        wanted_hook = _hook(skill, script, extra)
+        wanted_hook = _hook(skill, script, extra, base)
         if len(ours) == 1 and ours[0][1] == wanted_hook and ours[0][0].get("matcher") == matcher:
             hooks[event] = groups
             continue
@@ -214,10 +284,11 @@ def _merge_deny(result: Merge, force: bool) -> None:
     result.changes.extend(f"add deny rule {rule}" for rule in missing)
 
 
-def merge(settings: dict | None, force: bool = False) -> Merge:
-    """Add our hooks and deny rules to `settings` (a copy). Conflicts stay as they are unless `force`."""
+def merge(settings: dict | None, force: bool = False, base: str | None = None) -> Merge:
+    """Add our hooks and deny rules to `settings` (a copy). Conflicts stay as they are unless `force`. `base` is a
+    machine folder: the hook commands are then the machine form (managed settings), else the project form."""
     result = Merge(copy.deepcopy(settings) if settings else {})
-    _merge_hooks(result, force)
+    _merge_hooks(result, force, base)
     _merge_deny(result, force)
     if result.settings.get("disableAllHooks") is True:
         if force:

@@ -525,6 +525,41 @@ class SessionStartTests(unittest.TestCase):
         )
         self.assertTrue(ss.wiring_ok(self.root))
 
+    def machine_settings(self, base: Path | None = None) -> dict:
+        return hw.managed_settings(str((base or self.managed) / "bmad-guard"))
+
+    def test_machine_commands_in_the_managed_file_count_as_wired(self):
+        self.wire(settings=False)
+        self.write_managed("managed-settings.json", self.machine_settings())
+        self.assertTrue(ss.wiring_ok(self.root))
+        self.assertEqual(self.start(), (0, "", ""))
+        self.assertEqual(queue(self.root), [])
+
+    def test_machine_commands_in_drop_ins_count_as_wired(self):
+        self.wire(settings=False)
+        full = self.machine_settings()
+        self.write_managed("managed-settings.d/10-hooks.json", {"hooks": full["hooks"]})
+        self.write_managed("managed-settings.d/20-deny.json", {"permissions": full["permissions"]})
+        self.assertTrue(ss.wiring_ok(self.root))
+
+    def test_machine_commands_pointing_into_another_folder_do_not_count(self):
+        self.wire(settings=False)
+        self.write_managed("managed-settings.json", self.machine_settings(self.root / "elsewhere"))
+        self.assertFalse(ss.wiring_ok(self.root))
+        self.assertIn("will not run", json.loads(self.start()[1])["systemMessage"])
+
+    def test_machine_hooks_with_a_missing_deny_rule_do_not_count(self):
+        self.wire(settings=False)
+        settings = self.machine_settings()
+        settings["permissions"]["deny"].pop()
+        self.write_managed("managed-settings.json", settings)
+        self.assertFalse(ss.wiring_ok(self.root))
+
+    def test_the_machine_folder_is_defined_once(self):
+        self.assertFalse(hasattr(ss, "MANAGED_DIRS"))
+        with mock.patch.object(ss.sys, "platform", "linux"):
+            self.assertEqual(str(REAL_MANAGED_DIR()), hw.MANAGED_DIRS["linux"])
+
     def test_managed_drop_ins_are_read_together(self):
         self.wire(settings=False)
         full = hw.merge(None).settings

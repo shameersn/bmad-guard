@@ -47,12 +47,6 @@ FIXES = {
         "chmod 700 on its folder; run setup_guard.py --check for details"
     ),
 }
-# Managed settings folder per OS (docs/managed-settings-rollout.md). WSL reports linux.
-MANAGED_DIRS = {
-    "darwin": "/Library/Application Support/ClaudeCode",
-    "linux": "/etc/claude-code",
-    "win32": "C:\\Program Files\\ClaudeCode",
-}
 
 
 def hooks_path_ok(root: Path) -> bool:
@@ -67,7 +61,7 @@ def hooks_path_ok(root: Path) -> bool:
 
 
 def managed_dir() -> Path | None:
-    value = MANAGED_DIRS.get(sys.platform)
+    value = hw.MANAGED_DIRS.get(sys.platform)  # defined once, in hook_wiring.py
     return Path(value) if value else None
 
 
@@ -94,17 +88,25 @@ def managed_settings(base: Path | None) -> dict | None:
     return combined or None
 
 
-def _wired(load) -> bool:
+def _wired(load, base: str | None = None) -> bool:
     try:
         settings = load()
-    except (ValueError, OSError):
+        return settings is not None and hw.merge(settings, base=base).ok
+    except (ValueError, OSError):  # an unusable file, or a managed folder that is not a POSIX path (Windows)
         return False
-    return settings is not None and hw.merge(settings).ok
 
 
 def wiring_ok(root: Path) -> bool:
-    """True when the project settings or the managed settings hold the full wiring."""
-    return _wired(lambda: hw.load_settings(root / hw.SETTINGS_REL)) or _wired(lambda: managed_settings(managed_dir()))
+    """True when the project settings or the managed settings hold the full wiring. The managed file may hold the
+    project form of the commands (the first template) or the machine form (ADR 0008): its scripts are in the
+    `bmad-guard` folder next to the managed file."""
+    managed = managed_dir()
+    machine = str(managed / hw.MACHINE_DIR_NAME) if managed is not None else None
+    return (
+        _wired(lambda: hw.load_settings(root / hw.SETTINGS_REL))
+        or _wired(lambda: managed_settings(managed))
+        or (machine is not None and _wired(lambda: managed_settings(managed), machine))
+    )
 
 
 def credential_ok(root: Path) -> bool:

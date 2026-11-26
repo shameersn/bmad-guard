@@ -265,6 +265,78 @@ class LoadSettingsTests(unittest.TestCase):
             self.assertTrue(hw.render({}).endswith("}\n"))
 
 
+MAC = "/Library/Application Support/ClaudeCode/bmad-guard"
+LINUX = "/etc/claude-code/bmad-guard"
+
+
+class MachineCommandTests(unittest.TestCase):
+    """ADR 0008: the same hooks, with scripts in the machine folder instead of the project."""
+
+    def test_machine_command_is_absolute_quoted_and_has_no_project_dir(self):
+        cmd = hw.command("tool-guard", "pre_tool_use.py", MAC)
+        self.assertEqual(
+            cmd,
+            'python3 "/Library/Application Support/ClaudeCode/bmad-guard/skills/tool-guard/scripts/pre_tool_use.py"',
+        )
+        self.assertNotIn("CLAUDE_PROJECT_DIR", cmd)
+
+    def test_no_base_is_the_project_command(self):
+        self.assertEqual(hw.command("tool-guard", "pre_tool_use.py", None), PRE)
+
+    def test_a_base_that_could_break_the_quoting_is_refused(self):
+        for base in ('/x"y', "/x$HOME", "/x`id`", "/x\\y", "/x\ny", "relative/path", ""):
+            with self.subTest(base=base), self.assertRaises(ValueError):
+                hw.command("tool-guard", "pre_tool_use.py", base)
+
+    def test_machine_hooks_keep_the_matcher_timeout_and_on_failure(self):
+        mine, project = hw.desired_hooks(LINUX), hw.desired_hooks()
+        for event, groups in project.items():
+            for group, machine_group in zip(groups, mine[event], strict=True):
+                self.assertEqual(group.get("matcher"), machine_group.get("matcher"))
+                for key in ("timeout", "onFailure"):
+                    self.assertEqual(group["hooks"][0].get(key), machine_group["hooks"][0].get(key))
+        self.assertEqual(
+            mine["PreToolUse"][0]["hooks"][0]["command"],
+            f'python3 "{LINUX}/skills/tool-guard/scripts/pre_tool_use.py"',
+        )
+
+    def test_script_paths_with_a_base_are_absolute(self):
+        self.assertEqual(
+            hw.script_paths(LINUX),
+            [
+                f"{LINUX}/skills/tool-guard/scripts/session_start.py",
+                f"{LINUX}/skills/prompt-guard/scripts/prompt_guard_hook.py",
+                f"{LINUX}/skills/tool-guard/scripts/pre_tool_use.py",
+            ],
+        )
+
+    def test_machine_bases_come_from_the_managed_folders(self):
+        self.assertEqual(hw.machine_base("darwin"), MAC)
+        self.assertEqual(hw.machine_base("linux"), LINUX)
+        self.assertIsNone(hw.machine_base("win32"))
+        self.assertIsNone(hw.machine_base("plan9"))
+        self.assertEqual(hw.MANAGED_DIRS["darwin"], "/Library/Application Support/ClaudeCode")
+
+    def test_merge_with_a_base_writes_machine_commands_and_is_idempotent(self):
+        result = hw.merge(None, base=LINUX)
+        self.assertEqual(result.conflicts, [])
+        self.assertEqual(result.settings["hooks"], hw.desired_hooks(LINUX))
+        self.assertTrue(hw.merge(result.settings, base=LINUX).ok)
+
+    def test_each_form_is_a_lookalike_conflict_for_the_other(self):
+        machine = hw.merge(None, base=LINUX).settings
+        self.assertTrue(hw.merge(machine).conflicts)  # project form wanted, machine command found
+        self.assertTrue(hw.merge(full(), base=LINUX).conflicts)  # machine form wanted, project command found
+
+    def test_another_machine_folder_is_a_lookalike_conflict(self):
+        self.assertTrue(hw.merge(hw.merge(None, base=MAC).settings, base=LINUX).conflicts)
+
+    def test_force_replaces_the_other_form(self):
+        result = hw.merge(full(), force=True, base=LINUX)
+        self.assertEqual(result.conflicts, [])
+        self.assertEqual(result.settings["hooks"], hw.desired_hooks(LINUX))
+
+
 class ManagedTemplateTests(unittest.TestCase):
     """module/managed-settings/managed-settings.json must carry the same wiring as the project merge."""
 
