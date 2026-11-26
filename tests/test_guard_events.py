@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -276,6 +278,174 @@ class ConfigTests(unittest.TestCase):
     def test_new_name_wins_over_the_alias(self):
         env = {"BMAD_GUARD_ENDPOINT": "https://new", "BMAD_GUARD_COLLECTOR": "https://old"}
         self.assertEqual(ge.Config.for_project(Path("/p"), env).endpoint, "https://new")
+
+
+class CredentialFileTests(unittest.TestCase):
+    """The credential file (ADR 0007): read order, the permission rules, and what is never printed."""
+
+    FILE_KEY = "fake-file-secret-1%x"  # a % must survive (no interpolation)
+    TEXT = f"[collector]\nendpoint = https://file.example.invalid\nuser = file-user\nkey = {FILE_KEY}\n"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(os.path.realpath(tmp.name))
+        self.home = self.base / "home"
+        self.project = self.base / "project"
+        self.folder = self.home / ".config" / "bmad-guard"
+        self.path = self.folder / "credentials"
+
+    def put(self, text: str | None = None, mode: int = 0o600, folder_mode: int = 0o700) -> Path:
+        self.folder.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.folder, folder_mode)
+        self.path.write_text(self.TEXT if text is None else text, encoding="utf-8")
+        os.chmod(self.path, mode)
+        return self.path
+
+    def cfg(self, **env: str) -> ge.Config:
+        cfg = ge.Config.for_project(self.project, {"HOME": str(self.home), **env})
+        cfg.queue, cfg.timeout, cfg.backoff = self.base / "q" / "queue.jsonl", 1, 0
+        return cfg
+
+    def test_env_only(self):
+        env = {"BMAD_GUARD_ENDPOINT": "https://e", "BMAD_GUARD_USER": "u", "BMAD_GUARD_KEY": "k"}
+        cfg = self.cfg(**env)
+        self.assertEqual((cfg.endpoint, cfg.user, cfg.key, cfg.key_source), ("https://e", "u", "k", "env"))
+        self.assertEqual(cfg.credential_problem, "")
+
+    def test_the_file_alone_gives_all_three_values(self):
+        self.put()
+        cfg = self.cfg()
+        self.assertEqual(
+            (cfg.endpoint, cfg.user, cfg.key), ("https://file.example.invalid", "file-user", self.FILE_KEY)
+        )
+        self.assertEqual((cfg.key_source, cfg.credential_problem), ("file", ""))
+        self.assertTrue(cfg.sending_enabled)
+
+    def test_each_value_comes_from_the_environment_first_then_the_file(self):
+        self.put()
+        cfg = self.cfg(BMAD_GUARD_USER="env-user")
+        self.assertEqual((cfg.endpoint, cfg.user, cfg.key), ("https://file.example.invalid", "env-user", self.FILE_KEY))
+        cfg = self.cfg(BMAD_GUARD_KEY="env-secret")
+        self.assertEqual((cfg.user, cfg.key, cfg.key_source), ("file-user", "env-secret", "env"))
+        cfg = self.cfg(BMAD_GUARD_COLLECTOR="https://old")  # the deprecated alias still wins over the file
+        self.assertEqual(cfg.endpoint, "https://old")
+
+    def test_the_file_is_not_read_when_the_environment_has_everything(self):
+        env = {"BMAD_GUARD_ENDPOINT": "https://e", "BMAD_GUARD_USER": "u", "BMAD_GUARD_KEY": "k"}
+        with mock.patch.object(ge, "read_credential_file", side_effect=AssertionError("read"), create=True):
+            self.cfg(**env)
+
+    def test_neither_env_nor_file_only_queues_without_a_message(self):
+        cfg, err = self.cfg(), io.StringIO()
+        self.assertEqual((cfg.endpoint, cfg.credential_problem), ("", ""))
+        self.assertEqual(ge.emit(event(), cfg, stderr=err), {"sent": 0, "queued": 1, "error": None})
+        self.assertEqual(err.getvalue(), "")
+
+    def test_env_passed_without_home_skips_the_file(self):
+        self.put()
+        self.assertFalse(ge.Config.for_project(self.project, {}).sending_enabled)
+
+    def test_no_env_argument_uses_the_process_environment(self):
+        self.put()
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+            self.assertEqual(ge.Config.for_project(self.project).user, "file-user")
+
+    def test_an_explicit_file_path_wins_over_home(self):
+        self.put()
+        cfg = ge.Config.for_project(self.project, {}, credentials_file=self.path)
+        self.assertEqual(cfg.user, "file-user")
+
+    def test_a_file_open_to_group_or_others_is_refused_with_the_fix(self):
+        for mode in (0o640, 0o604, 0o644, 0o660):
+            with self.subTest(mode=oct(mode)):
+                self.put(mode=mode)
+                cfg = self.cfg()
+                self.assertEqual((cfg.endpoint, cfg.user, cfg.key), ("", "", ""))
+                self.assertFalse(cfg.sending_enabled)
+                self.assertIn(f"{mode:03o}", cfg.credential_problem)
+                self.assertIn("chmod 600", cfg.credential_problem)
+                self.assertNotIn(self.FILE_KEY, cfg.credential_problem)
+
+    def test_a_folder_that_group_or_others_can_write_is_refused(self):
+        self.put(folder_mode=0o770)
+        cfg = self.cfg()
+        self.assertFalse(cfg.sending_enabled)
+        self.assertIn("chmod 700", cfg.credential_problem)
+
+    def test_a_symbolic_link_is_refused(self):
+        self.put()
+        real = self.base / "real"
+        self.path.rename(real)
+        self.path.symlink_to(real)
+        cfg = self.cfg()
+        self.assertFalse(cfg.sending_enabled)
+        self.assertIn("symbolic link", cfg.credential_problem)
+
+    def test_a_file_owned_by_someone_else_is_refused(self):
+        self.put()  # a real chown needs root, so the current user id is faked instead
+        with mock.patch.object(ge.os, "geteuid", return_value=os.stat(self.path).st_uid + 1):
+            cfg = self.cfg()
+        self.assertFalse(cfg.sending_enabled)
+        self.assertIn("not owned by you", cfg.credential_problem)
+
+    def test_something_that_is_not_a_regular_file_is_refused(self):
+        self.folder.mkdir(parents=True)
+        os.chmod(self.folder, 0o700)
+        self.path.mkdir()
+        self.assertIn("not a regular file", self.cfg().credential_problem)
+
+    def test_a_missing_file_is_not_a_problem(self):
+        self.assertEqual(ge.read_credential_file(self.path), ({}, ""))
+        self.assertEqual(self.cfg().credential_problem, "")
+
+    def test_a_parse_error_names_the_error_type_and_never_the_content(self):
+        self.put("key = SECRET-LINE-VALUE\n")  # no section header: the library's message quotes this line
+        cfg = self.cfg()
+        self.assertFalse(cfg.sending_enabled)
+        self.assertIn("MissingSectionHeaderError", cfg.credential_problem)
+        self.assertNotIn("SECRET-LINE-VALUE", cfg.credential_problem)
+
+    def test_unknown_keys_and_a_missing_section_are_ignored(self):
+        self.put("[other]\nkey = x\n[collector]\nendpoint = https://e\nextra = 1\n")
+        cfg = self.cfg()
+        self.assertEqual((cfg.endpoint, cfg.user, cfg.key, cfg.credential_problem), ("https://e", "", "", ""))
+        self.put("[other]\nkey = x\n")
+        self.assertFalse(self.cfg().sending_enabled)
+
+    def test_the_401_hint_names_the_file_when_the_key_came_from_it(self):
+        with FakeCollector() as fc:  # the file's key is not the collector's key, so the answer is 401
+            self.put(self.TEXT.replace("https://file.example.invalid", fc.url))
+            cfg, err = self.cfg(), io.StringIO()
+            result = ge.emit(event(), cfg, stderr=err)
+        self.assertEqual(result["queued"], 1)
+        self.assertIn("HTTP 401", err.getvalue())
+        self.assertIn("the key is from the credential file", err.getvalue())
+        self.assertNotIn(self.FILE_KEY, err.getvalue())
+
+    def test_the_401_hint_names_the_variable_when_the_key_came_from_the_environment(self):
+        with FakeCollector() as fc:
+            cfg = self.cfg(BMAD_GUARD_ENDPOINT=fc.url, BMAD_GUARD_USER="u", BMAD_GUARD_KEY="env-wrong-secret")
+            err = io.StringIO()
+            ge.emit(event(), cfg, stderr=err)
+        self.assertIn("the key is from BMAD_GUARD_KEY", err.getvalue())
+        self.assertNotIn("env-wrong-secret", err.getvalue())
+
+    def test_flush_puts_the_reason_in_the_error_field(self):
+        self.put(mode=0o644)
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}), contextlib.redirect_stdout(out):
+            self.assertEqual(ge.main(["flush", "--project-root", str(self.project)]), 0)
+        result = json.loads(out.getvalue())
+        self.assertIn("644", result["error"])
+        self.assertNotIn(self.FILE_KEY, out.getvalue())
+
+    def test_an_endpoint_from_the_environment_with_a_refused_file_says_why_it_cannot_send(self):
+        self.put(mode=0o644)
+        cfg, err = self.cfg(BMAD_GUARD_ENDPOINT="https://e.example.invalid"), io.StringIO()
+        result = ge.emit(event(), cfg, stderr=err)
+        self.assertEqual(result["queued"], 1)
+        self.assertIn("chmod 600", err.getvalue())
 
 
 if __name__ == "__main__":
