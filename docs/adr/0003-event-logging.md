@@ -132,6 +132,29 @@ Rules that follow:
 - Events from before this update have no `tree` or record hash, so the reports flag older commits and records. Run the
   reports on commits made after the sender is rolled out.
 
+## Update (2026-11-26, GUARD-3 T4 follow-up): Claude Code metrics, and when the queue is sent
+
+**Metrics are in the pilot.** The collector gets a metrics pipeline next to the logs pipeline: the same OTLP receiver (so
+the same basic auth), the same `user` stamp from the key, the same scrub (`attributes/scrub` works on metric datapoint
+attributes, `resource/scrub` on the resource). Claude Code metrics carry the same personal attributes as its events.
+
+Options for where the metrics go:
+- **A. Same database `guard`, the exporter's default table names** (`otel_metrics_sum`, `otel_metrics_gauge`). One TTL
+  and one grant model; `grafana_reader` already has SELECT on `guard.*`; one backup covers both.
+- **B. A separate database.** Cleaner names, but a second TTL, a second grant set, a second backup path, and a second data
+  source in Grafana for no gain at pilot size.
+
+**Decision: A.** The tables are created by `clickhouse/init/02-metrics.sh` (layout copied from the exporter's own DDL,
+180-day TTL). `otel_writer` gets INSERT on those two tables only and keeps `create_schema: false`, so the collector
+still has no CREATE right at run time. Only sum and gauge exist (Claude Code sends counters); the exporter refuses a
+histogram or summary until a table is added. An existing stack runs `02-metrics.sh` once by hand (README).
+
+**When the queue is sent.** The git hooks only queued, so a developer who works in a terminal sent nothing until a
+Claude Code tool call happened, and the "commits with no guard events" report listed those commits. Now the
+`SessionStart` hook and the pre-push hook send the queue once, best effort: no endpoint means no network and no message;
+the sender's 3 s timeout and 5-minute backoff apply; a failure never blocks a session or a push. Pre-commit stays
+queue-only (it must never wait on the network). This is the "events never wait" rule of this ADR, kept.
+
 ## Related
 - Past ADRs: 0002 (enforcement layers).
 - Links: `spikes/collector/REPORT.md` (T3), `spikes/collector/otelcol/config.yaml`.

@@ -43,11 +43,14 @@ and a live run of Claude Code 2.1.332 against the local stack (`docs/reports/pha
 |---|---|---|
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | `1` | Required. |
 | `OTEL_LOGS_EXPORTER` | `otlp` | Events go to the collector's logs pipeline. |
-| `OTEL_METRICS_EXPORTER` | `none` | The collector has no metrics pipeline or table. Turn on only after building them. |
+| `OTEL_METRICS_EXPORTER` | `otlp` | Metrics (sessions, tokens, cost, lines of code, commits, pull requests, tool decisions) go to the collector's metrics pipeline and `guard.otel_metrics_*` (needed for the pilot). |
+| `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` | `delta` | The Claude Code default, set on purpose: the dashboard adds up values. |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/json` | What the spike and the live check used. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `https://REPLACE-WITH-COLLECTOR-HOST` | **IT replaces this** with the real collector URL (no path: Claude Code adds `/v1/logs`). Left as is, exports fail quietly. |
 | `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT`, `OTEL_LOG_RAW_API_BODIES` | `0` | Content switches, all explicitly off (they default to off). All five are in the docs for 2.1.332; `OTEL_LOG_TOOL_DETAILS` would put Bash commands in events. Checked live: `prompt`, `prompt_text` and `response` hold `<REDACTED>` or nothing. |
-| `OTEL_METRICS_INCLUDE_ACCOUNT_UUID` | `false` | Account ids off at the source. The docs name it for metrics; whether logs follow is **not verified**. The collector deletes them either way. |
+| `OTEL_METRICS_INCLUDE_ACCOUNT_UUID` | `false` | Account ids off at the source. The docs say the switch covers metrics and events. The collector deletes them either way. |
+| `OTEL_METRICS_INCLUDE_SESSION_ID`, `_VERSION`, `_ENTRYPOINT` | `true` | Not personal. `session.id` also stays on events (the docs: metrics and events). |
+| `OTEL_METRICS_INCLUDE_REPOSITORY`, `_RESOURCE_ATTRIBUTES` | `false` | `vcs.*` would name the repository; custom resource keys would become labels on every series. |
 | `otelHeadersHelper` | `python3 ".../bmad-guard/otel_headers.py"` | Prints the `Authorization` header from the developer's own credential file or environment. |
 
 **No key in the managed file.** The file is the same for every developer and any local user can read it. A static
