@@ -1056,13 +1056,6 @@ class CredentialSetupTests(FakeHomeMixin, unittest.TestCase):
         self.assertEqual(stop.exception.code, 2)
         self.assertIn("--project", err.getvalue())
 
-    def test_windows_is_refused(self):
-        with mock.patch.object(sg.sys, "platform", "win32"):
-            code, _, err = self.go()
-        self.assertEqual(code, 2)
-        self.assertIn("not supported yet", err)
-        self.assertFalse(self.cred.exists())
-
     def test_a_folder_others_can_write_is_reported_as_a_problem(self):
         self.folder.mkdir(parents=True)
         self.folder.chmod(0o777)
@@ -1072,7 +1065,8 @@ class CredentialSetupTests(FakeHomeMixin, unittest.TestCase):
 
 
 class CheckCredentialTests(FakeHomeMixin, Base):
-    """`--check` in a project: a note for a missing credential file, a problem line for a bad one, a Windows warning."""
+    """`--check` in a project: a note for a missing credential file, a problem line for a bad one. Windows has its own
+    tests in test_setup_guard_windows.py."""
 
     def setUp(self):
         super().setUp()
@@ -1111,13 +1105,7 @@ class CheckCredentialTests(FakeHomeMixin, Base):
         self.assertIn("chmod 600", out)
         self.assertNotIn("fake-secret", out)
 
-    def test_windows_gets_a_warning(self):
-        with mock.patch.object(sg.sys, "platform", "win32"):
-            code, out, _ = run(self.project, self.module, "--check")
-        self.assertEqual(code, 0, out)
-        self.assertIn("Windows is not supported yet", out)
-
-    def test_other_platforms_get_no_windows_warning(self):
+    def test_other_platforms_get_no_windows_lines(self):
         self.assertNotIn("Windows", run(self.project, self.module, "--check")[1])
 
 

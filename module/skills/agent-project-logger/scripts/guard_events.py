@@ -51,7 +51,9 @@ try:  # file locking: macOS and Linux; Windows runs without a lock (ADR 0009; ms
 except ImportError:  # pragma: no cover - Windows only
     fcntl = None
 
-IS_WINDOWS = os.name == "nt"  # tests set it: there are no POSIX mode bits to check, and HOME is not the home folder
+IS_WINDOWS = (
+    sys.platform == "win32"
+)  # tests set it: there are no POSIX mode bits to check, and HOME is not the home folder
 
 QUEUE_REL = Path(".bmad-guard/events/queue.jsonl")
 CREDENTIALS_REL = Path(".config/bmad-guard/credentials")  # under HOME; ADR 0007

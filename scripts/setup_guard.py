@@ -29,8 +29,15 @@ Per-user credential file (ADR 0007, optional: without it events only queue):
   created with that mode). The key comes from a hidden prompt, or from BMAD_GUARD_KEY for that run; never from the
   command line. Same values: nothing changes. Different values: a conflict, replaced only with --force. It never
   writes into a project, and needs no --project.
-- `--check` also notes a missing file, reports a file that is too open (with the fix), and warns on Windows
-  (not supported yet, D10). These lines do not change the exit code.
+- `--check` also notes a missing file and reports a file that the sender would refuse (with the fix). These lines do
+  not change the exit code.
+
+Windows (GUARD-3 T9, ADR 0009; simulated in tests, not run on a real machine): the L1 hooks only. Setup copies no git
+hooks, sets no core.hooksPath and sets no exec bit, and says so. `--check` also tests that Git for Windows (bash.exe) is
+there and that `python3` works in Git Bash with Python 3.10 or later, and exits 1 with the fix when not. `--credentials`
+writes `%USERPROFILE%/.config/bmad-guard/credentials` and runs `icacls` on the folder and the file (best effort: the
+result is reported and the exit code stays 0). Setup also writes `.gitattributes` lines (all OSes) so the guard files
+stay LF with `core.autocrlf=true` and their hashes match the manifest.
 
 Uninstall (`--uninstall`, GUARD-3 T5): takes out what setup added and nothing else, using the manifest. Run
 `--uninstall --dry-run` first. It removes the files the manifest lists (skill copies, overrides, git hooks) that are
@@ -62,6 +69,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -79,6 +87,15 @@ EVENTS_REL = "module/skills/agent-project-logger/scripts/guard_events.py"  # Led
 CREDENTIALS_REL = ".config/bmad-guard/credentials"  # under HOME; ADR 0007
 GITIGNORE_LINE = ".bmad-guard/"
 GITIGNORE_COMMENT = "# bmad-guard local event queue"
+# Keep the files setup installs LF in a clone with core.autocrlf=true (Windows): the manifest holds hashes of the bytes.
+GITATTRIBUTES_COMMENT = "# bmad-guard: keep the installed files LF (their hashes are in the manifest)"
+GITATTRIBUTES_LINES = (
+    ".claude/skills/** text eol=lf",
+    ".agents/skills/** text eol=lf",
+    "_bmad/custom/guard/** text eol=lf",
+    "_bmad/custom/*.toml text eol=lf",
+)
+MIN_PYTHON = (3, 10)
 # Uninstall only removes files under these folders (what setup installs); a manifest cannot point anywhere else.
 UNINSTALL_PREFIXES = (*(f"{d}/" for d in TOOL_SKILL_DIRS), "_bmad/custom/")
 # Folders that uninstall never removes, even when empty: they belong to BMAD and the tools, not to setup.
@@ -107,6 +124,7 @@ class Plan:
     hooks_path_ok: bool = True
     hooks_path_conflict: bool = False
     gitignore_ok: bool = True
+    gitattributes_missing: list[str] = field(default_factory=list)  # our .gitattributes lines that are not there
     version: str = "unknown"
     version_now: str | None = None
     settings_new: str | None = None  # new text for .claude/settings.json, None = nothing to write
@@ -125,8 +143,13 @@ class Plan:
             and not self.conflicts()
             and self.hooks_path_ok
             and self.gitignore_ok
+            and not self.gitattributes_missing
             and self.version == self.version_now
         )
+
+
+def on_windows() -> bool:
+    return sys.platform == "win32"  # tests patch it
 
 
 def sha256(path: Path) -> str:
@@ -134,7 +157,7 @@ def sha256(path: Path) -> str:
 
 
 def git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, encoding="utf-8", errors="replace")
 
 
 def module_version(module_dir: Path) -> str:
@@ -167,7 +190,7 @@ def module_files(module_dir: Path, project_dir: Path) -> dict[str, Path]:
         for src, rel in _walk(overrides):
             files[f"_bmad/custom/{rel.as_posix()}"] = src
     hooks = module_dir / "module" / "hooks"
-    if hooks.is_dir():
+    if hooks.is_dir() and not on_windows():  # no L2 git hooks on Windows (ADR 0009)
         for src, rel in _walk(hooks):
             files[f"{HOOKS_REL}/{rel.as_posix()}"] = src
     return files
@@ -210,7 +233,7 @@ def read_manifest(project_dir: Path) -> dict:
     if not path.is_file():
         return {"version": None, "files": {}}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as err:
         raise SetupError(f"{MANIFEST_REL} is not valid JSON; fix or delete it") from err
     return {"version": data.get("version"), "files": dict(data.get("files", {}))}
@@ -259,6 +282,8 @@ def make_plan(project_dir: Path, module_dir: Path, force: bool = False) -> Plan:
     for rel, recorded in installed.items():
         if rel in plan.files:
             continue
+        if on_windows() and rel.startswith(HOOKS_REL + "/"):
+            continue  # installed on another OS; Windows installs and removes no git hooks
         dest = project_dir / rel
         if not dest.exists():
             continue
@@ -275,15 +300,21 @@ def make_plan(project_dir: Path, module_dir: Path, force: bool = False) -> Plan:
             f"skip     {SETTINGS_REL}: no .claude/skills folder or no tool-guard skill, so no Claude Code hooks"
         )
 
-    hooks_now = git(["config", "--local", "core.hooksPath"], project_dir).stdout.strip() or None
-    plan.hooks_path_now = hooks_now
-    if hooks_now != HOOKS_REL:
-        plan.hooks_path_ok = False
-        plan.hooks_path_conflict = hooks_now is not None and not force
+    if on_windows():
+        plan.notes.append("note     L2 git hooks are not installed on Windows (the Claude Code hooks are)")
+    else:
+        hooks_now = git(["config", "--local", "core.hooksPath"], project_dir).stdout.strip() or None
+        plan.hooks_path_now = hooks_now
+        if hooks_now != HOOKS_REL:
+            plan.hooks_path_ok = False
+            plan.hooks_path_conflict = hooks_now is not None and not force
 
     gitignore = project_dir / ".gitignore"
-    lines = gitignore.read_text().splitlines() if gitignore.is_file() else []
+    lines = gitignore.read_text(encoding="utf-8").splitlines() if gitignore.is_file() else []
     plan.gitignore_ok = GITIGNORE_LINE in (line.strip() for line in lines)
+    gitattributes = project_dir / ".gitattributes"
+    present = gitattributes.read_text(encoding="utf-8").splitlines() if gitattributes.is_file() else []
+    plan.gitattributes_missing = [line for line in GITATTRIBUTES_LINES if line not in (p.strip() for p in present)]
     return plan
 
 
@@ -312,7 +343,7 @@ def apply_plan(plan: Plan, project_dir: Path) -> None:
         settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text(plan.settings_new, encoding="utf-8")
 
-    if not plan.hooks_path_ok and not plan.hooks_path_conflict:
+    if not on_windows() and not plan.hooks_path_ok and not plan.hooks_path_conflict:
         (project_dir / HOOKS_REL).mkdir(parents=True, exist_ok=True)
         result = git(["config", "--local", "core.hooksPath", HOOKS_REL], project_dir)
         if result.returncode != 0:
@@ -320,14 +351,26 @@ def apply_plan(plan: Plan, project_dir: Path) -> None:
 
     if not plan.gitignore_ok:
         gitignore = project_dir / ".gitignore"
-        text = gitignore.read_text() if gitignore.is_file() else ""
+        text = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
         if text and not text.endswith("\n"):
             text += "\n"
-        gitignore.write_text(f"{text}# bmad-guard local event queue\n{GITIGNORE_LINE}\n")
+        gitignore.write_text(f"{text}# bmad-guard local event queue\n{GITIGNORE_LINE}\n", encoding="utf-8")
+
+    if plan.gitattributes_missing:
+        gitattributes = project_dir / ".gitattributes"
+        text = gitattributes.read_text(encoding="utf-8") if gitattributes.is_file() else ""
+        if text and not text.endswith("\n"):
+            text += "\n"
+        block = "".join(f"{line}\n" for line in plan.gitattributes_missing)
+        gitattributes.write_text(f"{text}{GITATTRIBUTES_COMMENT}\n{block}", encoding="utf-8", newline="\n")
 
     manifest_path = project_dir / MANIFEST_REL
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps({"version": plan.version, "files": dict(sorted(manifest.items()))}, indent=2))
+    manifest_path.write_text(
+        json.dumps({"version": plan.version, "files": dict(sorted(manifest.items()))}, indent=2),
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def _prune_empty_dirs(folder: Path, stop: Path) -> None:
@@ -349,6 +392,8 @@ def describe(plan: Plan) -> list[str]:
         lines.append(f"set      core.hooksPath = {HOOKS_REL}")
     if not plan.gitignore_ok:
         lines.append(f"append   .gitignore: {GITIGNORE_LINE}")
+    if plan.gitattributes_missing:
+        lines.append(f"append   .gitattributes: {len(plan.gitattributes_missing)} line(s) to keep the guard files LF")
     lines += plan.notes
     kept = sum(1 for a in plan.actions if a.kind == "keep")
     conflicts = len(plan.conflicts()) + plan.hooks_path_conflict  # the core.hooksPath line above is a conflict too
@@ -371,6 +416,8 @@ class Removal:
     unset_hooks_path: bool = False
     gitignore_new: str | None = None
     gitignore_delete: bool = False
+    gitattributes_new: str | None = None
+    gitattributes_delete: bool = False
     notes: list[str] = field(default_factory=list)
 
     def conflicts(self) -> list[Action]:
@@ -451,7 +498,7 @@ def plan_removal_gitignore(removal: Removal, project_dir: Path, force: bool) -> 
     path = project_dir / ".gitignore"
     if not path.is_file():
         return
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     drop: set[int] = set()
     for i, line in enumerate(lines):
@@ -477,6 +524,41 @@ def plan_removal_gitignore(removal: Removal, project_dir: Path, force: bool) -> 
         removal.actions[-1] = Action("remove", ".gitignore", f"nothing else in it; remove {GITIGNORE_LINE}")
 
 
+def plan_removal_gitattributes(removal: Removal, project_dir: Path, force: bool) -> None:
+    """Remove the comment setup wrote and the lines right after it that are ours. The same lines without that comment
+    were the project's own: kept, unless --force."""
+    path = project_dir / ".gitattributes"
+    if not path.is_file():
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    drop: set[int] = set()
+    for i, line in enumerate(lines):
+        if line.strip() != GITATTRIBUTES_COMMENT:
+            continue
+        drop.add(i)
+        j = i + 1
+        while j < len(lines) and lines[j].strip() in GITATTRIBUTES_LINES:
+            drop.add(j)
+            j += 1
+    own = {i for i, line in enumerate(lines) if line.strip() in GITATTRIBUTES_LINES}
+    if own - drop and not force:
+        removal.notes.append(
+            "keep     .gitattributes: lines like ours are there without setup's comment line, so they are yours "
+            "(--force removes them)"
+        )
+    elif force:
+        drop |= own
+    if not drop:
+        return
+    kept = [line for i, line in enumerate(lines) if i not in drop]
+    removal.actions.append(Action("update", ".gitattributes", "remove the bmad-guard lines"))
+    if any(line.strip() for line in kept):
+        removal.gitattributes_new = "\n".join(kept) + "\n"
+    else:
+        removal.gitattributes_delete = True
+        removal.actions[-1] = Action("remove", ".gitattributes", "nothing else in it; remove the bmad-guard lines")
+
+
 def make_removal(project_dir: Path, module_dir: Path, force: bool = False) -> Removal:
     check_project(project_dir, module_dir)
     path = project_dir / MANIFEST_REL
@@ -495,6 +577,7 @@ def make_removal(project_dir: Path, module_dir: Path, force: bool = False) -> Re
     elif hooks_now is not None:
         removal.notes.append(f"keep     core.hooksPath is '{hooks_now}': not ours, left as it is")
     plan_removal_gitignore(removal, project_dir, force)
+    plan_removal_gitattributes(removal, project_dir, force)
     if (project_dir / ".bmad-guard").exists():
         removal.notes.append(
             "keep     .bmad-guard/ (the local event queue; setup did not create it). Delete it by hand if you want."
@@ -539,7 +622,12 @@ def apply_removal(removal: Removal, project_dir: Path) -> None:
     if removal.gitignore_delete:
         gitignore.unlink()
     elif removal.gitignore_new is not None:
-        gitignore.write_text(removal.gitignore_new)
+        gitignore.write_text(removal.gitignore_new, encoding="utf-8")
+    gitattributes = project_dir / ".gitattributes"
+    if removal.gitattributes_delete:
+        gitattributes.unlink()
+    elif removal.gitattributes_new is not None:
+        gitattributes.write_text(removal.gitattributes_new, encoding="utf-8", newline="\n")
     manifest = project_dir / MANIFEST_REL
     manifest.unlink()
     _prune_dirs(manifest.parent, project_dir)
@@ -607,15 +695,14 @@ def load_events(module_dir: Path):
 
 
 def credentials_file() -> Path:
-    return Path(os.environ.get("HOME") or Path.home()) / CREDENTIALS_REL
+    """On Windows the home folder is USERPROFILE (`Path.home()`): in Git Bash HOME can be `/c/Users/x` (ADR 0009)."""
+    return (Path.home() if on_windows() else Path(os.environ.get("HOME") or Path.home())) / CREDENTIALS_REL
 
 
 def credential_report(module_dir: Path) -> list[str]:
-    """Lines for `--check`: the Windows warning (D10), and a note or a problem about the per-user credential file.
-    Never reads the key into the output. Sending is optional, so a missing file is only a note."""
-    lines = []
-    if sys.platform == "win32":
-        lines.append("warning  Windows is not supported yet (macOS and Linux only; Phase 3 decision D10)")
+    """Lines for `--check`: a note or a problem about the per-user credential file. Never reads the key into the
+    output. Sending is optional, so a missing file is only a note."""
+    lines: list[str] = []
     events = load_events(module_dir)
     if events is None:
         return lines
@@ -629,6 +716,81 @@ def credential_report(module_dir: Path) -> list[str]:
             "(sending is optional; see docs/guides/install.md)"
         )
     return lines
+
+
+# ---------------------------------------------------------------- Windows checks (GUARD-3 T9, ADR 0009)
+
+PYTHON3_FIX = (
+    "copy python.exe to python3.exe in the same folder (the folder `where python` shows), turn off the Microsoft Store "
+    "aliases for python (Settings > Apps > Advanced app settings > App execution aliases), then open a new Git Bash"
+)
+
+
+def find_git_bash(env=None, which=None, is_file=None) -> str | None:
+    """bash.exe of Git for Windows: CLAUDE_CODE_GIT_BASH_PATH, the folder git.exe belongs to, or the usual folders. Not
+    the `bash.exe` of WSL in System32 (that is a different shell)."""
+    env = os.environ if env is None else env
+    which, is_file = which or shutil.which, is_file or os.path.isfile
+    found = []
+    if env.get("CLAUDE_CODE_GIT_BASH_PATH"):
+        found.append(env["CLAUDE_CODE_GIT_BASH_PATH"])
+    git_exe = which("git")
+    if git_exe:
+        root = os.path.dirname(os.path.dirname(git_exe))  # ...\Git\cmd\git.exe -> ...\Git
+        found += [os.path.join(root, "bin", "bash.exe"), os.path.join(os.path.dirname(root), "bin", "bash.exe")]
+    for base in (env.get("ProgramFiles"), env.get("ProgramFiles(x86)"), env.get("LOCALAPPDATA")):
+        if base:
+            found += [
+                os.path.join(base, "Git", "bin", "bash.exe"),
+                os.path.join(base, "Programs", "Git", "bin", "bash.exe"),
+            ]
+    return next((path for path in found if is_file(path)), None)
+
+
+def windows_report(runner=None, find=None) -> tuple[list[str], bool]:
+    """Lines for `--check` on Windows and whether it is all right: Git Bash is there, and `python3` in Git Bash is
+    Python 3.10 or later (the hook command is `python3`). Nothing here has run on a real machine."""
+    runner, find = runner or subprocess.run, find or find_git_bash
+    bash = find()
+    if bash is None:
+        return [
+            "problem  Git for Windows (bash.exe) was not found. Claude Code runs the hooks and the Bash tool in Git "
+            "Bash. Install Git for Windows, or set CLAUDE_CODE_GIT_BASH_PATH to its bash.exe"
+        ], False
+    lines = [f"ok       Git Bash: {bash}"]
+    probe = 'python3 -c "import sys; print(sys.version_info[:2])"'
+    try:
+        out = runner([bash, "-c", probe], capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+    except (OSError, subprocess.SubprocessError) as err:
+        return [*lines, f"problem  could not run Git Bash ({type(err).__name__}). Fix: {PYTHON3_FIX}"], False
+    match = re.search(r"\((\d+), (\d+)\)", out.stdout or "")
+    if out.returncode != 0 or match is None:
+        return [
+            *lines,
+            f"problem  python3 does not work in Git Bash (not found, or the Microsoft Store stub). Fix: {PYTHON3_FIX}",
+        ], False
+    version = (int(match.group(1)), int(match.group(2)))
+    if version < MIN_PYTHON:
+        return [
+            *lines,
+            f"problem  python3 in Git Bash is {version[0]}.{version[1]}; the hooks need "
+            f"{MIN_PYTHON[0]}.{MIN_PYTHON[1]} or later. Install a newer Python and make python3 point to it: "
+            + PYTHON3_FIX,
+        ], False
+    return [*lines, f"ok       python3 in Git Bash: {version[0]}.{version[1]}"], True
+
+
+def gitattributes_report(project_dir: Path, plan: Plan) -> list[str]:
+    """A line when core.autocrlf is on and our .gitattributes lines are missing (the guard files may come out CRLF)."""
+    if not plan.gitattributes_missing:
+        return []
+    value = git(["config", "core.autocrlf"], project_dir).stdout.strip().lower()
+    if value != "true":
+        return []
+    return [
+        "warning  core.autocrlf is true and .gitattributes has no bmad-guard lines: a checkout can turn the guard "
+        "files into CRLF, and their hashes then differ from the manifest. Run setup without --check"
+    ]
 
 
 def _clean_value(name: str, value: str) -> str:
@@ -653,7 +815,8 @@ def write_credentials(endpoint: str, user: str, key: str, force: bool, module_di
         if problem and not force:
             return 1, [f"conflict {shown}: {problem}", "use --force to replace it"]
         if not problem and old == new:
-            return 0, [f"keep     {shown}", "done"]
+            acl = restrict_windows_acl(path.parent, path) if on_windows() else []  # run again to repair the access
+            return 0, [f"keep     {shown}", *acl, "done"]
         if not problem and not force:
             differs = ", ".join(name for name in new if old.get(name) != new[name])
             return 1, [f"conflict {shown} (differs in: {differs}); use --force to replace it"]
@@ -668,7 +831,7 @@ def write_credentials(endpoint: str, user: str, key: str, force: bool, module_di
     temp = folder / f".credentials.{os.getpid()}.tmp"
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -678,19 +841,47 @@ def write_credentials(endpoint: str, user: str, key: str, force: bool, module_di
             temp.unlink()
         raise
     lines = [f"{kind:8} {shown}"]
+    if on_windows():
+        lines += restrict_windows_acl(folder, path)
     _, problem = events.read_credential_file(path)  # what the sender will see
     if problem:
         return 1, [*lines, f"problem  {problem}"]
     return 0, [*lines, "done"]
 
 
-def credentials_main(args: argparse.Namespace) -> int:
-    if sys.platform == "win32":
-        print(
-            "bmad-guard setup: Windows is not supported yet (macOS and Linux only; Phase 3 decision D10)",
-            file=sys.stderr,
+def restrict_windows_acl(folder: Path, path: Path, runner=None, user: str | None = None) -> list[str]:
+    """Windows has no mode bits: take the inherited access off the folder and the file and give it to this user only
+    (`icacls`). Best effort: the result is reported, and the exit code does not depend on it. The sender does not read
+    the ACL (ADR 0009). Never prints the key."""
+    runner, user = runner or subprocess.run, user or os.environ.get("USERNAME", "")
+    if not user:
+        return [
+            "warning  icacls skipped: USERNAME is not set. Limit the folder to your user by hand "
+            "(docs/guides/install.md)"
+        ]
+    lines = []
+    for what, item, grant in (("folder", folder, f"{user}:(OI)(CI)F"), ("file", path, f"{user}:F")):
+        try:
+            out = runner(
+                ["icacls", str(item), "/inheritance:r", "/grant:r", grant],
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            ok = out.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        lines.append(
+            f"acl      {what}: only {user} has access (icacls)"
+            if ok
+            else f"warning  icacls failed on the {what}: it may be readable by others. Run icacls by hand "
+            "(docs/guides/install.md)"
         )
-        return 2
+    return lines
+
+
+def credentials_main(args: argparse.Namespace) -> int:
     try:
         endpoint = _clean_value("endpoint", args.endpoint)
         user = _clean_value("user", args.user)
@@ -761,12 +952,22 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
 
     if args.check:
+        windows_ok = True
+        if on_windows():
+            lines, windows_ok = windows_report()
+            for line in lines:
+                print(line)
+        for line in gitattributes_report(project_dir, plan):
+            print(line)
         for line in credential_report(module_dir):
             print(line)
         for line in machine_report(module_dir, plan.version_now, args.machine_dir):
             print(line)
-        print("up to date" if plan.up_to_date() else "NOT up to date: run setup_guard.py without --check")
-        return 0 if plan.up_to_date() else 1
+        up_to_date = plan.up_to_date()
+        print("up to date" if up_to_date else "NOT up to date: run setup_guard.py without --check")
+        if not windows_ok:
+            print("Windows check failed: fix the lines marked 'problem' above")
+        return 0 if up_to_date and windows_ok else 1
     if args.dry_run:
         for line in plan.settings_diff:
             print(line)
