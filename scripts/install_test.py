@@ -11,7 +11,9 @@ hook wiring in .claude/settings.json is checked after setup and after every BMAD
   upgrade  BMAD 6.11.0 -> setup_guard.py -> install 6.12.4 over it; guard files untouched; overrides resolve.
 
 The fresh stage ends with smoke calls for every guard. The pre-commit hook (Phase 2, T6) is tested through real
-`git commit` calls in the sandbox, so git starts the installed hook through core.hooksPath.
+`git commit` calls in the sandbox, so git starts the installed hook through core.hooksPath. The pre-push hook (T7) is
+tested through real `git push` calls to a bare remote in the temp folder: one block (no review record), then one allow
+(a review record made by the tool-guard hook from a fresh session, committed on its own).
 
 Needs network (npx downloads bmad-method@6.12.4 and @6.11.0), Node (npx), uv and git. uv also provides
 a Python 3.11+ to read the override TOML files. Fake data only. Not part of `python3 -m unittest discover`.
@@ -66,6 +68,7 @@ NO_ARGPARSE_SMOKE = {
     "document_guard.py": None,  # library
     "bash_write_guard.py": None,  # library
     "content_scan.py": None,  # library (run through pre_tool_use.py)
+    "review_record.py": (["--help"], ""),  # the hook reads the same arguments, so no argparse: --help exits 0
     "document_text.py": None,  # library
     "pre_tool_use.py": (
         [],
@@ -494,6 +497,7 @@ def check_smokes(runner: Runner, stage: str, sandbox: Path) -> None:
     check_write_gate(runner, stage, sandbox)
     check_content_scan(runner, stage, sandbox)
     check_pre_commit(runner, stage, sandbox)
+    check_pre_push(runner, stage, sandbox)
 
 
 # (label, tool, tool input, expected exit code, expected reason code or "") for the PreToolUse hook as Claude Code
@@ -744,6 +748,79 @@ def check_pre_commit(runner: Runner, stage: str, sandbox: Path) -> None:
         "the hook queued its events",
         "COMMIT_SECRET" in codes and "COMMIT_ALLOWED" in codes,
         ", ".join(dict.fromkeys(codes)),
+    )
+
+
+def check_pre_push(runner: Runner, stage: str, sandbox: Path) -> None:
+    """The pre-push hook end to end, through real pushes to a bare remote: source commits with no review record are
+    blocked; after a review recorded by the tool-guard hook in a fresh session, and committed on its own, the push goes
+    through. The remote is a folder next to the sandbox; nothing leaves the temp folder."""
+    hook = sandbox / setup_guard.HOOKS_REL / "pre-push"
+    runner.add(
+        stage, "pre-push hook is installed and executable", os.access(hook, os.X_OK), str(hook.relative_to(sandbox))
+    )
+    remote = sandbox.parent / f"{sandbox.name}-remote.git"
+    proc, _ = runner.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], sandbox)
+    git(runner, sandbox, "remote", "add", "origin", str(remote))
+    proc, _ = runner.run(["git", "push", "-q", "--no-verify", "origin", "HEAD:refs/heads/main"], sandbox)
+    if not runner.add(stage, "set-up: the sandbox history is on the bare remote", proc.returncode == 0, tail(proc)):
+        return
+    git(runner, sandbox, "checkout", "-q", "-b", "smoke-push")
+    path = sandbox / "src/push-smoke.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("print('fake')\n", encoding="utf-8")
+    git(runner, sandbox, "add", "--", "src/push-smoke.py")
+    proc, _ = runner.run(["git", "commit", "-q", "-m", "source change"], sandbox)
+    code_sha = git(runner, sandbox, "rev-parse", "HEAD").stdout.strip()
+    runner.add(stage, "set-up: a source commit goes through the pre-commit hook", proc.returncode == 0, tail(proc))
+
+    proc, took = runner.run(["git", "push", "origin", "smoke-push"], sandbox)
+    ok = proc.returncode != 0 and "PUSH_NO_RECORD" in proc.stderr
+    runner.add(stage, "git push of source with no review record is blocked by the pre-push hook", ok, tail(proc), took)
+
+    command = (
+        f'python3 "{sandbox}/.claude/skills/tool-guard/scripts/review_record.py" --story smoke-story --verdict pass'
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "session_id": "s-smoke-review",
+        "cwd": str(sandbox),
+    }
+    hook_script = sandbox / ".claude/skills/tool-guard/scripts/pre_tool_use.py"
+    proc, took = runner.run([sys.executable, str(hook_script)], sandbox, stdin=json.dumps(payload))
+    record = sandbox / "_bmad-output/guard/reviews/smoke-story.json"
+    try:
+        data = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    ok = (
+        proc.returncode == 0
+        and data.get("sessions") == ["s-smoke-review"]
+        and data.get("reviewed_sha") == code_sha
+        and data.get("verdict") == "pass"
+    )
+    runner.add(stage, "the tool-guard hook writes the review record with the hook's session id", ok, tail(proc), took)
+
+    git(runner, sandbox, "add", "--", "_bmad-output/guard")
+    proc, _ = runner.run(["git", "commit", "-q", "-m", "review record"], sandbox)
+    runner.add(stage, "the review record is committed through the pre-commit hook", proc.returncode == 0, tail(proc))
+
+    proc, took = runner.run(["git", "push", "origin", "smoke-push"], sandbox)
+    runner.add(
+        stage,
+        "git push with a valid review record goes through the pre-push hook",
+        proc.returncode == 0,
+        tail(proc),
+        took,
+    )
+    codes = [e.get("reason_code") for e in queue_lines(sandbox) if e.get("guard") == "git-hooks"]
+    runner.add(
+        stage,
+        "the pre-push hook queued its events",
+        "PUSH_NO_RECORD" in codes and "PUSH_ALLOWED" in codes,
+        ", ".join(dict.fromkeys(c for c in codes if c.startswith("PUSH_"))),
     )
 
 

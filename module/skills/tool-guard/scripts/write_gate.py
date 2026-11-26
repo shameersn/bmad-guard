@@ -394,6 +394,38 @@ def record_reasons(root: Path, outcome: Outcome, payload: dict) -> list[hc.Verdi
 # --- which writes are gated ----------------------------------------------------------------------------
 
 
+def allowed_entries(project_paths: tuple[str, ...]) -> list[tuple[bool, tuple[str, ...]]]:
+    """The built-in allowed paths and the project's (`write_gate_allowed_paths`) as (anywhere, folder parts)."""
+    entries = [(False, (name,)) for name in ALLOWED_PATHS]
+    for entry in project_paths:
+        anywhere = entry.startswith("**/")
+        parts = (entry[3:] if anywhere else entry).split("/")
+        entries.append((anywhere, tuple(p.lower() for p in parts if p)))
+    return entries
+
+
+def in_allowed(entries: list[tuple[bool, tuple[str, ...]]], parts: tuple[str, ...]) -> bool:
+    """True when a project-relative path (as parts) is in an allowed path: the write gate does not ask about it."""
+    low = tuple(p.lower() for p in parts)
+    for anywhere, folder in entries:
+        if low[: len(folder)] == folder or (
+            anywhere and any(low[i : i + len(folder)] == folder for i in range(len(low)))
+        ):
+            return True
+    return False
+
+
+def source_checker(root: Path):
+    """A function that says whether a project-relative path (with /) is outside the allowed paths, so a change to it is
+    a source change. The pre-push hook (T7) uses it. A project extension file that cannot be read adds nothing."""
+    try:
+        extra = gc.load(root).write_allowed
+    except gc.ExtensionError:
+        extra = ()
+    entries = allowed_entries(extra)
+    return lambda rel: not in_allowed(entries, tuple(p for p in rel.split("/") if p))
+
+
 class Paths:
     """Decides, for one call, whether a path needs the gate: inside the project, not allowed, not scratch."""
 
@@ -409,20 +441,10 @@ class Paths:
             commands, scratch, hosts = gc.load_builtin()
             rules = gc.Rules(tuple(commands), tuple(scratch), tuple(hosts), ())
         self.ctx = cg.make_context(payload, root, rules)
-        self.allowed = [(False, (name,)) for name in ALLOWED_PATHS]
-        for entry in rules.write_allowed:
-            anywhere = entry.startswith("**/")
-            parts = (entry[3:] if anywhere else entry).split("/")
-            self.allowed.append((anywhere, tuple(p.lower() for p in parts if p)))
+        self.allowed = allowed_entries(rules.write_allowed)
 
     def _allowed(self, parts: tuple[str, ...]) -> bool:
-        low = tuple(p.lower() for p in parts)
-        for anywhere, folder in self.allowed:
-            if low[: len(folder)] == folder or (
-                anywhere and any(low[i : i + len(folder)] == folder for i in range(len(low)))
-            ):
-                return True
-        return False
+        return in_allowed(self.allowed, parts)
 
     def gated(self, path: str, cwd: str | None = None, folder: bool = False) -> bool:
         """True when a write to this path (absolute, or relative to `cwd`) needs the gate. `folder`: the path is the

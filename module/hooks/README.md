@@ -7,9 +7,9 @@ Plain Python. No Node, no Husky. `scripts/setup_guard.py` copies every file in t
 | `pre-commit` | The hook git runs. A thin launcher: it loads `guard_pre_commit.py` and blocks the commit if that fails to load, or if `python3` is older than 3.10 (the macOS system Python can be 3.9; the message says so). |
 | `guard_pre_commit.py` | The three checks (scan, approval fields, tech stack) and the messages. |
 | `guard_tech_stack.py` | The tech-stack list and the dependency-file readers. Pure text logic. |
-| `guard_hook_lib.py` | Git helpers, loading of the guard skills, local events. Shared with the pre-push hook (T7). |
-
-`pre-push` (T7) is not here yet.
+| `pre-push` | The hook git runs on a push (T7). The same kind of launcher; it loads `guard_pre_push.py`. |
+| `guard_pre_push.py` | The review-record check and its messages. |
+| `guard_hook_lib.py` | Git helpers, loading of the guard skills, local events. Shared by both hooks. |
 
 ## pre-commit
 
@@ -86,4 +86,50 @@ python = [
 - **Speed:** about 0.2 s for a small commit, plus about 0.6 s per MiB of added text. A Markdown file costs two or three git calls. There is no limit on the total size of a commit, only on one file (1 MiB).
 - **Not read:** `pyproject.toml` with dependencies as an inline table of `[tool.poetry]` or under a different table, `Pipfile`, `setup.py`, `.csproj` and others (warned). A dependency that a requirements line pulls in with `-r other.txt` is read when `other.txt` itself is staged.
 
-Tests: `tests/test_pre_commit.py` (real throwaway git repositories, real Warden scripts), `tests/test_tech_stack.py`, `tests/test_setup_guard.py`, and the install test (`scripts/install_test.py`) commits through the installed hook.
+## pre-push
+
+A push that sends source commits needs an independent review on record. Exit 0: the push goes ahead. Exit 1: the push is blocked, and **one message lists every reason** (it names the ref). Any failure of the hook itself blocks (`PUSH_ERROR`, an error type, never text). The hook changes nothing.
+
+How it works, in order, for each ref in git's input (`local-ref local-sha remote-ref remote-sha`):
+
+1. **A delete** (local sha all zeros), or an object that is not a commit: allowed, nothing to check.
+2. **The pushed commits** are the commits the remote does not have: `git rev-list <local> --not <remote sha> --remotes=<remote>`. A new branch (remote sha all zeros) is the same call without the remote sha, so only commits that no tracking ref of this remote has are looked at. A remote sha that is not known locally is ignored. An annotated tag is followed to its commit.
+3. **Source commits.** A pushed commit is a source commit when it changes a file outside the write gate's allowed paths (`_bmad/`, `_bmad-output/`, `docs/`, `.claude/`, `.agents/`, `.bmad-guard/` and the project's `write_gate_allowed_paths`; the hook calls `write_gate.source_checker`, so there is one definition). A merge commit has no changes of its own and is not one. No source commit: allowed (`PUSH_NOTHING_TO_CHECK`).
+4. **Records are read from the pushed tree** (`git cat-file blob <sha>:<path>`), never from the work tree. A record that is not committed does not count; a work-tree edit after the commit changes nothing.
+5. **A review record is valid** when its verdict is `pass`, none of its sessions is a build session, and its `reviewed_sha` is the pushed commit or one of its ancestors (not stale).
+6. **A source commit is covered** when some valid record's `reviewed_sha` is that commit or a descendant of it. A source commit that is not covered blocks the push. A commit that changes no source (the commit that holds the record, documents) never needs a record, so "review, then commit the record" works.
+
+| Rule id | Result | What |
+|---|---|---|
+| `PUSH_NO_RECORD` | block | Source commits are not covered, and the pushed commits hold no review record. |
+| `PUSH_VERDICT_NOT_PASS` | block | A review record in the push has a verdict other than `pass` (`fail`, or anything else). |
+| `PUSH_SAME_SESSION` | block | A review record in the push names a session that is in a build record (`_bmad-output/guard/builds/`). |
+| `PUSH_RECORD_STALE` | block | A review record in the push points at a commit that is not in the pushed history (rebase, amend, another branch, an unknown sha). |
+| `PUSH_COMMITS_AFTER_REVIEW` | block | A valid record exists, but source commits come after the reviewed commit (or were never in it). The message names up to five. |
+| `PUSH_RECORD_UNREADABLE` | block | A review record in the push is not in the expected format (story, a 40 or 64 hex `reviewed_sha`, sessions, verdict). |
+| `PUSH_BUILD_UNREADABLE` | block | A build record in the pushed tree cannot be read, so the reviewer cannot be compared with the builders. Always a block when the push has source commits. |
+| `PUSH_ERROR` | block | The hook could not run (a guard skill is missing, git failed, bad input from git). |
+| `PUSH_ALLOWED`, `PUSH_NOTHING_TO_CHECK` | event only | The push may go ahead. |
+
+### Design choices
+
+- **How a commit is mapped to a story: it is not.** Coverage is by history. A review record covers every source commit that is an ancestor of its `reviewed_sha`; the story name in the record is for people. No commit trailer is needed, and nothing the model types decides which commits a record covers. A record covers all earlier unpushed source commits, so a branch with two stories can be covered by one review of its tip; the reviewer is then expected to have looked at both (`bmad-code-review` reviews a diff against the baseline).
+- **Same-session check against ALL build records,** not only the record's own story. The story in a review record is typed by the model; a build session could record its review under another story and escape a per-story comparison. Cost: a session that built any story in the repo cannot review any story. That matches the advice (review in a fresh session), and session ids are never reused.
+- **Only records committed in the push get a reason of their own.** An old record for another story, left in the tree (stale after a squash merge, say), would otherwise block every later push. A valid old record still counts as coverage; a bad one that is not in the push is ignored.
+- **Read the pushed tree, not the work tree.** What is pushed is what is checked. The price: the review record must be committed (the override tells the developer so), in its own commit, after the code.
+- **Which verdicts pass.** Only the exact value `pass`. `fail` and any other word block.
+- **Events: local queue only**, same as pre-commit. Stage `pre-push`, the rule id, the commit count and the source commit count, and the rule ids as detail. No ref name, no story, no SHA, no session id, no path.
+- **The tool-guard skill must be installed.** The hook loads `write_gate.py` from `.claude/skills` (or `.agents/skills`) for the source definition. If it is missing the push is blocked with `PUSH_ERROR` and a message to run the setup script.
+
+### Known limits
+
+- **A local hook can be skipped** (`git push --no-verify`, another git client, setup not run). T2 blocks `--no-verify` from the agent. CI is a later phase (ADR 0002).
+- **A forged record.** Anyone who can write a file and commit it can write a record with any session id. The hook (`review_record.py`) is the only honest writer, and the agent's file and shell writes to `_bmad-output/guard/` are blocked, but `python -c` or a script file can write it (`guard-rules.md`, "Review record limits"). A person can always forge it: the push check is a guard rail for the agent, not a proof against a developer.
+- **Subagent session ids are not verified** (`docs/hooks.md`, open check 7). Run the review in a fresh top-level session.
+- **A missing or deleted build record** leaves nothing to compare. Code that was written by hand, or before the write gate was on, has no build session; the push then needs only a valid review record.
+- **Rebase, amend, squash:** commit SHAs change, so the record is stale (`PUSH_RECORD_STALE`) and the review is run again. A merge commit with conflict edits is not seen as source.
+- **A remote with no refs** (the first push of a long history) checks every commit in it.
+- **Another remote:** commits that the named remote lacks are checked even if `origin` has them. Pushing to a URL (not a remote name) uses all remote-tracking refs.
+- **Speed:** one git call per pushed commit (`diff-tree`), a few more per push. A push of a thousand new commits takes a few seconds.
+
+Tests: `tests/test_pre_commit.py` (real throwaway git repositories, real Warden scripts), `tests/test_tech_stack.py`, `tests/test_pre_push.py` (real repositories and a real bare remote, real `git push`), `tests/test_review_record.py`, `tests/test_setup_guard.py`, and the install test (`scripts/install_test.py`): it commits through the installed pre-commit hook and pushes to a bare remote through the installed pre-push hook (one block, one allow).

@@ -1,11 +1,11 @@
 ---
 name: guard-rules
-description: The command, path, document, write gate and content scan rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
+description: The command, path, document, write gate, review record and content scan rules that tool-guard enforces, how a project adds rules, and what the guard cannot see.
 ---
 
 # Guard rules
 
-`pre_tool_use.py` runs six guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer. A guard may also **warn**: the call goes ahead, and the developer and the model get one message (only the content scan does this today; see "Content scan").
+`pre_tool_use.py` runs seven guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer. A guard may also **warn**: the call goes ahead, and the developer and the model get one message (only the content scan does this today; see "Content scan").
 
 | Guard | Tools | Rules |
 |---|---|---|
@@ -15,6 +15,7 @@ description: The command, path, document, write gate and content scan rules that
 | `bash-write-guard` | Bash | the same protected files, written from the shell |
 | `write-gate` | Write, Edit, MultiEdit, NotebookEdit, and the write targets of Bash | source writes without an approved plan and a ready story (see "Write gate") |
 | `content-scan` | Write, Edit, MultiEdit, NotebookEdit, and text that a Bash command writes to a file | secrets and PHI in the new text (see "Content scan") |
+| `review-record` | Bash | writes the independent review's record when the call is the one plain record command (see "Review record") |
 
 Each rule has a stable id. The id is the reason code in the message and in the event. Events carry the rule id, the guard name, the tool name and the session id. They never carry the command text, a file path or file content.
 
@@ -173,10 +174,48 @@ The first check is the plan (Sentry's logic, `hash_mode = build`: the plan's app
 - **Bash is best effort.** Only explicit targets are seen. `python3 -c`, a script file, `npm install`, `make`, `mkdir`, `touch`, `node -e`, `awk -i inplace`, an editor and a target held in a variable (`> $FILE`) are not seen. With a variable, only a literal folder in front of it counts (`src/$f`).
 - **`cd` is followed in the order of the command**, a subshell is not scoped (`(cd /tmp; ls); echo x > src/a.py` is read as if the `cd` stayed). After a `cd` into a variable, only absolute targets are checked.
 - **Paths outside the project are not gated**, and the project is the folder Claude Code started in (`CLAUDE_PROJECT_DIR`).
-- **Reviewers and subagents** run in the same project. Their session id may be the parent's; this is not checked yet (T7).
+- **Reviewers and subagents** run in the same project. A subagent's `session_id` may be the parent's, or its own: not verified (`docs/hooks.md`, open check 7). See "Review record limits".
 - **`gate: generic` from the shell.** File-tool edits of the marker are blocked (`DOC_APPROVAL_FIELD`). A `sed -i` or `python -c` that adds it is not seen; the T6 pre-commit hook warns about it at commit (`COMMIT_GATE_GENERIC`). It cannot block: a person sets the marker too, and the hook cannot tell who typed it. ADR 0004 still asks to review the marker's use in the pilot.
 - **A project with a renamed output folder** (not `_bmad-output`) finds no plan, so every source write is blocked until the folder is named `_bmad-output` again.
 - **Test and build commands** that write to a source folder through a tool option (`pytest --junitxml=reports/x.xml`) are not seen; a redirect into a source folder is gated like any write.
+
+## Review record
+
+Written for `review_record.py`. The independent review (the `bmad-code-review` override) ends with one command. The hook writes the record; the command only checks that it did. The pre-push git hook (`module/hooks/README.md`) reads the record.
+
+```
+python3 "<project>/.claude/skills/tool-guard/scripts/review_record.py" --story <story id or story file> --verdict pass|fail
+```
+
+| Rule id | Blocks | Close-but-safe |
+|---|---|---|
+| `REVIEW_IN_SUBAGENT` | the record command when the hook input has `agent_id` (a call from a subagent) | the same command in the top-level session |
+| `REVIEW_NO_SESSION` | the record command when the hook input has no usable `session_id` | - |
+| `REVIEW_NO_COMMIT` | the record command in a project with no commit | - |
+| `REVIEW_RECORD_FAILED` | the record command when the file cannot be written | - |
+
+Event only: `REVIEW_RECORDED` (allow, the verdict as detail, the session id; no story, no SHA, no path).
+
+The record, `_bmad-output/guard/reviews/<story>.json`: `{"story", "reviewed_sha", "sessions", "verdict", "reviewed_at"}`. No content and no path. `reviewed_sha` is `HEAD` of the project at the time of the call. `sessions` has the session id of the hook input. `verdict` is `pass` or `fail`. A later review of the same story replaces the file. The story name is made like the build record's name (`write_gate.story_key`): a plain id stays, a story file becomes its file name.
+
+### Design choices
+
+- **The hook writes the record, not the script.** The script is run by the model through Bash, so the session id it could read (`CLAUDE_CODE_SESSION_ID`) is a value the model can set in its own command. The `PreToolUse` hook gets `session_id` from Claude Code itself (`docs/hooks.md`, section 6). So the hook recognises the call and writes the file with its own `session_id`. The hook never reads `CLAUDE_CODE_SESSION_ID`, and the command accepts no session argument (`--session x` is a bad argument: nothing is written).
+- **Only one plain command is recognised:** `python3` (or `python`, `python3.N`), this very script (a literal path, a relative path from the working folder, or one that starts with `$CLAUDE_PROJECT_DIR` / `${CLAUDE_PROJECT_DIR}`), and `--story` and `--verdict` only. A pipe, `&&`, `;`, `cd`, a redirect, a variable or `$(...)` in the arguments, `python3 -I`, a copy of the script in another folder: not recognised. Nothing is written and the call is not blocked; the command then says "no record was written" and exits 1. A command that is not plain is never half-recorded.
+- **Why the agent cannot write the record itself.** `DOC_GUARD_RECORD` blocks Write, Edit, MultiEdit, NotebookEdit and the shell write targets (redirect, `tee`, `cp`, `mv`, `sed -i`, `rm`, `git checkout` of the path ...) for everything in `_bmad-output/guard/`. Running the script with a faked `CLAUDE_CODE_SESSION_ID` (in the environment or in the command) changes nothing: the hook ignores both. A build session that records its own review gets its own id in the record, and the pre-push hook refuses a reviewer that is a build session.
+- **The record is written when the hook runs, before Claude Code's permission prompt.** If the developer then denies the command, the record still exists. It holds the reviewer's real session and the verdict the reviewer chose, so it cannot help a forger.
+- **Subagents.** If the hook input has `agent_id` (a call from a subagent: Verified in the docs, not run by us), the hook refuses (`REVIEW_IN_SUBAGENT`): the review is recorded from the top-level session. If the field is not there, nothing changes (see the limits).
+- **The command line side is a receipt.** It checks that the record is for this story and verdict, was written in the last 2 minutes and points at the current `HEAD`, and prints the file to commit. It writes nothing, so a model that runs it without the hook (hooks off, a command that is not plain) gets exit 1.
+- **Verdicts.** `pass` only when no `decision-needed` or `patch` finding is left and no unresolved `high` or `medium` finding remains (the test BMAD uses to set the story to `done`); otherwise `fail`. The pre-push hook lets only `pass` through.
+
+### Review record limits
+
+- **The verdict is the reviewer's word.** The hook proves which session recorded the review and which commit it pointed at, not that the review was done well. A fresh session that records `pass` without reviewing is not caught.
+- **`python -c` or a script file can write the record** (the shell guard is best effort; see the limits above). The pre-push hook then sees a record that looks real. An agent that does this works around the guard on purpose; ADR 0002 accepts that. The audit trail is git history and the events.
+- **Subagents (not verified).** `docs/hooks.md` lists `agent_id` and `agent_type` for hook calls inside a subagent. Whether a subagent's `session_id` is the parent's or its own is **not verified** (open check 7). If it is the parent's, a review run by a subagent of the build session has the build session's id: the pre-push hook blocks it (the safe direction), but the same-session check can not tell a subagent from its parent. If it is its own, a subagent of the build session can pass as a different session, and only the `agent_id` rule above stops the record call. Run the review in a fresh top-level session.
+- **A session that applied patches in the review** may have written code for the story (the write gate records its id), and then its own record is refused. Leave the patches as action items, or review again in a new session after they are committed.
+- **Rebase, amend and squash** change commit SHAs: the record is then stale and the review is done again.
+- **A record deleted from a later commit** is not seen by the pre-push hook (it reads the pushed tree only); `DOC_GUARD_RECORD` stops the agent from deleting it.
 
 ## Content scan
 
