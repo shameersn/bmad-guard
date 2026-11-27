@@ -22,10 +22,7 @@ Install Git for Windows (it brings Git Bash), Node.js and Python 3.10 or later. 
 
 Make `python3` work in Git Bash. The python.org installer gives `python.exe` and the `py` launcher, not `python3`. Windows also has a Store alias that only prints a hint.
 
-1. In a normal terminal: `where python`. Note the folder of the first real `python.exe`.
-2. Copy `python.exe` to `python3.exe` in that same folder.
-3. Turn off the Store alias: Settings, Apps, Advanced app settings, App execution aliases, switch off the two `python` entries.
-4. Open a **new** Git Bash and run:
+Do the steps in the [install guide](install.md), "Windows: `python3` in Git Bash" (Store aliases off, `command -v python`, copy to `python3.exe`). Then open a **new** Git Bash and run:
 
 ```bash
 python3 --version
@@ -123,7 +120,7 @@ icacls "%USERPROFILE%\.config\bmad-guard\credentials"
 
 **Expect:** the setup output has `acl      folder: only <you> has access (icacls)` and the same for the file; `icacls` lists only your user; the project `--check` has no `problem` line. Asking Claude to read the file is blocked (`PATH_GUARD_CONFIG`).
 
-- **VERIFY:** that `icacls ... /inheritance:r /grant:r "<user>:(OI)(CI)F"` works as written; what `%USERNAME%` is (a domain account?); that a second run with the same values prints `keep` and runs `icacls` again; that HOME in Git Bash (`echo $HOME`) can differ from `%USERPROFILE%` and the sender still finds the file.
+- **VERIFY:** that the hidden key prompt hides the key in the Git Bash window (mintty) and does not hang; that `icacls ... /inheritance:r /grant:r "<user>:(OI)(CI)F"` works as written; what `%USERNAME%` is (a domain account?); that a second run with the same values prints `keep` and runs `icacls` again; that HOME in Git Bash (`echo $HOME`) can differ from `%USERPROFILE%` and the sender still finds the file.
 
 ## 8. Events: queue, then flush
 
