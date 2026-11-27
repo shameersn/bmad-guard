@@ -1,6 +1,6 @@
 # 0004 — Ready-for-dev gate: counted, not self-scored
 
-- **Status:** Accepted (2026-11-25)
+- **Status:** Accepted (2026-11-25). Epic summary and generic marker changed by 0010 (if accepted).
 - **Date:** 2026-11-24
 - **Project:** Other (Experion, Guarded BMAD pilot)
 - **Deciders:** Shameer (architect), Manesh G, BA team; team approval by PR

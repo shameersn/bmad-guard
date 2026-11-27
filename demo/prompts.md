@@ -22,19 +22,20 @@ Build the fake token first, in a terminal, and keep it in a scratch note: `pytho
 8. **Terminal** (skip PRD, FRDs, architecture, stories): `git switch --discard-changes -C main demo/4-stories`, then `git log --oneline | head`
 8a. **Terminal**: `grep -n '^## \|^### 4\.' _bmad-output/planning-artifacts/frds/F-001/frd.md` (13 sections, `FR-F001-nn` ids), then
     `sed -n '/For the Product Owner/,/^## /p' _bmad-output/planning-artifacts/frds/F-001/frd-review.md` (the disputed finding, kept for the PO)
-8b. **Terminal**: `grep -A2 'Feature:' _bmad-output/planning-artifacts/epics.md | head` (each story names its feature and FR ids)
+8b. **Terminal**: `cat _bmad-output/planning-artifacts/stories/stories.md` (the build order: story ids `F001-01`, `F002-01`, ..., each with its FR ids), then
+    `cat _bmad-output/planning-artifacts/stories/F-001/F001-01-*.md` (a thin story: front matter with `feature` and `requirements`, no acceptance criteria; they are in the FRD)
 
 ## 3. Ready-for-dev gate
 
-9. `Run bmad-build for the story that still has an open question.` → the gate lists the ids (`GATE_READY_OPEN_QUESTIONS` if code is tried)
+9. `Run bmad-build for story F001-01, which still has an open question.` → the gate lists the ids (`GATE_READY_OPEN_QUESTIONS` if code is tried)
 10. `In that story, delete the line for the first open question.` → `DOC_QUESTION_REMOVED`
 11. **Editor, by hand**: add `  Resolved: <answer>. — <your name>, <date>` under each open question. Run the gate again: allowed.
-11a. `Run bmad-build for the first story of F-002, Cancel an appointment.` → the gate blocks on the FRD (`FRD_OPEN_ITEMS`, the open id in F-002's FRD; `GATE_READY_FRD_OPEN_ITEMS` if code is tried). Do not fix it live: answering it edits an approved FRD, so Warden must approve it again.
+11a. `Run bmad-build for story F002-01, the first story of F-002, Cancel an appointment.` → the gate blocks on the FRD (`FRD_OPEN_ITEMS`, the open id in F-002's FRD; `GATE_READY_FRD_OPEN_ITEMS` if code is tried). Do not fix it live: answering it edits an approved FRD, so Warden must approve it again.
 
 ## 4. Code generation
 
 12. `Create app/main.py with a FastAPI app that has one route /health.` (before any plan) → `GATE_NO_ACTIVE_PLAN`
-13. `Run bmad-build for story 1, Book an appointment.` Read the plan. Warden asks two questions: **yes**, **yes**. Code and tests are written.
+13. `Run bmad-build for story F001-01, Book an appointment.` Read the plan (it cites the FR ids and reads the acceptance criteria from the FRD). Warden asks two questions: **yes**, **yes**. Code and tests are written.
 14. **Terminal**: `python3 -m pytest -q`
 15. `Add one line at the end of the Risks section of the plan.` → allowed
 16. `Now add a GET /slots route to app/main.py.` → `GATE_PLAN_CHANGED`
@@ -56,9 +57,9 @@ Fallback: **Terminal** `git switch --discard-changes -C main demo/5-story1-built
 ## 6. Review and push
 
 24. **Terminal**: `git push` → `PUSH_NO_RECORD`
-25. `Run bmad-code-review for story 1.` (same session; leave findings as action items) Then **Terminal**:
+25. `Run bmad-code-review for story F001-01.` (same session; leave findings as action items) Then **Terminal**:
     `git add _bmad-output/guard/reviews/ && git commit -m "Review record (same session)" && git push` → `PUSH_SAME_SESSION`
-26. Quit. Start a new `gclaude`. `Run bmad-code-review for story 1.` Then **Terminal**:
+26. Quit. Start a new `gclaude`. `Run bmad-code-review for story F001-01.` Then **Terminal**:
     `git add _bmad-output/guard/reviews/ && git commit -m "Review record (fresh session)" && git push` → push goes through (`PUSH_ALLOWED`)
 
 Fallback: **Terminal** `git switch --discard-changes -C main demo/6-reviewed`

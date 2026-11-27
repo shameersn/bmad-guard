@@ -39,6 +39,12 @@ epics_dir = "{project-root}/_bmad-output/planning-artifacts/epics"
 # until that FRD exists, is approved and has no open item. Keep in sync with experion-frd's frds_dir.
 frds_dir = "{project-root}/_bmad-output/planning-artifacts/frds"
 
+# Key under which Warden records the approved architecture in _bmad/custom/approval-state.json. A story with
+# `gate: technical` (setup work, `feature: none`, no `requirements`) has no epic summary: it is blocked
+# (ARCH_UNAPPROVED) unless that architecture is approved and unchanged (Sentry's check). The file is the path the
+# approval record holds, so no folder is set here. The write gate reads this key from this file only.
+architecture_doc_type = "architecture"
+
 # Git ref to compare question and assumption ids against; ids present there but gone now count as
 # deleted. Empty = only id gaps are checked (and the story need not be in git).
 baseline = "HEAD"

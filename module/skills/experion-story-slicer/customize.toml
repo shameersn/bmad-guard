@@ -1,0 +1,63 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for experion-story-slicer.
+# Team overrides:     {project-root}/_bmad/custom/experion-story-slicer.toml
+# Personal overrides: {project-root}/_bmad/custom/experion-story-slicer.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+# Consumed by module.yaml:agents[] and `[agents.<code>]` in central config.
+
+code = "experion-story-slicer"
+name = "Sloane"
+title = "Story Slicer"
+icon = "🍰"
+description = "Turns approved FRDs into thin, ordered story pointers (front matter and links, no requirement text) plus technical stories from the approved architecture, and checks with a script that every requirement is covered once."
+agent_type = "stateless"   # stateless | memory | autonomous
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (persistent_facts, activation_steps_*): append
+#   arrays-of-tables with `code`/`id`: replace matching items, append new ones.
+
+# Steps to run before the standard activation (config load, greet).
+# Overrides append. Use for pre-flight loads, compliance checks, etc.
+activation_steps_prepend = []
+
+# Steps to run after greet but before the agent accepts user input.
+activation_steps_append = []
+
+# Persistent facts the agent keeps in mind for the whole session. Overrides append.
+# Each entry is either a literal sentence or a `file:`-prefixed path/glob.
+persistent_facts = [
+  "file:{project-root}/**/project-context.md",
+]
+
+# Steps to run after the stories are written or updated. Overrides append.
+on_complete = []
+
+# The story template and the feature's technical summary template. Bare paths resolve from the skill root.
+story_template = "assets/story-template.md"
+technical_summary_template = "assets/technical-summary-template.md"
+
+# A team's own copy of the story template. When this file exists it is used instead of story_template, so a team
+# can change the template without touching the installed skill (setup_guard.py never writes here).
+project_template = "{project-root}/_bmad/custom/templates/story-template.md"
+
+# Folder with the approved FRDs, one F-<nnn>/frd.md per feature. Keep in sync with experion-frd and
+# ready-for-dev-gate (frds_dir).
+frds_dir = "{project-root}/_bmad-output/planning-artifacts/frds"
+
+# Folder for the stories: F-<nnn>/<story>-<slug>.md, F-<nnn>/technical-summary.md, technical/T-<nn>-<slug>.md and the
+# build order stories.md. The coverage script and the ready-for-dev gate read this layout.
+stories_dir = "{project-root}/_bmad-output/planning-artifacts/stories"
+
+# Where the approved architecture lives: one folder per architecture, with the spine inside. Warden records the
+# exact file under doc_type 'architecture'; Sentry checks that record, so the architecture is read from the path
+# in the approval state, not found by guessing.
+architecture_dir = "{project-root}/_bmad-output/planning-artifacts/architecture"
+architecture_filename = "ARCHITECTURE-SPINE.md"
+
+# File names inside a feature's stories folder. The summary is not a story; the order file is one per project.
+technical_summary_filename = "technical-summary.md"
+order_filename = "stories.md"

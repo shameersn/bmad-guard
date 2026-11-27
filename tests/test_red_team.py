@@ -323,6 +323,39 @@ class TextBuilderTests(unittest.TestCase):
             result = rfd.evaluate(text, story, 80, str(summary))
         self.assertEqual([r["code"] for r in result["reasons"]], ["OPEN_QUESTIONS"])
 
+    def test_the_thin_story_cases_get_the_gate_answers_their_rows_expect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            story = root / "docs/stories/story.md"
+            frd = root / "frds/F-001/frd.md"
+            summary = root / "epics/epic-1/epic-summary.md"
+            for path, text in ((frd, rt.FRD_TEXT), (summary, rt.EPIC_SUMMARY)):
+                path.parent.mkdir(parents=True)
+                path.write_text(text, encoding="utf-8")
+            story.parent.mkdir(parents=True)
+
+            def gate(requirements: str, technical: bool = False) -> list[str]:
+                text = rt.thin_story_text(requirements, technical)
+                result = rfd.evaluate(text, story, 80, str(summary), None, None, str(root / "frds"))
+                return [r["code"] for r in result["reasons"]]
+
+            self.assertEqual(gate("[FR-F001-01]"), [], "the known id is clean, so the rows below fail for one reason")
+            self.assertEqual(gate("[FR-F001-09]"), ["STORY_FR_UNKNOWN"])
+            self.assertEqual(gate("[FR-F001-01]", technical=True), ["TECHNICAL_STORY_INVALID", "ARCH_UNAPPROVED"])
+        self.assertEqual(spec_of("GATE-4").rule, "GATE_READY_STORY_FR_UNKNOWN")
+        self.assertEqual(spec_of("GATE-5").rule, "GATE_READY_TECHNICAL_STORY_INVALID")
+        for cid in ("GATE-4", "GATE-5"):
+            self.assertEqual((spec_of(cid).family, spec_of(cid).expected), ("Write gate", "block"))
+
+    def test_the_thin_story_plan_is_found_by_the_write_gate_and_names_the_story(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(os.path.realpath(tmp))
+            (root / rt.THIN_PLAN_REL).parent.mkdir(parents=True)
+            (root / rt.THIN_PLAN_REL).write_text(rt.plan_text("Plan 3", story=rt.THIN_STORY_REL), encoding="utf-8")
+            plans = wg.scan_plans(root)
+        self.assertEqual([p.rel for p in plans], [rt.THIN_PLAN_REL])
+        self.assertEqual(plans[0].fields.get("story"), rt.THIN_STORY_REL)
+
 
 class OfflineHookTests(unittest.TestCase):
     """Every stateless case against the real tool-guard hook, in an empty project. Same answers as in the sandbox."""

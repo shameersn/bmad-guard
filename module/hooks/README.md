@@ -5,7 +5,7 @@ Plain Python. No Node, no Husky. `scripts/setup_guard.py` copies every file in t
 | File | What |
 |---|---|
 | `pre-commit` | The hook git runs. A thin launcher: it loads `guard_pre_commit.py` and blocks the commit if that fails to load, or if `python3` is older than 3.10 (the macOS system Python can be 3.9; the message says so). |
-| `guard_pre_commit.py` | The three checks (scan, approval fields, tech stack) and the messages. |
+| `guard_pre_commit.py` | The four checks (scan, approval fields, tech stack, story coverage) and the messages. |
 | `guard_tech_stack.py` | The tech-stack list and the dependency-file readers. Pure text logic. |
 | `pre-push` | The hook git runs on a push (T7). The same kind of launcher; it loads `guard_pre_push.py`. |
 | `guard_pre_push.py` | The review-record check and its messages. |
@@ -26,6 +26,7 @@ Exit 0: the commit goes ahead (a warning may be on stderr). Exit 1: the commit i
 | `COMMIT_STATE_UNREADABLE` | block | `approval-state.json` is not valid JSON, and the commit needs it. |
 | `COMMIT_GATE_GENERIC` | warn | `gate: generic` was added, removed or changed in a document. |
 | `COMMIT_QUESTION_REMOVED` | warn | An open question or assumption is gone and has no resolution record. |
+| `COMMIT_STORY_COVERAGE` | warn | The commit stages a file under the stories folder, and Sloane's `story_coverage.py` found a problem in the staged stories and FRDs of those features (an FR in no story or in two, copied FRD text, a bad order), or could not run. The message names codes and story or feature ids, never text. |
 | `COMMIT_RESOLUTION_CHANGED` | event only | A `Resolved:` line or `[ASSUMPTION-RESOLVED ...]` tag changed. No message. |
 | `COMMIT_TECH_STACK_NOT_ALLOWED` | block | A new dependency is not on the approved tech-stack list. |
 | `COMMIT_TECH_STACK_UNAPPROVED` | block | A dependency was added, and the list has no matching Warden entry (never approved, edited since, or reopened). |
@@ -49,6 +50,7 @@ Exit 0: the commit goes ahead (a warning may be on stderr). Exit 1: the commit i
   - An open question or assumption removed without a record: **warn** (an id that was renumbered looks like a removal; look again with the pilot's false-block numbers).
   - A status that goes from `approved` to something else is **not checked**: it removes approval, and nothing downstream accepts a document that is not approved.
 - **A Warden entry matches when** its `doc_path` is the file (relative to the project root), it is not `superseded`, and the hash of the staged text equals `approved_hash`. The hash is computed as Warden does it (`approval_core.content_hash`, with the entry's `hash_mode`, `full` or `build`) over the text with newlines folded to `\n`, so a CRLF checkout still matches. The entry is read from the **staged** `_bmad/custom/approval-state.json`: an approval that was not committed with the document does not count. This is the port of `revert-brief-status.js`: it caught "content changed after approval" and wrote `draft` into the file; this hook blocks, names the file and the Warden step, and changes nothing. It also does not depend on the file name (the old script knew `brief-*/brief.md`, `prd-*/prd.md` and the architecture spine), because the entry names the file.
+- **Story coverage (ADR 0010): warn only.** It runs only when a staged path is under the stories folder (the slicer's `stories_dir` from its `customize.toml`, else `_bmad-output/planning-artifacts/stories/`), on the staged blobs of the stories and the FRDs. A project without the `experion-story-slicer` skill is skipped silently. A commit that only deletes a story file is not seen. The blocks are Sloane's own run and the ready-for-dev gate.
 - **Events: local queue only.** Events go to `.bmad-guard/events/queue.jsonl` through Ledger's code, with no endpoint, so the hook never waits on the network (a collector set in the environment is ignored). An event has the guard (`git-hooks`), stage `pre-commit`, the verdict, the rule id, the check (`scan`, `approval`, `tech-stack`), the staged file count and a `detail` (rule ids, a count or an error type). The approval events also carry the file path and the SHA-256 of the staged file (the same fields Warden records). **Paths of scanned files are not recorded**, and never file content or matched text. Package names are not recorded: the console message names them, the event counts them.
 
 ### Tech stack (optional)

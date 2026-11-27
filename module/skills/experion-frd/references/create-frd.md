@@ -13,7 +13,7 @@ code: CF
 ## Non-Negotiables
 
 - Never write `approval_status: approved`, `approved_by`, `approved_at`, a `Resolved:` line or an `[ASSUMPTION-RESOLVED …]` tag. The guards block these writes; do not try another way.
-- Never renumber, reuse or remove a `Q-<n>`, `A-<n>`, `FR-<Fnnn>-<nn>` or `FNFR-<Fnnn>-<nn>` id, also on an update. A requirement that is dropped stays, marked *Withdrawn*. A question that is no longer relevant stays, and the user resolves it (for example "Resolved: No longer needed, the PRD dropped bulk edit. — <name>, <date>").
+- Never renumber, reuse or remove a `Q-<n>`, `A-<n>`, `FR-<Fnnn>-<nn>` or `FNFR-<Fnnn>-<nn>` id, also on an update. A requirement that is dropped stays, marked *Withdrawn* (the word in asterisks, at the end of its heading, for example `### 4.3. FR-F001-03 — List free slots *Withdrawn*`, or on the first non-blank line under it; the story tools read only that form). A question that is no longer relevant stays, and the user resolves it (for example "Resolved: No longer needed, the PRD dropped bulk edit. — <name>, <date>").
 - Never add scope that is not in this PRD feature. Something the sources or the user want that the feature does not cover becomes a question that names it.
 - Never change a PRD NFR target. If this feature cannot meet it, add a question.
 - Never edit the PRD, the UX design, the architecture, another FRD or the FRD review. If a source looks wrong, say so to the user and add a question.
@@ -83,4 +83,4 @@ Save `{feature-folder}/{agent.frd_filename}` (create the folder if needed). Tell
 - the path, the confidence score and its rationale;
 - the counts: requirements, screens, inherited NFRs, open questions, open assumptions;
 - that no story of this feature can go to development while the FRD has open questions or assumptions or is not approved, and that a named person records each answer as a `Resolved:` line (format in `docs/ready-for-dev-markup.md`);
-- the next step: the FRD review (`experion-frd-review`), then approval with Warden. The team override offers both.
+- the next step: the FRD review (`experion-frd-review`), then approval with Warden. The team override offers both. Stories come later: when the FRDs and the architecture are approved, Sloane (`experion-story-slicer`) writes thin stories that point at the FR ids. Fenn writes no stories.

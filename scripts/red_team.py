@@ -69,6 +69,9 @@ STATE_REL = "_bmad/custom/approval-state.json"
 TECH_STACK_REL = "_bmad/custom/project/guard/tech-stack.toml"
 BUILD_PLAN_REL = "_bmad-output/implementation-artifacts/spec-redteam.md"
 STORY_PLAN_REL = "_bmad-output/implementation-artifacts/spec-notready.md"
+THIN_PLAN_REL = "_bmad-output/implementation-artifacts/spec-thin.md"
+THIN_STORY_REL = "docs/stories/F001-01-thin.md"
+FRD_REL = "_bmad-output/planning-artifacts/frds/F-001/frd.md"
 SESSIONS = {"main": "s-rt-main", "build": "s-rt-build", "review": "s-rt-review"}
 CODE_PREFIXES = (
     "CMD_",
@@ -150,6 +153,8 @@ REV-C1 | L2 | git push        | allow | PUSH_ALLOWED      | Control: push after 
 GATE-1 | L1 | PreToolUse Write | block | GATE_NO_ACTIVE_PLAN       | Source write with no plan in progress
 GATE-2 | L1 | PreToolUse Write | block | GATE_PLAN_NOT_APPROVED    | Source write while the plan is not approved
 GATE-3 | L1 | PreToolUse Write | block | GATE_READY_OPEN_QUESTIONS | Source write for a story with an open question
+GATE-4 | L1 | PreToolUse Write | block | GATE_READY_STORY_FR_UNKNOWN | Source write for a story whose FR id is not in its FRD
+GATE-5 | L1 | PreToolUse Write | block | GATE_READY_TECHNICAL_STORY_INVALID | Source write for a feature story relabelled gate: technical
 GATE-C1 | L1 | PreToolUse Bash | allow |                          | Control: sed -i on a file outside the project
 ## Destructive commands
 DESTR-1  | L1 | PreToolUse Bash | block | CMD_GIT_RESET_HARD | Hard git reset
@@ -438,6 +443,45 @@ def story_text(open_questions: list[str]) -> str:
     lines += ["## Open questions", ""] + [f"- Q-{i}: {q}" for i, q in enumerate(open_questions, 1)]
     return "\n".join(lines) + "\n\n## Acceptance criteria\n\n- Fake.\n"
 
+
+def thin_story_text(requirements: str, technical: bool = False) -> str:
+    """A thin story (ADR 0010): front matter and a pointer. `technical` relabels it `gate: technical`."""
+    lines = [
+        "---",
+        "story: F001-01",
+        "feature: F-001",
+        f"requirements: {requirements}",
+        "depends_on: none",
+        "epic_summary: epics/epic-1/epic-summary.md",
+        "confidence: 90",
+    ]
+    if technical:
+        lines.append("gate: technical")
+    lines += ["---", "# F001-01 A fake thin story", "", "Delivers a fake requirement of the fake FRD.", ""]
+    return "\n".join(lines) + "\n## Open questions\n\n- None.\n"
+
+
+# An approved FRD with one requirement, FR-F001-01, and no open question. Written to the work tree only: a commit of
+# an approved document needs Warden's record, and the write gate reads the work tree.
+FRD_TEXT = """---
+feature: F-001
+approval_status: approved
+---
+
+# Fake FRD
+
+## 4. Requirement Details
+
+### 4.1. FR-F001-01 — Fake requirement
+
+#### 4.1.1. Acceptance Criteria
+
+1. The fake service answers the fake request.
+
+## 12. Open Questions
+
+- None.
+"""
 
 EPIC_SUMMARY = "# Epic 1\n\n## Functional\nFake.\n\n## Technical\nFake.\n"
 QUESTIONS = ["Which fake database do we use?", "Which fake queue do we use?"]
@@ -899,8 +943,31 @@ def scenario_ready_for_dev(lab: Lab) -> None:
     approve_plan(runner, sb, STORY_PLAN_REL)
     source = {"file_path": str(sb / "src/app.py"), "content": "print('fake')\n"}
     lab.record("GATE-3", lab.tool("Write", source, SESSIONS["build"]))
-    plan = sb / STORY_PLAN_REL  # set aside: not in progress any more, so it does not hide the next plan
+    set_aside(sb / STORY_PLAN_REL)
+    scenario_thin_story(lab)
+
+
+def set_aside(plan: Path) -> None:
+    """A plan that is not in progress any more, so it does not hide the next plan."""
     plan.write_text(plan.read_text(encoding="utf-8").replace("status: in-progress", "status: done"), encoding="utf-8")
+
+
+def scenario_thin_story(lab: Lab) -> None:
+    """GATE-4 and GATE-5 (ADR 0010): the gate reads the story's `requirements` and `gate: technical` marker."""
+    runner, sb = lab.runner, lab.sb
+    plan = plan_text("Plan for a thin story", story=THIN_STORY_REL)
+    files = {THIN_STORY_REL: thin_story_text("[FR-F001-09]"), THIN_PLAN_REL: plan}
+    must(lab.commit(files, "plan and thin story").actual != "block", "the thin story and its plan did not commit")
+    approve_plan(runner, sb, THIN_PLAN_REL)
+    frd = sb / FRD_REL
+    frd.parent.mkdir(parents=True, exist_ok=True)
+    frd.write_text(FRD_TEXT, encoding="utf-8")
+    source = {"file_path": str(sb / "src/app.py"), "content": "print('fake')\n"}
+    lab.record("GATE-4", lab.tool("Write", source, SESSIONS["build"]))
+    (sb / THIN_STORY_REL).write_text(thin_story_text("[FR-F001-01]", technical=True), encoding="utf-8")
+    lab.record("GATE-5", lab.tool("Write", source, SESSIONS["build"]))
+    set_aside(sb / THIN_PLAN_REL)
+    frd.unlink()
 
 
 def scenario_plan(lab: Lab, remote: Path) -> None:

@@ -1,0 +1,23 @@
+# bmad-guard team override for experion-story-slicer (Sloane). Installed by scripts/setup_guard.py; do not edit in
+# a project. Project-specific facts: add markdown files under _bmad/custom/project/experion-story-slicer/
+# (loaded by the last persistent_facts entry).
+#
+# Thin stories from approved FRDs (ADR 0010). Sloane checks the architecture here and each FRD in her own flow
+# (Sentry, doc_type 'frd-<feature>'). Stories carry no requirement content, so there is no Warden step: the
+# FRD is what a person approves. The coverage script (story_coverage.py) is the proof, run when the flow ends.
+
+[agent]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/guard/references/confidence-scoring.md",
+  "Approval (Guarded BMAD): the FRD's doc_type is 'frd-<feature>', where <feature> is the FRD's front matter `feature` exactly as written (e.g. 'frd-F-001'); the architecture's doc_type is 'architecture'. Use exactly these strings for Sentry and every log call that takes a doc_type.",
+  "file:{project-root}/_bmad/custom/project/experion-story-slicer/*.md",
+]
+activation_steps_prepend = [
+  "skill:agent-approval-gate-check with doc_type='architecture', doc_path=<path to the approved architecture spine, the doc_path the approval record holds for 'architecture'>, doc_label='architecture', downstream_label='story slicing'",
+  "skill:agent-project-logger with action 'Story slicing started', event='STORIES_STARTED', stage='stories'",
+]
+on_complete = [
+  "skill:agent-project-logger with action 'Stories sliced', event='STORIES_SLICED', stage='stories', doc_path=<path to stories.md>",
+  "skill:agent-project-logger with action 'Confidence scored for stories', event='CONFIDENCE_SCORED', stage='stories', doc_path=<path to stories.md>, confidence=<overall confidence, the lowest story score>, confidence_label=<its label>, confidence_rationale=<its rationale>",
+  "Run `python3 {skill-root}/scripts/story_coverage.py --stories-dir <stories dir> --frds-dir <FRDs dir> --feature F-<nnn>` once for each feature sliced in this run, and once without --feature when this run sliced every approved FRD. This run records the guard event. On result 'block', or if the command fails or prints anything but one JSON object, tell the user every reason and that the stories are not ready, and stop: do not say the stories are done, and do not edit anything to make it pass.",
+]

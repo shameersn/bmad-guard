@@ -18,6 +18,9 @@ folder. The reason code is the rule id:
                             GATE_READY_OPEN_QUESTIONS, _OPEN_ASSUMPTIONS, _LOW_CONFIDENCE, _MISSING_CONFIDENCE,
                             _RESOLUTION_MISSING_WHO_OR_WHEN, _DELETED_ITEMS, _DUPLICATE_IDS, _MALFORMED_FRONTMATTER,
                             _MISSING_EPIC_SUMMARY, _EPIC_SUMMARY_INCOMPLETE, _FRD_UNAPPROVED, _FRD_OPEN_ITEMS,
+                            _STORY_FR_UNKNOWN, _STORY_FR_OTHER_FEATURE (the story's `requirements` are not in its FRD),
+                            _ARCH_UNAPPROVED (a `gate: technical` story needs the approved, unchanged architecture),
+                            _TECHNICAL_STORY_INVALID (`gate: technical` with a feature or requirements),
                             _UNREADABLE_STORY, _BASELINE_UNAVAILABLE.
   GATE_RECORD_FAILED        the build session record could not be written (T7 needs it), so the write is blocked.
   GATE_ERROR                the gate cannot run (a sibling skill is missing, too many files to scan).
@@ -89,6 +92,27 @@ READY_NEXT = (
     "A person answers questions and resolves assumptions (a Resolved: line with name and date). "
     "Do not edit them, or the gate marker, to pass."
 )
+# Reasons a person does not fix by answering questions in the story (ADR 0010). Others get READY_NEXT.
+READY_NEXT_BY_CODE = {
+    "FRD_UNAPPROVED": "agent-approval-grant (Warden) approves the FRD. Do not edit its approval fields to pass.",
+    "FRD_OPEN_ITEMS": (
+        "A person answers the questions and resolves the assumptions in the FRD with experion-frd (Fenn), "
+        "then it is approved again with agent-approval-grant (Warden). Do not edit them to pass."
+    ),
+    "STORY_FR_UNKNOWN": (
+        "Fix the story's `requirements` with Sloane (experion-story-slicer), or the FRD with experion-frd (Fenn)."
+    ),
+    "STORY_FR_OTHER_FEATURE": (
+        "Fix the story's `requirements` with Sloane (experion-story-slicer): a story names only FRs of its own feature."
+    ),
+    "ARCH_UNAPPROVED": (
+        "agent-approval-grant (Warden) approves the architecture again. Do not edit the approval state to pass."
+    ),
+    "TECHNICAL_STORY_INVALID": (
+        "A `gate: technical` story has no feature and no requirements; "
+        "fix the story with Sloane (experion-story-slicer). Do not add the marker to a feature story to pass."
+    ),
+}
 CONSOLE = "tool-guard write gate"
 
 
@@ -136,21 +160,26 @@ def _load(skill: str, script: str):
     return module
 
 
-def ready_config(root: Path) -> tuple[int, str, str, str]:
-    """(min_confidence, epics_dir, baseline, frds_dir) from the ready-for-dev skill's own customize.toml. A project
-    override file is not read: it is not protected, and a lower minimum would weaken the gate."""
+def ready_config(root: Path) -> tuple[int, str, str, str, str]:
+    """(min_confidence, epics_dir, baseline, frds_dir, architecture_doc_type) from the ready-for-dev skill's own
+    customize.toml. A project override file is not read: it is not protected, and a lower minimum or another
+    architecture key would weaken the gate."""
     path = HERE.parents[1] / READY_SKILL / "customize.toml"
     try:
         agent = gc.parse_toml(path.read_text(encoding="utf-8")).get("agent", {})
         minimum = agent.get("min_confidence", 80)
         epics, baseline = agent.get("epics_dir", ""), agent.get("baseline", "")
         frds = agent.get("frds_dir", "")
+        architecture = agent.get("architecture_doc_type", "architecture")
     except (OSError, ValueError) as err:
         raise GateError(f"the ready-for-dev settings cannot be read ({type(err).__name__})") from None
-    texts = (epics, baseline, frds)
-    if not (isinstance(minimum, int) and 0 <= minimum <= 100 and all(isinstance(v, str) for v in texts)):
+    texts = (epics, baseline, frds, architecture)
+    if not (
+        isinstance(minimum, int) and 0 <= minimum <= 100 and all(isinstance(v, str) for v in texts) and architecture
+    ):
         raise GateError("the ready-for-dev settings are not in the expected format")
-    return minimum, epics.replace("{project-root}", str(root)), baseline, frds.replace("{project-root}", str(root))
+    epics, frds = (v.replace("{project-root}", str(root)) for v in (epics, frds))
+    return minimum, epics, baseline, frds, architecture
 
 
 # --- the plan ------------------------------------------------------------------------------------------
@@ -292,18 +321,24 @@ def find_story(root: Path, plan: Plan) -> tuple[Path | None, hc.Verdict | None]:
 
 def story_reasons(root: Path, story: Path) -> list[hc.Verdict]:
     rfd = dt.ready_for_dev()
-    minimum, epics_dir, baseline, frds_dir = ready_config(root)
+    minimum, epics_dir, baseline, frds_dir, architecture = ready_config(root)
     rel = story.relative_to(root).as_posix()
     try:
         text = story.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
         return [verdict("GATE_READY_UNREADABLE_STORY", f"The story {rel} cannot be read ({type(err).__name__}).")]
     try:
-        result = rfd.evaluate(text, story, minimum, None, epics_dir or None, baseline or None, frds_dir or None)
+        result = rfd.evaluate(
+            text, story, minimum, None, epics_dir or None, baseline or None, frds_dir or None, architecture
+        )
     except rfd.GateError as err:
         return [verdict(f"GATE_READY_{err.code}", f"The story {rel} cannot be checked: {err.detail}.")]
     return [
-        verdict(f"GATE_READY_{r['code']}", f"The story {rel} is not ready for development: {r['detail']}. {READY_NEXT}")
+        verdict(
+            f"GATE_READY_{r['code']}",
+            f"The story {rel} is not ready for development: {r['detail']}. "
+            f"{READY_NEXT_BY_CODE.get(r['code'], READY_NEXT)}",
+        )
         for r in result["reasons"]
     ]
 

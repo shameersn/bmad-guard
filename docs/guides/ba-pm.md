@@ -77,8 +77,9 @@ The gate counts what it can find, so use the fixed format. Full rules and an exa
 - Every question has an id (`Q-1`, `Q-2`). **Never renumber, reuse or remove an id.**
 - An answer is a `Resolved:` line that ends with your name and the date.
 - An assumption is `[ASSUMPTION A-1: text]`. When confirmed, it becomes `[ASSUMPTION-RESOLVED A-1: text — name, date]`.
-- A story is **ready** when: 0 open questions, 0 open assumptions, every answer has who and when, `confidence` is 80 or more, and the epic has an `epic-summary.md` with a Functional and a Technical part. When the story has `feature: F-<nnn>`, that feature's FRD must also be approved with nothing open, and the FRD counts as the Functional part.
-- `gate: generic` skips the gate. It is only for setup and chore stories. You set it by hand. A commit that adds or changes it gets a warning (`COMMIT_GATE_GENERIC`). Its use is reviewed in the pilot.
+- A story is **ready** when: 0 open questions, 0 open assumptions, every answer has who and when, `confidence` is 80 or more, and the epic has an `epic-summary.md` with a Functional and a Technical part. When the story has `feature: F-<nnn>`, that feature's FRD must also be approved with nothing open, and the FRD counts as the Functional part. A thin story (see "Thin stories") points to its feature's `technical-summary.md` instead, and every FR id in its `requirements` must be in the FRD (`STORY_FR_UNKNOWN`, `STORY_FR_OTHER_FEATURE`).
+- Setup work from the architecture (project starter, tooling) is a technical story with `gate: technical`. The gate does not skip it: it checks that the architecture is approved and unchanged (`ARCH_UNAPPROVED`).
+- `gate: generic` skips the gate. It is only for real chores. You set it by hand. A commit that adds or changes it gets a warning (`COMMIT_GATE_GENERIC`). Its use is reviewed in the pilot.
 - The confidence score is the model's own opinion. It is one input. The counts are the hard check.
 
 ### Why you type the answers
@@ -123,7 +124,7 @@ approver; Customer = the external client.
 | 15 | Review each FRD | AI | Iris (`experion-frd-review`), runs on its own at the end of step 14 | Writes `frd-review.md`. |
 | 16 | Corrections → FRD v2 | BA | You | An edit to an approved FRD sets it back to draft. |
 | 17 | PO approves the FRD; disagreements go to the PO | PO | Warden | Iris lists findings you disputed under "For the Product Owner". |
-| 18 | Approved FRDs to ADO as stories | BA/Tooling | Outside Claude. For development in BMAD: John, menu CE → `bmad-create-epics-and-stories` | Sentry checks each FRD; every story carries `feature: F-<nnn>`. |
+| 18 | Approved FRDs to ADO as stories | BA/Tooling | Outside Claude. For development in BMAD: Sloane (`experion-story-slicer`) writes thin stories | Sentry checks the architecture and each FRD; every story carries `feature: F-<nnn>` and its FR ids. A script checks that every FR is in one story. The sync to ADO or Jira is outside Claude and not built yet. |
 | 19 | Hand-off to delivery | PO | — | The ready-for-dev gate blocks any story whose FRD is not approved or has open items. |
 
 **Change requests.** A change after approval goes back to the draft step (3, 10 or 16). Change the
@@ -148,9 +149,48 @@ never overwritten.
 - **Approval.** Fenn asks once whether the FRD is ready. On a yes, Warden runs with doc_type
   `frd-F-001`. Answer Fenn's open questions first: an FRD with an open question blocks **every story of
   that feature** at the ready-for-dev gate, even when it is approved.
+- **Stories come later.** Fenn does not write stories. When the FRDs are approved, Sloane
+  (`experion-story-slicer`) writes thin stories that point at the FR ids (step 18).
 - **Your own template.** Put a copy of the template at `_bmad/custom/templates/frd-template.md` and edit
   it. Fenn uses it instead of the built-in one and says so. Keep Section 12 a `- Q-<n>:` list: the gate
   counts only that format.
+
+## Thin stories (step 18)
+
+The FRD is where the requirements are written, once. A story is only a pointer to it. Ask for Sloane
+(`experion-story-slicer`) after the FRDs and the architecture are approved. Sloane writes:
+
+- `_bmad-output/planning-artifacts/stories/F-001/F001-02-<slug>.md`: one story per FR by default. Front matter with
+  `requirements: [FR-F001-02]`, `depends_on`, and a link to the feature's `technical-summary.md`.
+- `stories/technical/T-01-<slug>.md`: setup work the approved architecture asks for. Nothing else.
+- `stories/stories.md`: the build order, one line per story.
+
+**What you review: the order and the grouping, not the text.** Open `stories.md`. Check that:
+
+- the order is one you could build in;
+- each story that merges two FRs, or splits one FR, has a one-line reason, and you agree with it;
+- the technical stories are what the architecture says, and no more.
+
+There are no acceptance criteria in a story to review. They are in the FRD, which you already approved.
+**Never copy FRD text into a story**, and never add a rule or an acceptance criterion there. The coverage script
+(`story_coverage.py`) blocks a story that repeats a line of FRD Section 4 or 5 (`STORY_FRD_TEXT`). If a
+requirement is wrong or missing, change the FRD with Fenn, and approve it again with Warden.
+
+Sloane's run ends with the script. It reports an FR that is in no story (`STORY_FR_UNCOVERED`) or in two
+(`STORY_FR_TWICE`), an id of another feature, copied FRD text, and a bad order. Each block names the story
+or the feature. At commit you get only a warning (`COMMIT_STORY_COVERAGE`). The hard block is at the
+ready-for-dev gate: an FR id that is not in the FRD stops that story.
+
+When the FRD changes after the stories exist, ask Sloane for an update. It keeps every id and file, and only adds
+stories for new FRs.
+
+**Known limits:**
+
+- There is no "withdrawn story" mark. When an FR is *Withdrawn* in the FRD, its story blocks with
+  `STORY_FR_UNKNOWN`. You remove the story file and its line in `stories.md`. That id is never reused.
+- A commit that only deletes a story file gets no coverage warning.
+- `requirements` and `depends_on` must be on **one line** (`[FR-F001-02]`). A list over several lines reads as
+  empty.
 
 ## What the flow looks like in BMAD
 
@@ -158,7 +198,7 @@ never overwritten.
 2. **PRD** → Sentry checks the brief → Warden approves (`prd`).
 3. **FRDs** → Sentry checks the PRD → Fenn writes one per feature → Iris reviews → Warden approves (`frd-F-<nnn>`).
 4. **Architecture** → Sentry checks the PRD → Warden approves.
-5. **Epics and stories** → Sentry checks each FRD → stories carry `feature: F-<nnn>` and the `FR` ids they deliver. There is no Warden step for `epics.md`.
+5. **Thin stories** → Sentry checks the architecture and each FRD → Sloane writes stories that carry `feature: F-<nnn>` and the `FR` ids they deliver, plus `stories/stories.md` (the build order). There is no Warden step: a story holds no requirement text. A script checks coverage.
 6. **Ready for development** → the ready-for-dev gate counts open items in the story and its FRD. The developer then plans and approves the **plan** with Warden (`bmad-build`).
 
 The diagram is in [architecture.md](../architecture.md).
@@ -169,6 +209,7 @@ The diagram is in [architecture.md](../architecture.md).
 - Delete a question that is hard to answer. Keep it open, or resolve it with a real answer.
 - Remove `feature: F-<nnn>` from a story, or delete an FRD question, to get past the gate.
 - Use `gate: generic` to skip a story that has open questions.
+- Copy FRD text (an acceptance criterion, a rule, a screen label) into a story. Point to the FR id instead.
 - Put real patient or customer data in a prompt, a story or an example. Use fake values.
 - Ask Claude to approve for you. Only Warden's two questions count.
 - Say "proceed anyway" to a Sentry block.

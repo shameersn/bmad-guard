@@ -81,16 +81,17 @@ flowchart TB
         c -->|"Warden"| c2["Architecture approved"]
         b2 -->|"Sentry checks the PRD"| f1["FRD per PRD feature, by Fenn, reviewed by Iris"]
         f1 -->|"Warden"| f2["FRDs approved"]
-        f2 -->|"Sentry checks each FRD"| d["Epics and stories, each with feature F-nnn"]
+        f2 -->|"Sentry checks each FRD"| d["Thin stories by Sloane, with FR ids"]
         c2 --> d
-        d -->|"ready-for-dev gate counts open items"| e["Story ready for dev"]
+        d -->|"coverage script: every FR in one story"| d2["Stories and build order"]
+        d2 -->|"ready-for-dev gate counts open items, checks the FR ids"| e["Story ready for dev"]
     end
 
     subgraph BUILD["Build: developer"]
         e --> f["bmad-build writes the plan"]
         f -->|"Warden approves the plan"| g["Plan approved, in progress"]
         g -->|"write gate checks every source write and records the build session"| h["Code written"]
-        h -->|"pre-commit: secrets, PHI, approval fields, tech stack"| i["Commit"]
+        h -->|"pre-commit: secrets, PHI, approval fields, tech stack, story coverage (warn)"| i["Commit"]
     end
 
     subgraph REVIEW["Review and push"]
@@ -108,7 +109,7 @@ flowchart TB
 
 Notes on the diagram:
 
-- **Stories.** In the current overrides `epics.md` gets a confidence score but no Warden step. What stops a story is the **ready-for-dev gate** (counted facts) and the **plan approval** by Warden in `bmad-build`.
+- **Stories (ADR 0010, if accepted).** The FRD is the only place requirements are written. Sloane (`experion-story-slicer`) writes **thin stories**: front matter with the FR ids, the build order in `stories/stories.md`, and technical stories from the approved architecture. A story has no Warden step, because it holds no requirement text. A script (`story_coverage.py`) proves that every FR is in one story and that no FRD text was copied. What stops a story is the **ready-for-dev gate** (counted facts, and the FR ids must exist in the FRD) and the **plan approval** by Warden in `bmad-build`, which reads the acceptance criteria from the FRD by FR id.
 - **Approval is by hash.** Warden stores a hash of the text. A later edit makes Sentry say `stale`, and sets the document back to `draft`.
 - **The write gate** blocks any source write until the current plan is approved and unchanged and the story is ready. It also writes the **build record** (which session built the story).
 - **The review record** is written by the hook, not by the model. The push check refuses a reviewer who is a build session.
@@ -213,7 +214,7 @@ sequenceDiagram
 | write-gate | L1 `PreToolUse` | Write, Edit, MultiEdit, NotebookEdit, Bash write targets | `GATE_*` | Source write needs an approved, unchanged plan and a ready story. Records the build session. | Block |
 | content-scan | L1 `PreToolUse` | Write, Edit, MultiEdit, NotebookEdit, text a Bash command writes to a file | `CONTENT_SECRET`, `CONTENT_PHI` | Secrets and identifiers in the new text. | HIPAA project: block. Other: warn. |
 | review-record | L1 `PreToolUse` | Bash | `REVIEW_*` | Recognises the one plain record command and writes the review record with the hook's session id. | Block |
-| pre-commit | L2 | `git commit` | `COMMIT_*` | Secrets and identifiers in added lines, approval fields vs Warden's record, tech-stack list. | Block (`COMMIT_ERROR`) |
+| pre-commit | L2 | `git commit` | `COMMIT_*` | Secrets and identifiers in added lines, approval fields vs Warden's record, tech-stack list. Warns when staged stories and FRDs do not match (`COMMIT_STORY_COVERAGE`). | Block (`COMMIT_ERROR`) |
 | pre-push | L2 | `git push` | `PUSH_*` | An independent review record for source commits. | Block (`PUSH_ERROR`) |
 
 Rules, ids and limits: [guard-rules.md](../module/skills/tool-guard/references/guard-rules.md) (L1) and [module/hooks/README.md](../module/hooks/README.md) (L2).
@@ -224,7 +225,8 @@ Guard **skills** that BMAD workflows call (L0, not hooks):
 |---|---|---|
 | `agent-approval-grant` | Warden | Two confirmations from a person, then marks a document approved and records it in `approval-state.json`. Also reopens a document. |
 | `agent-approval-gate-check` | Sentry | Checks that an upstream document is approved and unchanged. |
-| `ready-for-dev-gate` | Gatekeeper | Counts open questions and assumptions, checks who and when, confidence and the epic summary. For a story with `feature: F-<nnn>`, also checks that feature's FRD exists, is approved and has nothing open. |
+| `ready-for-dev-gate` | Gatekeeper | Counts open questions and assumptions, checks who and when, confidence and the epic summary. For a story with `feature: F-<nnn>`, also checks that feature's FRD exists, is approved and has nothing open, and that every FR id in `requirements` is in it. A `gate: technical` story is checked against the approved architecture instead of an epic summary. |
+| `experion-story-slicer` | Sloane | Turns approved FRDs into thin, ordered stories (FR ids, no requirement text) and technical stories from the approved architecture. Runs `story_coverage.py`: every FR in one story, no copied FRD text, a sound order. |
 | `agent-project-logger` | Ledger | Writes events to the local queue. Sends them to a collector when one is set (not in the pilot start). |
 | `experion-brief-review` | Voss | Adversarial review of the brief before approval. |
 | `experion-frd` | Fenn | Writes one FRD per PRD feature in the Experion 13-section format, with stable `FR-<Fnnn>-<nn>` ids and the PRD NFRs it inherits; Warden approves it as `frd-F-<nnn>`. |

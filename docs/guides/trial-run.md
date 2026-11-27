@@ -5,7 +5,7 @@
 | Ticket | GUARD-3, T0 (pilot pack). Decision D15 in the [Phase 3 plan](../plans/phase-3.md). |
 | For | Shameer, before the pilot starts. The results are the first pilot entry. |
 | Project | A small "Clinic appointment booking" API, in a **new throwaway repo**. FastAPI and SQLite (Node is fine too). |
-| Stories | 1. Book an appointment. 2. Cancel an appointment. 3. List free slots. |
+| Features | F-001 Book an appointment. F-002 Cancel an appointment. F-003 List free slots. Each gets thin stories from Sloane (`F001-01`, `F002-01`, ...). |
 | Mode | HIPAA: `phi = "block"`. **Fake data only.** |
 | Time | The set-up is about 15 minutes. The steps depend on how long you take over the BMAD planning flow (steps 14 to 17). |
 | Checked | On 2026-11-26, in a throwaway project (BMAD 6.12.4, Claude Code 2.1.326), the set-up commands and every step marked **checked** were run by calling the installed hook scripts with the hook JSON and by running real `git commit` and `git push` calls. Steps marked **first real run** need a live Claude Code session. They match the red-team cases, but no live model has driven the hooks yet (see [hooks.md](../hooks.md), open checks 1, 2, 5, 8). |
@@ -90,21 +90,38 @@ git add requirements.txt && git commit -q -m "Add dependencies"
 
 ### A5. Test fixtures (fake)
 
-A story file with two open questions, and an example env file. Both are fake.
+A thin story file with two open questions, a technical story file, and an example env file. All are fake. The thin story points at `FR-F001-01`, which Fenn writes in step 14e. The ids `F001-99` and `T-99` are not real stories: they are kept out of `_bmad-output/`, so Sloane never sees them.
 
 ```bash
 mkdir -p docs
 cat > docs/trial-fixture.md <<'EOF'
 ---
+story: F001-99
+feature: F-001
+requirements: [FR-F001-01]
+depends_on: none
+epic_summary: _bmad-output/planning-artifacts/stories/F-001/technical-summary.md
 confidence: 85
-epic: 1
 ---
-# Story 1.1 (trial fixture)
+# F001-99 Book an appointment (trial fixture)
 
 ## Open questions
 
 - Q-1: Can a slot be double booked?
 - Q-2: How long is one slot?
+EOF
+cat > docs/trial-technical.md <<'EOF'
+---
+story: T-99
+feature: none
+gate: technical
+confidence: 85
+---
+# T-99 Set up the project (trial fixture)
+
+## Open questions
+
+- None.
 EOF
 printf 'APP_NAME=clinic-booking\n' > .env.example
 git add -A && git commit -q -m "Trial fixtures"
@@ -246,10 +263,18 @@ Fake values used below:
 
 - 14e. Run Fenn: `Talk to Fenn. Write the FRD for F-001.` Expect: Sentry says the PRD is approved. Fenn writes `_bmad-output/planning-artifacts/frds/F-001/frd.md` with 13 numbered sections, requirement headings `FR-F001-01`…, Section 8.1 listing the PRD NFRs that apply (targets word for word), and unknowns as `Q-<n>` in Section 12. Then Iris runs on her own and writes `frds/F-001/frd-review.md` with front matter `frd-F-001_version: 1` and findings `R-1`, `R-2`… Fenn asks whether the FRD is ready for approval: answer **no**.
 - 14f. Dispute a finding **by hand**: in `frd-review.md`, under one finding, add `Disputed: <why> — <name>, 2026-11-27`. Run `Talk to Iris. Review the FRD for F-001.` Expect: the finding keeps its `R-<n>`, has status **Disputed**, is listed under **For the Product Owner**, and your line is still there word for word.
-- 14g. Try: `bmad-create-epics-and-stories`. Expect: Sentry blocks stories for F-001 (the FRD is not approved) and names it.
+- 14g. Try: `Talk to Sloane. Write the stories for F-001.` Expect: Sloane checks the architecture (approved in 14d) and the FRD of F-001 with Sentry. The FRD is not approved, so Sloane writes no stories for F-001, says why, and stops.
 - 14h. Answer the FRD's open questions **by hand** (`Resolved:` lines with your name and the date). Run Warden: `Approve the FRD for F-001.` Give two separate yes answers. Expect: `approval-state.json` has a `frd-F-001` entry. Write and approve the FRDs for F-002 and F-003 the same way, but leave **one question open in F-002** before you approve it (used in step 15c).
-- 14i. Run `bmad-create-epics-and-stories` again. Expect: Sentry says each FRD is ok. Each story in `epics.md` has `Feature: F-<nnn>` and `Requirements: FR-…`, and each story file has front matter `feature: F-<nnn>`. In the current overrides, `epics.md` gets no Warden step.
-- 14j. Optional, team template: `mkdir -p _bmad/custom/templates && cp .claude/skills/experion-frd/assets/frd-template.md _bmad/custom/templates/`, change one guidance line, and ask Fenn to update the FRD for F-003. Expect: Fenn says it uses the team template. Write in the results whether it did. The update sets the FRD back to draft: approve it again with Warden.
+- 14i. Run `Talk to Sloane. Write the stories for F-001, F-002 and F-003.` Expect: Sentry says the architecture and each FRD are ok. Sloane shows the plan (one story per FR; a merge or split has a one-line reason), then writes `_bmad-output/planning-artifacts/stories/`: `stories.md` (the build order), `F-001/F001-01-<slug>.md` and the other feature stories, `F-001/technical-summary.md` for each feature, and `technical/T-01-<slug>.md` if the architecture names setup work. Each feature story has `feature: F-<nnn>` and `requirements: [FR-F001-01]` in its front matter, and no acceptance criteria. There is no Warden step for stories. Sloane ends with the coverage script and says `allow`. Check it yourself:
+
+  ```bash
+  python3 .claude/skills/experion-story-slicer/scripts/story_coverage.py \
+    --stories-dir _bmad-output/planning-artifacts/stories --frds-dir _bmad-output/planning-artifacts/frds --no-event
+  ```
+
+  Expect: `"result": "allow"` and `frs_covered` equal to `frs`. Commit the stories.
+- 14j. Copied FRD text is blocked. Open one story of F-001 by hand and paste one acceptance-criterion line of its FRD into it (a line of 8 words or more, for example the first criterion of FR-F001-01). Run the command from 14i. Expect: `STORY_FRD_TEXT` with the story id, a line number and the FRD section, but never the text. Then `git add` the story and commit: expect the commit to go through with the warning `COMMIT_STORY_COVERAGE` (event `warn COMMIT_STORY_COVERAGE`). Remove the pasted line again and run the command: `allow`.
+- 14k. Optional, team template: `mkdir -p _bmad/custom/templates && cp .claude/skills/experion-frd/assets/frd-template.md _bmad/custom/templates/`, change one guidance line, and ask Fenn to update the FRD for F-003. Expect: Fenn says it uses the team template. Write in the results whether it did. The update sets the FRD back to draft: approve it again with Warden.
 
 **15. A story that is not ready** (checked by command; the model flow is a **first real run**)
 
@@ -257,29 +282,36 @@ The ready-for-dev gate counts open items. Run it on the fixture:
 
 ```bash
 python3 .claude/skills/ready-for-dev-gate/scripts/ready_for_dev.py docs/trial-fixture.md \
-  --epics-dir _bmad-output/planning-artifacts/epics --no-event
+  --frds-dir _bmad-output/planning-artifacts/frds --no-event
 ```
 
-- Expect: `"result": "block"` with `OPEN_QUESTIONS` (Q-1, Q-2) and `MISSING_EPIC_SUMMARY`. Exit code is 0 for a block (read the JSON).
-- Fix it **by hand**: create `_bmad-output/planning-artifacts/epics/epic-1/epic-summary.md` with a `## Functional` and a `## Technical` section (some text each). Add a `Resolved:` line under each question, ending with your name and a date, for example `  Resolved: No. One patient per slot. — <name>, 2026-11-26`. Run the command again. Expect: `"result": "allow"`.
-- 15b. FRD check by command: add `feature: F-009` to the front matter of `docs/trial-fixture.md` (by hand) and run:
+- Expect: `"result": "block"` with `OPEN_QUESTIONS` (Q-1, Q-2). Exit code is 0 for a block (read the JSON). The FRD of F-001 is approved with nothing open (14h), and the feature's `technical-summary.md` exists (14i), so nothing else blocks.
+- Fix it **by hand**: add a `Resolved:` line under each question, ending with your name and a date, for example `  Resolved: No. One patient per slot. — <name>, 2026-11-26`. Run the command again. Expect: `"result": "allow"`.
+- 15b. Requirements check by command. Change `requirements: [FR-F001-01]` in `docs/trial-fixture.md` (by hand) and run the command above each time:
+  - `[FR-F001-99]`: expect `STORY_FR_UNKNOWN` ("FR-F001-99 is not in this FRD").
+  - `[FR-F002-01]`: expect `STORY_FR_OTHER_FEATURE`.
+  - `[FR-F001-01]` again, and `feature: F-009`: expect `FRD_UNAPPROVED` with "no frd.md for this feature".
+  - `feature: F-001` again: expect `"result": "allow"`.
+
+  An FR that is in no story never blocks here (`STORY_FR_UNCOVERED` is for Sloane's script).
+- 15c. Model flow: run `bmad-build` on a story of F-002. Expect: `GATE_READY_FRD_OPEN_ITEMS` with the open id from the F-002 FRD. Answering it means editing an approved FRD: Sentry then says `stale` and Warden must approve it again.
+- 15d. Technical story by command. `docs/trial-technical.md` has `gate: technical`. Run:
 
   ```bash
-  python3 .claude/skills/ready-for-dev-gate/scripts/ready_for_dev.py docs/trial-fixture.md \
-    --epics-dir _bmad-output/planning-artifacts/epics --frds-dir _bmad-output/planning-artifacts/frds --no-event
+  python3 .claude/skills/ready-for-dev-gate/scripts/ready_for_dev.py docs/trial-technical.md \
+    --architecture-doc-type architecture-draft --no-event
   ```
 
-  Expect: `FRD_UNAPPROVED` with "no frd.md for this feature". Change it to `feature: F-001` (approved, nothing open in 14h): expect `"result": "allow"`. Remove the line again.
-- 15c. Model flow: run `bmad-build` on a story of F-002. Expect: `GATE_READY_FRD_OPEN_ITEMS` with the open id from the F-002 FRD. Answering it means editing an approved FRD: Sentry then says `stale` and Warden must approve it again.
+  Expect: `ARCH_UNAPPROVED` (nothing is approved under that key), and `"gate": "technical"` in the JSON. Run it again without `--architecture-doc-type` (the default key is `architecture`, approved in 14d): expect `"result": "allow"`, with no epic summary and no FRD. Then change `feature: none` to `feature: F-001` in the file by hand: expect `TECHNICAL_STORY_INVALID`. Change it back.
 - Model flow: run `bmad-build` on a real story that still has an open question. Expect the gate to stop it and list the ids. If Claude writes code anyway, the hook says `GATE_READY_OPEN_QUESTIONS`.
 
 ### Part B4. Build
 
 **16. Approved plan, build allowed** (first real run)
 
-- Try: run `bmad-build` for story 1, "Book an appointment". Read the plan it writes (`_bmad-output/implementation-artifacts/spec-<slug>.md`). Warden asks two questions. Answer yes to each.
+- Try: run `bmad-build` for story `F001-01` (book an appointment). The plan should cite the FR ids and the Section 4 numbers, with acceptance criteria read from the FRD. Read the plan it writes (`_bmad-output/implementation-artifacts/spec-<slug>.md`). Warden asks two questions. Answer yes to each.
 - Expect: after approval and `in-progress`, code writes to `app/` succeed. A file appears: `_bmad-output/guard/builds/<story>.json` with one session id and no code. Check: `cat _bmad-output/guard/builds/*.json`.
-- The real story layout can differ from the fixture. If the write gate blocks with `GATE_STORY_NOT_FOUND` or a `GATE_READY_*` code for a missing `epic`, `confidence` or epic summary, fix it by hand as in step 15 and write it in the results as a finding.
+- The real story layout can differ from the fixture. If the write gate blocks with `GATE_STORY_NOT_FOUND` or a `GATE_READY_*` code for a missing `confidence` or a missing technical summary, fix it by hand as in step 15 and write it in the results as a finding.
 - Run `python3 .claude/skills/tool-guard/scripts/write_gate.py --check` before and after approval. Expect exit 1 with reasons, then exit 0.
 
 **17. Edit the approved plan** (checked for the hook; first real run for the flow)
@@ -319,7 +351,7 @@ python3 .claude/skills/ready-for-dev-gate/scripts/ready_for_dev.py docs/trial-fi
 
 ### Part B6. Review and push
 
-Make sure the work for story 1 is committed. The pushed commits now include source (`app/...`), so a review is needed.
+Make sure the work for story `F001-01` is committed. The pushed commits now include source (`app/...`), so a review is needed.
 
 **20. Push, review in the same session, review in a fresh session** (checked for the git side; first real run for the model side)
 
@@ -385,13 +417,15 @@ Environment: Claude Code `____`, `python3 --version` `____`, bmad-guard commit `
 | 14d | Sentry lets the PRD start; features carry `F-<nnn>`, NFRs `NFR-<nnn>` | | | |
 | 14e | Fenn writes `frds/F-001/frd.md` (13 sections, FR ids, 8.1 NFRs); Iris writes `frd-review.md` | | | |
 | 14f | Disputed finding kept and listed for the PO | | | |
-| 14g | Sentry blocks stories for an unapproved FRD | | | |
+| 14g | Sloane writes no stories for an unapproved FRD (Sentry) | | | |
 | 14h | `frd-F-001` entry in `approval-state.json` | | | |
-| 14i | Stories carry `feature: F-<nnn>` and FR ids | | | |
-| 14j | Fenn uses the team template (optional) | | | |
+| 14i | Thin stories carry `feature: F-<nnn>` and `requirements`; `stories.md` written; coverage `allow` | | | |
+| 14j | `STORY_FRD_TEXT` for a copied FRD line; `COMMIT_STORY_COVERAGE` warning at commit | | | |
+| 14k | Fenn uses the team template (optional) | | | |
 | 15 | Gate: block, then allow after the fixes | | | |
-| 15b | `FRD_UNAPPROVED` for a missing FRD, allow for F-001 | | | |
+| 15b | `STORY_FR_UNKNOWN`, `STORY_FR_OTHER_FEATURE`, `FRD_UNAPPROVED`, then allow for F-001 | | | |
 | 15c | `GATE_READY_FRD_OPEN_ITEMS` for an F-002 story | | | |
+| 15d | `ARCH_UNAPPROVED` for a technical story, then allow; `TECHNICAL_STORY_INVALID` with a feature | | | |
 | 16 | Plan approved, writes pass, build record exists | | | |
 | 17a | Plan text edit allowed | | | |
 | 17b | `GATE_PLAN_CHANGED` | | | |
@@ -426,5 +460,5 @@ To the pilot log, `docs/reports/pilot-log.md` (this is the first pilot entry; Sh
 These were seen while the commands above were checked. They are not bugs in the script. Decide in the pilot what to do.
 
 - **The first push of a new project blocked (fixed).** The BMAD install commit (`.github/agents/...`) and the setup commit (`.gitignore`) counted as source in `pre-push`. Fixed: the root `.gitignore` and `.github/agents/bmad-*.agent.md` are not source in `pre-push` (`module/hooks/README.md`, step 3). Other `.github` files, such as workflows, stay source.
-- **`ready_for_dev.py` needs `--epics-dir` and `--frds-dir` on the command line.** The skill and the write gate pass the folders from their settings, so the model flow works. The bare command does not find the epic summary or the FRD without them (step 15). A story with `feature:` and no `--frds-dir` blocks with `FRD_UNAPPROVED` (fails closed).
+- **`ready_for_dev.py` needs `--frds-dir` on the command line** (and `--epics-dir` for an old-style story with `epic:`). The skill and the write gate pass the folders and the architecture key from their settings, so the model flow works. The bare command does not find the FRD without them (step 15). A story with `feature:` and no `--frds-dir` blocks with `FRD_UNAPPROVED` (fails closed). The architecture key has a default (`architecture`), so a technical story needs no flag unless the key differs (step 15d).
 - **`setup_guard.py` crashes with a traceback** when `--project` is a folder that does not exist (it should print `bmad-guard setup: ...` and exit 2).
