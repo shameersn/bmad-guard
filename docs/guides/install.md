@@ -21,8 +21,8 @@ This guide puts the guards into one project. It takes about 10 minutes.
 | You need | Check with | Notes |
 |---|---|---|
 | macOS, Linux, or Windows 10 or 11 | | **Windows** is built for the Claude Code (L1) guards only and **has not been run on a real machine yet** (ADR 0009). It needs Git for Windows (Git Bash) and a `python3` that works in Git Bash: see "Windows" in step 4. |
-| Python 3.10 or later, as `python3` | `python3 --version` | The macOS system Python is 3.9 and is **too old**: the pre-commit hook blocks every commit and says so. Put a newer `python3` first in your `PATH`. |
-| git | `git --version` | |
+| Python 3.10 or later, as `python3` | `python3 --version` | The macOS system Python is 3.9 and is **too old**: the pre-commit hook blocks every commit and says so. Put a newer `python3` first in your `PATH`. On Windows, a normal install has no `python3`: do the fix in "Windows: `python3` in Git Bash" below **before** step 2. |
+| git | `git --version` | On Windows: **Git for Windows**. It brings Git Bash. |
 | BMAD 6.12.4 (exactly) | | Installed in step 3. The guards are tested only with this version. |
 | Node.js with `npx` | `npx --version` | Needed by the BMAD installer. Note: the minimum Node version is not checked here; see the BMAD docs. |
 | Claude Code 2.1.295 or later, installed and signed in | `claude --version` | The `PreToolUse` hook uses `"onFailure": "block"`, added in 2.1.295 (checked on 2.1.326). With an older version a crashing hook may not block. Do the guarded work in Claude Code: it is the only tool with the L1 guards. |
@@ -31,6 +31,40 @@ This guide puts the guards into one project. It takes about 10 minutes.
 | Read access to the bmad-guard GitHub repo | `git ls-remote git@github.com:shameersn/bmad-guard.git` | Ask Shameer for access. You get the code in step 2. |
 
 Use a project that is already a git repository. A new project is fine: run `git init` first.
+
+**On Windows, run every command in this guide in Git Bash**, not in PowerShell or CMD. Claude Code runs the hooks in Git Bash too. `~` in Git Bash is your user folder (`C:\Users\<you>`).
+
+### Windows: `python3` in Git Bash
+
+The hook command is `python3 "..."`. The python.org installer gives `python.exe` and the `py` launcher, but no `python3.exe`. Windows also has a Microsoft Store alias called `python3` that only prints a hint. If `python3` does not work, every guarded tool call is blocked (the guards fail closed).
+
+1. Turn off the Store aliases: Settings, Apps, Advanced app settings, App execution aliases. Switch off the two `python` entries.
+2. Open a **new** Git Bash. Find the real Python:
+
+   ```bash
+   command -v python
+   ```
+
+   It must print a folder of a real install, for example `/c/Users/<you>/AppData/Local/Programs/Python/Python312/python`. If it prints a path with `WindowsApps`, step 1 is not done. If it prints nothing, install Python 3.10 or later from python.org or with `winget`, and open a new Git Bash.
+
+3. Copy `python.exe` to `python3.exe` in that folder:
+
+   ```bash
+   py_dir="$(dirname "$(command -v python)")"
+   cp "$py_dir/python.exe" "$py_dir/python3.exe"
+   ```
+
+   If Python is installed for all users (under `C:\Program Files`), this needs an admin Git Bash. Ask IT.
+
+4. Open a **new** Git Bash and check:
+
+   ```bash
+   bash -c 'python3 --version'
+   ```
+
+   It must print `Python 3.10` or later. The setup check in step 4 tests the same thing.
+
+These steps are not yet run on a real Windows machine ([windows-check.md](windows-check.md), step 1).
 
 ## 2. Get bmad-guard
 
@@ -41,6 +75,7 @@ git clone git@github.com:shameersn/bmad-guard.git ~/tools/bmad-guard
 cd ~/tools/bmad-guard && git checkout <pilot tag>
 ```
 
+- On Windows, run this in Git Bash. The clone goes to `C:\Users\<you>\tools\bmad-guard`.
 - `<pilot tag>`: the version for the pilot. Shameer announces it (for example `pilot-1`). Do not use `main`: every pilot user must have the same version.
 - In the steps below `<bmad-guard>` means this folder, `~/tools/bmad-guard`.
 - Use `git clone`, not a ZIP download. The setup script reads the version from git and writes it into your project; from a ZIP it records `unknown`, and nobody can tell which version you run.
@@ -109,7 +144,9 @@ append   .gitignore: .bmad-guard/
 dry run: nothing changed
 ```
 
-`--dry-run` also prints the planned diff of `.claude/settings.json` before the last line.
+`--dry-run` also prints the planned diff of `.claude/settings.json` before the last line. The sample is from an older version: today it also plans the `.gitattributes` lines (see section 5).
+
+On Windows there is no `set core.hooksPath` line. You see `note     L2 git hooks are not installed on Windows (the Claude Code hooks are)` instead. That is correct.
 
 If the plan looks right, run it for real:
 
@@ -131,7 +168,7 @@ up to date
 
 `--check` changes nothing. It exits 0 when the project is up to date and 1 when it is not (`NOT up to date: run setup_guard.py without --check`). It exits 2 when the folder is not a git repository, has no `_bmad/` folder, or `<bmad-guard>` is not a checkout.
 
-Commit the setup (this commit already goes through the new pre-commit hook):
+Commit the setup. On macOS and Linux this commit already goes through the new pre-commit hook. On Windows no git hook runs.
 
 ```bash
 git add -A && git commit -m "Add bmad-guard"
@@ -186,7 +223,7 @@ What is the same: the Claude Code guards (L1). The setup script, `--check`, the 
 What is different:
 
 - **Git for Windows is required.** Claude Code runs the hooks and the Bash tool in Git Bash. Run every command in this guide in **Git Bash**, not in PowerShell or CMD. `--check` fails with a clear line when `bash.exe` is not found.
-- **`python3` must work in Git Bash.** The hook command is `python3 "..."`. The python.org installer gives `python.exe`, not `python3.exe`. Fix: copy `python.exe` to `python3.exe` in the same folder, switch off the Microsoft Store aliases for python (Settings, Apps, Advanced app settings, App execution aliases), and open a new Git Bash. `--check` runs `bash -c 'python3 -c "import sys; print(sys.version_info[:2])"'` and says if `python3` is missing, the Store stub, or older than 3.10, each with this fix.
+- **`python3` must work in Git Bash.** Do the steps in "Windows: `python3` in Git Bash" (section 1). `--check` runs `bash -c 'python3 -c "import sys; print(sys.version_info[:2])"'` and says if `python3` is missing, the Store stub, or older than 3.10, each with this fix.
 - **No git hooks (L2).** Setup copies none, sets no `core.hooksPath`, and says so (`note     L2 git hooks are not installed on Windows`). A commit and a push on Windows are not checked by hooks. Developers on a Mac or Linux still have them. The pilot (project form, no admin) uses setup only.
 - **The PowerShell tool is blocked** in a guarded project on every OS: the call returns `PS_TOOL_UNSUPPORTED` and the model is told to use the Bash tool. No guard can read PowerShell commands yet (Phase 4). Without this rule the tool would skip every guard.
 - **`.gitattributes`.** On every OS, setup adds lines (`text eol=lf`) for the files it installs, so a clone with `core.autocrlf=true` does not turn them into CRLF and change their hashes. `--check` warns when `core.autocrlf` is true and the lines are missing. `--uninstall` removes them.
@@ -202,7 +239,7 @@ git config core.hooksPath
 python3 .claude/skills/tool-guard/scripts/write_gate.py --check
 ```
 
-The first prints `_bmad/custom/guard/hooks`. The second prints a block, because there is no approved plan yet. That is correct:
+The first prints `_bmad/custom/guard/hooks`. On Windows it prints nothing, because there are no git hooks there; that is correct. The second prints a block, because there is no approved plan yet. That is correct:
 
 ```text
 [tool-guard write gate] Blocked: source changes are not allowed yet:
@@ -227,6 +264,7 @@ python3 <bmad-guard>/scripts/setup_guard.py --credentials \
 - **Do not `export BMAD_GUARD_KEY` in your shell profile.** A key in the environment is visible to every command the agent runs (`printenv`). The file is the normal way. The environment variables `BMAD_GUARD_ENDPOINT`, `BMAD_GUARD_USER` and `BMAD_GUARD_KEY` still override the file, for CI or a one-off test only.
 - If the file is open to group or others, a link, or not yours, the guards **do not use it**: events keep queueing, and `setup_guard.py --project . --check` and the `SessionStart` warning say how to fix it (`chmod 600 ~/.config/bmad-guard/credentials`). Nothing is lost.
 - If the collector answers HTTP 401, the warning says whether the key came from the environment or from the file. A stale `BMAD_GUARD_KEY` in your environment hides a new key in the file.
+- On Windows, if the hidden key prompt shows what you type or does not react, stop with Ctrl+C and tell Shameer. Do not type a real key into a prompt that echoes. Not checked on a real machine yet ([windows-check.md](windows-check.md), step 7).
 - On Windows the file is `%USERPROFILE%\.config\bmad-guard\credentials`, and setup also runs `icacls` on the folder and the file (best effort). The sender refuses the file only when it or its folder is a link or junction. Not run on a real machine yet.
 
 ### Machine install (for IT, not for you)
@@ -251,6 +289,9 @@ On a machine with IT's **managed settings**, the Claude Code hooks may run from 
 | git config (local) | `core.hooksPath = _bmad/custom/guard/hooks` | Makes git run the hooks. |
 | `.claude/settings.json` | Three hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`) and 21 deny rules (`Read(...)` for `.env`, keys, dumps, `~/.aws`, `~/.ssh`, `~/.config/bmad-guard`). Your own entries are kept. | Layer L1. Skipped when the project has no `.claude/skills` folder. |
 | `.gitignore` | The line `.bmad-guard/` | The local event queue is never committed. |
+| `.gitattributes` | `text eol=lf` lines for the guard skill folders, `_bmad/custom/guard/` and each override file, on every OS | A clone with `core.autocrlf=true` (common on Windows) keeps these files byte for byte, so the manifest hashes still match. |
+
+On Windows setup does not write `_bmad/custom/guard/hooks/` or `core.hooksPath` (no L2).
 
 The setup script does **not** create the HIPAA setting (next section) or any file under `_bmad/custom/project/`. Those are yours.
 
@@ -381,6 +422,7 @@ The by-hand steps below are the same thing, if you cannot run the script.
    Remove the overrides together with the skills. The overrides call the guard skills, so one without the other breaks the BMAD workflows.
 
 4. Optional: remove the line `.bmad-guard/` from `.gitignore`, and delete the local queue `.bmad-guard/`.
+   Remove the guard block from `.gitattributes`: the comment line `# bmad-guard: keep the installed files LF (their hashes are in the manifest)` and the `<path> text eol=lf` lines below it. Keep your own lines. If the file held only ours, delete it.
 5. Keep your data, or delete it if the pilot lead says so: `_bmad/custom/approval-state.json` (who approved what), `_bmad-output/guard/` (build and review records), `_bmad/custom/prompt-guard.toml` and `_bmad/custom/project/guard/` (your own settings).
 6. Commit.
 
@@ -418,6 +460,7 @@ The guards **fail closed**: if a guard cannot run, it blocks. This is on purpose
 | Every tool blocked, and the hook script is missing | The project was never set up and IT's managed file is the **first** template (hook scripts inside each project). | Run the setup script. With the machine templates a project without the module is not blocked. |
 | Every tool blocked, and the hook script is missing, on a machine with a machine folder | The managed file points to a machine folder that is gone or was never installed (ADR 0008). | Tell IT at once: the managed file must go before the folder does. Do not switch the hooks off. |
 | One line at session start: `bmad-guard is not installed here, the guards are off` | BMAD is in the project, but setup was not run (no `_bmad/custom/guard/manifest.json`). | Run the setup script if the project should be guarded. |
+| Windows: every tool blocked, or `--check` has a `problem` line for `python3` | `python3` is missing in Git Bash, is the Store alias, or is older than 3.10. | Do "Windows: `python3` in Git Bash" (section 1), open a new Git Bash, restart Claude Code, run `--check`. |
 | Every commit blocked, "needs Python 3.10 or later" | `python3` is too old. | Put a newer `python3` first in `PATH`. |
 | `COMMIT_ERROR` or `PUSH_ERROR` | A git hook could not run. The message gives a short cause. | Run setup again. |
 
