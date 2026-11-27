@@ -32,9 +32,9 @@ guard  + Voss (brief Iris +   tech stack   ready-for  gate    commit   record
 | 0–3 | Why guards: the model writes, guards outside it decide | Talk | |
 | 3–6 | Setup is real: stack up, `setup_guard.py --check`, a PHI prompt blocked | Live | |
 | 6–14 | Brief, Voss review, Warden says no, Sentry blocks the PRD, then two yes answers | Live | `demo/1-brief` |
-| 14–19 | PRD, FRDs, architecture, stories: start the PRD, then jump; show an FRD, its review and the approvals in git | Skip | `demo/4-stories` |
+| 14–19 | PRD, FRDs, architecture, thin stories (Sloane): start the PRD, then jump; show an FRD, its review, the approvals in git, and `stories.md` with one thin story | Skip | `demo/4-stories` |
 | 19–22 | Ready-for-dev gate: open question blocks, resolve by hand, allowed; a story blocked by its FRD | Live | |
-| 22–30 | Code before plan blocked; `bmad-build` story 1; code and tests; plan edit blocked | Live | `demo/5-story1-built` |
+| 22–30 | Code before plan blocked; `bmad-build` story F001-01; code and tests; plan edit blocked | Live | `demo/5-story1-built` |
 | 30–37 | Guard rapid fire: `rm -rf`, `reset --hard`, `--no-verify`, `.env`, PHI commit, Postgres driver | Live | |
 | 37–41 | Push blocked without review; fresh-session review; push allowed | Live | `demo/6-reviewed` |
 | 41–45 | Grafana: blocks per rule, users, tokens, cost; privacy query; audit reports | Live | |
@@ -130,9 +130,9 @@ After each stage is approved and committed, tag it:
 | PRD | `bmad-prd` (Sentry checks the brief); features get `F-001`…, NFRs `NFR-001`… | two yes | `git tag demo/2-prd` |
 | FRDs | Fenn once per feature (F-001 book, F-002 cancel, F-003 free slots); Iris reviews each; add one `Disputed:` line in F-001's review and re-run Iris; resolve the questions by hand except **one in F-002** | two yes per FRD | `git tag demo/2b-frd` |
 | Architecture | `bmad-architecture`: FastAPI, SQLite, pytest | two yes | `git tag demo/3-arch` |
-| Stories | `bmad-create-epics-and-stories` (Sentry checks each FRD; stories carry `feature: F-<nnn>`); leave one open question in an F-001 story for the gate step | none today | `git tag demo/4-stories` |
-| Build story 1 | `bmad-build` "Book an appointment" | plan: two yes | `git tag demo/5-story1-built` |
-| Review | new `gclaude`; `bmad-code-review` story 1; commit the record alone; `git push` | none | `git tag demo/6-reviewed` |
+| Stories | `Talk to Sloane. Write the stories for F-001, F-002 and F-003.` (Sentry checks the architecture and each FRD; thin stories carry `feature: F-<nnn>` and `requirements`, and `stories/stories.md` holds the build order; the coverage script must say `allow`). Then add one technical question by hand, `- Q-1: <question>`, under Open questions in `F001-01`, for the gate step | none (a story holds no requirement text) | `git tag demo/4-stories` |
+| Build story F001-01 | `bmad-build` "Book an appointment" | plan: two yes | `git tag demo/5-story1-built` |
+| Review | new `gclaude`; `bmad-code-review` story F001-01; commit the record alone; `git push` | none | `git tag demo/6-reviewed` |
 
 The rehearsal also proves the steps the trial run marks "first real run" (Warden and Sentry in the planning flow, the
 build flow, the fresh-session review). Write what you see in `docs/reports/pilot-log.md`. A guard that fails is a
