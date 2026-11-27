@@ -11,17 +11,17 @@
 
 ## The idea
 
-One small project goes from an idea to pushed code: product brief, PRD, architecture, stories, ready-for-dev gate,
+One small project goes from an idea to pushed code: product brief, PRD, one FRD per PRD feature, architecture, stories, ready-for-dev gate,
 plan, generated code, commit, review, push. The guards block unsafe steps live, each with a rule id. Every decision and
 the Claude Code metrics land in ClickHouse and show in Grafana. A rehearsal the day before tags each approved stage, so a
 slow model step becomes one command on the day.
 
 ```text
-Idea → Brief → PRD → Architecture → Stories → Build → Commit → Review → Push
- |       |      |         |            |         |       |        |       |
-prompt Warden Sentry  Warden +     ready-for  write   pre-     review  pre-push
-guard         (brief  tech stack   -dev gate  gate    commit   record
-             approved?)
+Idea → Brief → PRD → FRDs → Architecture → Stories → Build → Commit → Review → Push
+ |       |      |      |          |            |         |       |        |       |
+prompt Warden Sentry Fenn +   Warden +     Sentry +   write   pre-     review  pre-push
+guard  + Voss (brief Iris +   tech stack   ready-for  gate    commit   record
+             approved?) Warden              -dev gate
                  every decision → OTel collector :4318 → ClickHouse → Grafana :3000
 ```
 
@@ -32,9 +32,9 @@ guard         (brief  tech stack   -dev gate  gate    commit   record
 | 0–3 | Why guards: the model writes, guards outside it decide | Talk | |
 | 3–6 | Setup is real: stack up, `setup_guard.py --check`, a PHI prompt blocked | Live | |
 | 6–14 | Brief, Voss review, Warden says no, Sentry blocks the PRD, then two yes answers | Live | `demo/1-brief` |
-| 14–18 | PRD, architecture, stories: start the PRD, then jump; show approvals in git | Skip | `demo/4-stories` |
-| 18–21 | Ready-for-dev gate: open question blocks, resolve by hand, allowed | Live | |
-| 21–30 | Code before plan blocked; `bmad-build` story 1; code and tests; plan edit blocked | Live | `demo/5-story1-built` |
+| 14–19 | PRD, FRDs, architecture, stories: start the PRD, then jump; show an FRD, its review and the approvals in git | Skip | `demo/4-stories` |
+| 19–22 | Ready-for-dev gate: open question blocks, resolve by hand, allowed; a story blocked by its FRD | Live | |
+| 22–30 | Code before plan blocked; `bmad-build` story 1; code and tests; plan edit blocked | Live | `demo/5-story1-built` |
 | 30–37 | Guard rapid fire: `rm -rf`, `reset --hard`, `--no-verify`, `.env`, PHI commit, Postgres driver | Live | |
 | 37–41 | Push blocked without review; fresh-session review; push allowed | Live | `demo/6-reviewed` |
 | 41–45 | Grafana: blocks per rule, users, tokens, cost; privacy query; audit reports | Live | |
@@ -94,9 +94,10 @@ After each stage is approved and committed, tag it:
 | Stage | Run | Warden | Tag |
 |---|---|---|---|
 | Brief | `bmad-product-brief` with the idea in `prompts.md`; Voss reviews | two yes | `git tag demo/1-brief` |
-| PRD | `bmad-prd` (Sentry checks the brief) | two yes | `git tag demo/2-prd` |
+| PRD | `bmad-prd` (Sentry checks the brief); features get `F-001`…, NFRs `NFR-001`… | two yes | `git tag demo/2-prd` |
+| FRDs | Fenn once per feature (F-001 book, F-002 cancel, F-003 free slots); Iris reviews each; add one `Disputed:` line in F-001's review and re-run Iris; resolve the questions by hand except **one in F-002** | two yes per FRD | `git tag demo/2b-frd` |
 | Architecture | `bmad-architecture`: FastAPI, SQLite, pytest | two yes | `git tag demo/3-arch` |
-| Stories | `bmad-create-epics-and-stories`: book, cancel, list free slots; leave one open question in a story for the gate step | none today | `git tag demo/4-stories` |
+| Stories | `bmad-create-epics-and-stories` (Sentry checks each FRD; stories carry `feature: F-<nnn>`); leave one open question in an F-001 story for the gate step | none today | `git tag demo/4-stories` |
 | Build story 1 | `bmad-build` "Book an appointment" | plan: two yes | `git tag demo/5-story1-built` |
 | Review | new `gclaude`; `bmad-code-review` story 1; commit the record alone; `git push` | none | `git tag demo/6-reviewed` |
 
@@ -144,7 +145,7 @@ bottom. Run `events 5` after each block.
 
 | Risk | Mitigation |
 |---|---|
-| Warden, Sentry, build flow and fresh-session review have not been driven by a live model yet | Rehearsal runs every one; findings go to the pilot log |
+| Warden, Sentry, Fenn, Iris, build flow and fresh-session review have not been driven by a live model yet | Rehearsal runs every one; findings go to the pilot log |
 | Model speed: PRD and architecture can take 10+ minutes | Stage tags; jump with one command; say so openly |
 | Claude refuses to write a fake token | Use the terminal commit (`COMMIT_SECRET`) instead |
 | Claude Code panels empty with `--settings` | Check in rehearsal; guard events still flow through the queue |
@@ -157,7 +158,7 @@ bottom. Run `events 5` after each block.
 1. `docker compose ps`: three containers up, clickhouse healthy.
 2. Grafana open, logged in, "Last 24 hours", rehearsal data visible.
 3. In `clinic-demo-live`: `setup_guard.py --project . --check` says up to date; `git log --oneline -1` is the
-   `demo/0-setup` commit; `git tag -l 'demo/*'` shows 7 tags.
+   `demo/0-setup` commit; `git tag -l 'demo/*'` shows 8 tags.
 4. Sender is `demo-dev`. No key on screen. No `.env` anywhere.
 5. Fake token built in a scratch note; `prompts.md` open to copy from.
 6. Terminal font 18px, notifications off.

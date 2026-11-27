@@ -117,18 +117,21 @@ Main components, data and integrations.
 
 There is no check for "link between screens" (team decision).
 
-**Epic FRD.** When the same folder holds `frd.md` (the epic's Functional Requirements Document,
-written by Fenn, `experion-frd`), the FRD is the functional part and the summary needs only
-`## Technical`. The gate then also checks the FRD, and blocks **every story of the epic** until:
+**Feature FRD.** A story built from a PRD feature names it in its front matter: `feature: F-001`.
+The gate then reads that feature's Functional Requirements Document
+(`_bmad-output/planning-artifacts/frds/F-001/frd.md`, written by Fenn, `experion-frd`). The FRD is
+the functional part, so the epic summary needs only `## Technical`. The gate blocks **every story of
+the feature** until:
 
-- the FRD's front matter says `approval_status: approved` (only Warden writes it; `FRD_UNAPPROVED`);
+- the FRD exists and its front matter says `approval_status: approved` (only Warden writes it;
+  `FRD_UNAPPROVED`, also when `feature` is not in the `F-<nnn>` format);
 - its `## 12. Open Questions` list and its assumption tags have nothing open, every resolution has
   who and when, and no id is missing or used twice (`FRD_OPEN_ITEMS`).
 
-The markup in the FRD is the same as in a story. A numbered heading (`## 12. Open Questions`) counts
-like `## Open questions`, in an FRD and in a story. Figma links and Jira IDs in an FRD are optional:
-"Not linked" is not a question. An FRD edited after approval is caught by Sentry in `bmad-build`
-(doc_type `frd-epic-<n>`) and by the pre-commit check.
+A story without `feature` is not checked against an FRD. The markup in the FRD is the same as in a
+story. A numbered heading (`## 12. Open Questions`) counts like `## Open questions`, in an FRD and in
+a story. Figma links and ADO ids in an FRD are optional: "Not linked" is not a question. An FRD edited
+after approval is caught by Sentry in `bmad-build` (doc_type `frd-F-001`) and by the pre-commit check.
 
 ## Worked example
 
