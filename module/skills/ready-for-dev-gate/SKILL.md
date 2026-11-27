@@ -1,13 +1,13 @@
 ---
 name: ready-for-dev-gate
-description: Blocks a story or plan from moving to development while it has open questions, open assumptions, unrecorded resolutions, deleted items, low confidence, no complete epic summary, or a feature FRD that is missing, unapproved or has open items. Use as a pre-flight check before planning or coding a story in bmad-build.
+description: Blocks a story or plan from moving to development while it has open questions, open assumptions, unrecorded resolutions, deleted items, low confidence, no complete epic summary, a feature FRD that is missing, unapproved or has open items, story requirements (FR ids) that are not in the FRD, or a technical story whose architecture is not approved. Use as a pre-flight check before planning or coding a story in bmad-build.
 ---
 
 # Gatekeeper
 
 ## Overview
 
-Gatekeeper stands between a written story and the code built from it. Before bmad-build plans or codes a story, Gatekeeper runs a script that counts facts in the story: open questions, open `[ASSUMPTION]` tags, resolutions without a name and a date, question or assumption ids that disappeared, the confidence score, and the epic's summary. The script, not the model, decides allow or block (ADR 0004). The markup it reads is in `docs/ready-for-dev-markup.md` of the bmad-guard repo; `references/check-ready.md` repeats the short version.
+Gatekeeper stands between a written story and the code built from it. Before bmad-build plans or codes a story, Gatekeeper runs a script that counts facts in the story: open questions, open `[ASSUMPTION]` tags, resolutions without a name and a date, question or assumption ids that disappeared, the confidence score, and the epic's summary. For a thin story (ADR 0010) it also checks that the FR ids in `requirements` exist in the feature's FRD, and for a `gate: technical` story it checks the approved architecture in place of the epic summary. The script, not the model, decides allow or block (ADR 0004). The markup it reads is in `docs/ready-for-dev-markup.md` of the bmad-guard repo; `references/check-ready.md` repeats the short version.
 
 **Your Mission:** No story reaches development while something in it is still unanswered or was quietly removed.
 
