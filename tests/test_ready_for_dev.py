@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,9 @@ SKILL = ROOT / "module/skills/ready-for-dev-gate"
 SCRIPT = SKILL / "scripts/ready_for_dev.py"
 ENV = {k: v for k, v in os.environ.items() if not k.startswith("BMAD_GUARD_")}
 
+FIXTURE = (
+    ROOT / "tests/fixtures/frd-clinic-f001.md"
+)  # a fake clinic FRD with FR-F001-01 (13 criteria) and FR-F001-02 (7)
 STORY_ONLY_WORD = "zebra-pineapple"  # appears only in story text; must never reach an event
 
 STORY = f"""---
@@ -460,6 +464,128 @@ class FrdTests(Base):
         raw = (self.project / ".bmad-guard/events/queue.jsonl").read_text()
         self.assertIn("FRD_UNAPPROVED", raw)
         self.assertNotIn("giraffe-mango", raw)
+
+
+def settled_clinic_frd() -> str:
+    """The clinic fixture, approved and with no open question or assumption (the fixture is a draft with both)."""
+    text = FIXTURE.read_text(encoding="utf-8").replace("approval_status: draft", "approval_status: approved")
+    text = re.sub(r"\s*\[ASSUMPTION[^\]]*\]", "", text)
+    return re.sub(r"(## 12\. Open Questions\n\n).*?(\n## 13\.)", r"\1- None.\n\2", text, flags=re.DOTALL)
+
+
+class RequirementsTests(Base):
+    """A feature story's `requirements` must be in its feature's FRD (ADR 0010). Uncovered FRs never block here."""
+
+    def setUp(self):
+        super().setUp()
+        self.frds = self.project / "frds"
+        self.frd = self.frds / "F-001/frd.md"
+        self.frd.parent.mkdir(parents=True)
+        self.frd.write_text(settled_clinic_frd(), encoding="utf-8")
+        self.edit("confidence: 84\n", "confidence: 84\nfeature: F-001\nrequirements: [FR-F001-02]\n")
+
+    def gate(self, *extra: str) -> dict:
+        return super().gate("--frds-dir", str(self.frds), *extra)
+
+    def requirements(self, value: str | None) -> None:
+        text = re.sub(r"requirements: .*\n", "", self.story.read_text())
+        if value is not None:
+            text = text.replace("feature: F-001\n", f"feature: F-001\nrequirements: {value}\n")
+        self.write(text)
+
+    def blocked_only(self, code: str) -> dict:
+        result = self.blocked_with(code)
+        self.assertEqual(codes(result), [code], result)
+        return result
+
+    def test_the_settled_fixture_is_clean(self):
+        self.assertEqual(self.gate()["result"], "allow", self.gate())
+
+    def test_known_ids_pass_whole_split_and_merged(self):
+        for value in ("[FR-F001-02]", "[FR-F001-01#1-4, FR-F001-01#6]", "[FR-F001-01, FR-F001-02]", "[FR-F001-02#7]"):
+            with self.subTest(requirements=value):
+                self.requirements(value)
+                self.assertEqual(self.gate()["result"], "allow", value)
+
+    def test_an_unknown_id_blocks_with_the_id_in_the_detail(self):
+        self.requirements("[FR-F001-09]")
+        result = self.blocked_only("STORY_FR_UNKNOWN")
+        self.assertIn("FR-F001-09", result["reasons"][0]["detail"])
+
+    def test_one_unknown_id_among_known_ones_blocks(self):
+        self.requirements("[FR-F001-01, FR-F001-09]")
+        self.blocked_only("STORY_FR_UNKNOWN")
+
+    def test_an_acceptance_criterion_the_fr_does_not_have_blocks(self):
+        self.requirements("[FR-F001-02#8]")
+        self.assertIn("criterion 8", self.blocked_only("STORY_FR_UNKNOWN")["reasons"][0]["detail"])
+
+    def test_a_withdrawn_fr_blocks(self):
+        text = self.frd.read_text(encoding="utf-8")
+        heading = "### 4.2. FR-F001-02 — List Free Slots through the API"
+        self.assertIn(heading, text)
+        self.frd.write_text(text.replace(heading, heading + " *Withdrawn*"), encoding="utf-8")
+        self.assertIn("withdrawn", self.blocked_only("STORY_FR_UNKNOWN")["reasons"][0]["detail"])
+
+    def test_a_malformed_id_blocks(self):
+        for value in ("[FR-F001]", "[FR-F001-02#x]", "[fr-f001-02]"):
+            with self.subTest(requirements=value):
+                self.requirements(value)
+                self.blocked_only("STORY_FR_UNKNOWN")
+
+    def test_an_fr_heading_used_twice_in_the_frd_blocks(self):
+        text = self.frd.read_text(encoding="utf-8")
+        self.frd.write_text(text.replace("### 4.1. FR-F001-01", "### 4.1. FR-F001-02"), encoding="utf-8")
+        self.assertIn("more than one block", self.blocked_only("STORY_FR_UNKNOWN")["reasons"][0]["detail"])
+
+    def test_an_id_of_another_feature_blocks(self):
+        self.requirements("[FR-F002-01]")
+        self.assertIn("another feature", self.blocked_only("STORY_FR_OTHER_FEATURE")["reasons"][0]["detail"])
+
+    def test_both_reasons_come_together(self):
+        self.requirements("[FR-F002-01, FR-F001-09]")
+        self.assertEqual(
+            sorted(codes(self.blocked_with("STORY_FR_UNKNOWN"))), ["STORY_FR_OTHER_FEATURE", "STORY_FR_UNKNOWN"]
+        )
+
+    def test_a_feature_story_without_requirements_keeps_the_old_behaviour(self):
+        for value in (None, "[]", "none", ""):
+            with self.subTest(requirements=value):
+                self.requirements(value)
+                result = self.gate()
+                self.assertEqual(result["result"], "allow", result)
+
+    def test_an_uncovered_fr_never_blocks_the_gate(self):
+        self.requirements("[FR-F001-01]")  # FR-F001-02 is in no story: the slicer and the commit warning care, not this
+        self.assertEqual(self.gate()["result"], "allow")
+
+    def test_ids_are_not_read_when_the_frd_cannot_be_read(self):
+        self.requirements("[FR-F001-09]")
+        self.frd.write_text("---\napproval_status: approved\n# no closing line\n")
+        self.blocked_only("FRD_UNAPPROVED")
+        self.frd.unlink()
+        self.blocked_only("FRD_UNAPPROVED")
+
+    def test_an_unapproved_frd_and_an_unknown_id_both_block(self):
+        self.frd.write_text(settled_clinic_frd().replace("approval_status: approved", "approval_status: draft"))
+        self.requirements("[FR-F001-09]")
+        self.assertEqual(codes(self.blocked_with("FRD_UNAPPROVED")), ["FRD_UNAPPROVED", "STORY_FR_UNKNOWN"])
+
+    def test_a_story_without_a_feature_ignores_requirements(self):
+        self.write(self.story.read_text().replace("feature: F-001\n", "").replace("[FR-F001-02]", "[FR-F001-09]"))
+        self.assertEqual(self.gate()["result"], "allow")
+
+    def test_a_generic_story_is_not_checked(self):
+        self.requirements("[FR-F001-09]")
+        self.edit("feature: F-001\n", "feature: F-001\ngate: generic\n")
+        self.assertEqual(self.gate()["result"], "allow")
+
+    def test_the_event_holds_the_code_and_not_the_id_text(self):
+        self.requirements("[FR-F001-09]")
+        self.gate()
+        raw = (self.project / ".bmad-guard/events/queue.jsonl").read_text()
+        self.assertIn("STORY_FR_UNKNOWN", raw)
+        self.assertNotIn("FR-F001-09", raw)
 
 
 class EventTests(Base):

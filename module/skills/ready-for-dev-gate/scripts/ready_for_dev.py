@@ -8,7 +8,10 @@ minimum, a who-and-when record on every resolution, no deleted question or assum
 epic summary with a functional and a technical part. When the story names its PRD feature (frontmatter
 `feature: F-<nnn>`), the feature's FRD (`<frds-dir>/F-<nnn>/frd.md`, written by experion-frd) is the
 functional part: it must exist, be approved and have no open question or assumption, or every story of
-that feature is blocked. Markup: docs/ready-for-dev-markup.md.
+that feature is blocked. The story's `requirements` (FR ids, ADR 0010) must exist in that FRD: an unknown,
+withdrawn or malformed id, a missing acceptance criterion number, or an id of another feature blocks
+(STORY_FR_UNKNOWN, STORY_FR_OTHER_FEATURE). A feature story with no `requirements` is not blocked for that: stories
+written before ADR 0010 keep working. Markup: docs/ready-for-dev-markup.md.
 
 Usage:
   python3 ready_for_dev.py <story> [--epic-summary FILE] [--epics-dir DIR] [--frds-dir DIR]
@@ -67,6 +70,15 @@ EPIC_PARTS = ("functional", "technical")
 FRD_NAME = "frd.md"  # the feature's FRD, in <frds-dir>/F-<nnn>/
 FEATURE_RE = re.compile(r"^F-\d{1,4}$")  # also keeps the path inside frds-dir
 APPROVED = "approved"
+# frd_parse selection problem -> the gate's reason. FR_SCREEN_UNKNOWN is an FRD defect, not the story's.
+REQUIREMENT_CODES = {
+    "FR_UNKNOWN": "STORY_FR_UNKNOWN",
+    "FR_WITHDRAWN": "STORY_FR_UNKNOWN",
+    "FR_ID_MALFORMED": "STORY_FR_UNKNOWN",
+    "FR_AC_UNKNOWN": "STORY_FR_UNKNOWN",
+    "FR_DUPLICATE": "STORY_FR_UNKNOWN",
+    "FR_OTHER_FEATURE": "STORY_FR_OTHER_FEATURE",
+}
 
 
 class GateError(Exception):
@@ -257,8 +269,23 @@ def check_epic_summary(path: Path | None, has_frd: bool = False) -> list[dict]:
     return []
 
 
-def check_frd(path: Path) -> tuple[list[dict], int | None]:
-    """Reasons from the feature's FRD, and its open item count. A missing FRD blocks."""
+def requirement_ids(fields: dict) -> list[str]:
+    """The FR ids of the story's `requirements` line (`FR-F001-02`, `FR-F001-04#1-4`). `none` and empty give no ids."""
+    return [i for i in frd_parse.split_ids(fields.get("requirements", "")) if i.lower() != "none"]
+
+
+def check_requirements(frd: dict, ids: list[str]) -> list[dict]:
+    """STORY_FR_UNKNOWN and STORY_FR_OTHER_FEATURE for the story's FR ids, read against the parsed FRD."""
+    reasons = []
+    for problem in frd_parse.select_blocks(frd, ids)["problems"]:
+        if problem["code"] in REQUIREMENT_CODES:
+            reasons.append({"code": REQUIREMENT_CODES[problem["code"]], "detail": problem["detail"]})
+    return reasons
+
+
+def check_frd(path: Path, requirements: list[str] | None = None) -> tuple[list[dict], int | None]:
+    """Reasons from the feature's FRD, and its open item count. A missing FRD blocks. With `requirements`, the ids
+    are also checked against the FRD (only when its front matter was read, else FRD_UNAPPROVED already blocks)."""
     if not path.is_file():
         return [{"code": "FRD_UNAPPROVED", "detail": f"no {path.name} for this feature at {path}"}], 0
     try:
@@ -301,6 +328,8 @@ def check_frd(path: Path) -> tuple[list[dict], int | None]:
     total = len(open_ids) + no_id + len(unrecorded) + len(gaps) + len(dupes)
     if parts:
         reasons.append({"code": "FRD_OPEN_ITEMS", "detail": f"{path.name}: " + "; ".join(parts)})
+    if requirements and not fm_error:
+        reasons.extend(check_requirements(frd, requirements))
     return reasons, total
 
 
@@ -313,7 +342,8 @@ def check_feature_frd(fields: dict, frds_dir: str | None) -> tuple[list[dict], i
         return [{"code": "FRD_UNAPPROVED", "detail": f"feature '{feature}' is not in the F-<nnn> format"}], 0
     if not frds_dir:
         return [{"code": "FRD_UNAPPROVED", "detail": f"no FRD folder configured to find the FRD of {feature}"}], 0
-    return check_frd(Path(frds_dir) / feature / FRD_NAME)
+    # A feature story with no `requirements` is not blocked for that: stories written before ADR 0010 have none.
+    return check_frd(Path(frds_dir) / feature / FRD_NAME, requirement_ids(fields))
 
 
 # --- the gate --------------------------------------------------------------------------------------
