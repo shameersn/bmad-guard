@@ -7,6 +7,9 @@ BMAD offers (`customize.toml` keys); never stock files, never copied templates.
 |---|---|
 | `<skill>.toml` | Team-layer override for one skill: BMAD 6.12.4 skills, or our guard skills |
 | `experion-frd.toml` | Fenn (FRD per PRD feature): Sentry checks the PRD first; Iris (`experion-frd-review`) reviews; Warden approves each FRD as `frd-F-<nnn>` |
+| `experion-story-slicer.toml` | Sloane (thin stories from approved FRDs, ADR 0010): Sentry checks the architecture first, and each FRD in her own flow; Ledger logs start and end; the coverage script runs when the flow ends. No Warden step: a story holds no requirement text |
+| `bmad-create-epics-and-stories.toml` | The stock epics-and-stories skill only redirects: it says that stories come from Sloane (`experion-story-slicer`) and stops. It no longer writes stories or `epics.md` |
+| `bmad-build.toml`, `bmad-code-review.toml` | For a story with `requirements`, read the acceptance criteria from the FRD by FR id (`frd_parse.py`), and review the diff against them |
 | `guard/references/confidence-scoring.md` | Shared confidence rubric, loaded by the planning overrides |
 
 BMAD resolves three layers per skill: the skill's own `customize.toml`, the team file
