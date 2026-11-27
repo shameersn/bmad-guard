@@ -21,6 +21,7 @@ import unittest
 from unittest import mock
 
 from tests.hook_harness import FAKE, HOOKS, HOOKS_REL, LIST_REL, MARKER, STATE_REL, HookTestCase
+from tests.test_story_coverage import POINTER, ac, make_frd
 
 KEY = FAKE["github-token"]
 PHONE = FAKE["phone-us"]
@@ -714,6 +715,150 @@ class RealCommitTests(HookTestCase):
         self.git("add", "--", ".claude/skills", HOOKS_REL)
         proc = self.hook()
         self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
+STORIES = "_bmad-output/planning-artifacts/stories"
+FRD_REL = "_bmad-output/planning-artifacts/frds/F-001/frd.md"
+SLICER_SCRIPT = ".claude/skills/experion-story-slicer/scripts/story_coverage.py"
+ORDER = "- [F001-01](F-001/F001-01-slug.md) — FR-F001-01\n- [F001-02](F-001/F001-02-slug.md) — FR-F001-02\n"
+
+
+def story(story_id: str, requirements: str, body: str = POINTER, deps: str = "[]") -> str:
+    return (
+        f"---\nstory: {story_id}\nfeature: F-001\nrequirements: {requirements}\ndepends_on: {deps}\n---\n"
+        f"# {story_id} A fake story\n\n{body}\n"
+    )
+
+
+class StoryCoverageTests(HookTestCase):
+    """A commit with staged story files gets a warning (never a block) when the stories do not match the FRD."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(FRD_REL, make_frd())  # FR-F001-01 and FR-F001-02, three criteria each
+        self.commit_all("the approved FRD")
+
+    def stage_stories(self, one: str = "[FR-F001-01]", two: str = "[FR-F001-02]", body: str = POINTER) -> None:
+        self.write(f"{STORIES}/F-001/F001-01-slug.md", story("F001-01", one, body))
+        self.write(f"{STORIES}/F-001/F001-02-slug.md", story("F001-02", two, deps="[F001-01]"))
+        self.write(f"{STORIES}/stories.md", "# Build order\n\n" + ORDER)
+        self.stage(STORIES)
+
+    def stub(self, text: str) -> None:
+        self.write(SLICER_SCRIPT, text)
+
+    def warned(self, proc, *codes: str) -> None:
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("warning (the commit goes ahead)", proc.stderr)
+        for code in codes:
+            self.assertIn(code, proc.stderr)
+
+    def test_stories_that_cover_the_frd_are_quiet(self):
+        self.stage_stories()
+        self.assertQuiet(self.hook())
+        self.assertEqual(self.codes(), ["COMMIT_ALLOWED"])
+
+    def test_an_uncovered_fr_warns_with_the_code_and_the_feature(self):
+        self.stage_stories(two="[FR-F001-01]")  # FR-F001-02 is in no story, FR-F001-01 is in two
+        proc = self.hook()
+        self.warned(proc, "COMMIT_STORY_COVERAGE", "STORY_FR_UNCOVERED (F-001)", "STORY_FR_TWICE (F-001)")
+        event = next(e for e in self.events() if e["reason_code"] == "COMMIT_STORY_COVERAGE")
+        self.assertEqual((event["verdict"], event["rule"]), ("warn", "story-coverage"))
+        self.assertEqual(event["detail"], "STORY_FR_TWICE,STORY_FR_UNCOVERED")
+
+    def test_copied_frd_text_warns_with_the_story_id_and_never_repeats_the_text(self):
+        copied = ac("FR-F001-01", 2)
+        self.stage_stories(body=POINTER + "\n\n" + copied)
+        proc = self.hook()
+        self.warned(proc, "STORY_FRD_TEXT (F001-01)")
+        self.assertNotIn(copied, proc.stderr + "".join(map(str, self.events())))
+
+    def test_a_requirement_the_frd_does_not_have_warns(self):
+        self.stage_stories(two="[FR-F001-09]")
+        self.warned(self.hook(), "STORY_FR_UNKNOWN (F001-02)", "STORY_FR_UNCOVERED")
+
+    def test_the_commit_itself_still_goes_through(self):
+        self.stage_stories(two="[FR-F001-01]")
+        proc = self.commit("some stories")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("COMMIT_STORY_COVERAGE", proc.stderr)
+        self.assertEqual(self.git("log", "-1", "--format=%s").stdout.strip(), "some stories")
+
+    def test_a_commit_without_story_files_does_not_run_the_coverage_check(self):
+        marker = self.project / "coverage-ran.txt"
+        self.stub(
+            f"open({str(marker)!r}, 'w').close()\n\ndef evaluate(*args, **kwargs):\n    return {{'reasons': []}}\n"
+        )
+        self.write("src/app.py", "print('hello')\n")
+        self.write("docs/notes.md", "# Notes\n")
+        self.stage("src/app.py", "docs/notes.md")
+        self.assertQuiet(self.hook())
+        self.assertFalse(marker.exists())
+        self.stage_stories()
+        self.assertQuiet(self.hook())
+        self.assertTrue(marker.exists(), "the stub shows the check runs when a story is staged")
+
+    def test_a_project_without_the_slicer_gets_no_check_and_no_message(self):
+        shutil.rmtree(self.project / ".claude/skills/experion-story-slicer")
+        self.stage_stories(two="[FR-F001-01]")
+        self.assertQuiet(self.hook())
+        self.assertEqual(self.codes(), ["COMMIT_ALLOWED"])
+
+    def test_it_reads_the_staged_stories_not_the_work_tree(self):
+        self.stage_stories(two="[FR-F001-01]")
+        self.write(f"{STORIES}/F-001/F001-02-slug.md", story("F001-02", "[FR-F001-02]", deps="[F001-01]"))
+        self.warned(self.hook(), "STORY_FR_UNCOVERED")  # fixed in the work tree, but not staged
+        self.stage_stories()
+        self.assertQuiet(self.hook())
+
+    def test_a_story_that_is_not_staged_is_not_counted(self):
+        self.write(f"{STORIES}/F-001/F001-02-slug.md", story("F001-02", "[FR-F001-02]", deps="[F001-01]"))  # untracked
+        self.write(f"{STORIES}/F-001/F001-01-slug.md", story("F001-01", "[FR-F001-01]"))
+        self.write(f"{STORIES}/stories.md", "# Build order\n\n" + ORDER)
+        self.stage(f"{STORIES}/F-001/F001-01-slug.md", f"{STORIES}/stories.md")
+        self.warned(self.hook(), "STORY_FR_UNCOVERED", "STORY_ORDER")
+
+    def test_the_order_file_alone_checks_the_whole_tree(self):
+        self.stage_stories()
+        self.commit_all("stories")
+        self.write(
+            f"{STORIES}/stories.md", "# Build order\n\n" + ORDER + "- [F001-09](F-001/F001-09-x.md) — FR-F001-09\n"
+        )
+        self.stage(f"{STORIES}/stories.md")
+        self.warned(self.hook(), "STORY_ORDER (F001-09)")
+
+    def test_a_technical_story_is_checked_too(self):
+        self.stage_stories()
+        self.commit_all("stories")
+        text = "---\nstory: T-01\nfeature: none\ngate: technical\n---\n# T-01 Set up\n\n" + ac("FR-F001-01", 1) + "\n"
+        self.write(f"{STORIES}/technical/T-01-set-up.md", text)
+        self.stage(f"{STORIES}/technical/T-01-set-up.md")
+        self.warned(self.hook(), "STORY_FRD_TEXT (T-01)", "STORY_ORDER")
+
+    def test_the_stories_folder_comes_from_the_slicers_own_settings(self):
+        toml = self.project / ".claude/skills/experion-story-slicer/customize.toml"
+        text = toml.read_text(encoding="utf-8")
+        self.assertIn('stories_dir = "{project-root}/' + STORIES + '"', text)
+        toml.write_text(text.replace("/" + STORIES + '"', '/docs/stories"'), encoding="utf-8")
+        self.write("docs/stories/F-001/F001-01-slug.md", story("F001-01", "[FR-F001-01]"))
+        self.write("docs/stories/stories.md", "# Build order\n\n" + ORDER)
+        self.stage("docs/stories")
+        self.warned(self.hook(), "STORY_FR_UNCOVERED", "STORY_ORDER")
+
+    def test_a_setting_outside_the_project_falls_back_to_the_default_folder(self):
+        toml = self.project / ".claude/skills/experion-story-slicer/customize.toml"
+        text = toml.read_text(encoding="utf-8")
+        toml.write_text(text.replace("/" + STORIES + '"', '/../elsewhere"'), encoding="utf-8")
+        self.stage_stories(two="[FR-F001-01]")
+        self.warned(self.hook(), "STORY_FR_UNCOVERED")
+
+    def test_a_check_that_cannot_run_warns_and_does_not_block(self):
+        self.stub("raise ValueError('broken')\n")
+        self.stage_stories()
+        proc = self.hook()
+        self.warned(proc, "COMMIT_STORY_COVERAGE", "could not run (ValueError)")
+        self.stub("def evaluate(*args, **kwargs):\n    raise OSError('nope')\n")
+        self.warned(self.hook(), "could not run (OSError)")
 
 
 class TreeTests(HookTestCase):

@@ -3,7 +3,7 @@
 # ///
 """The pre-commit checks (Phase 2, T6). `pre-commit` is a thin launcher; this module holds the logic.
 
-Three checks run on what is STAGED, never on the work tree. A block exits 1 with one message that lists every reason;
+Four checks run on what is STAGED, never on the work tree. A block exits 1 with one message that lists every reason;
 a warning exits 0 with a message on stderr. Any failure of the hook itself blocks (fail closed).
 
 1. Scan (the T5 rules). The lines this commit ADDS (`git diff --cached`, so only the staged version) go through
@@ -42,6 +42,15 @@ a warning exits 0 with a message on stderr. Any failure of the hook itself block
      COMMIT_DEPENDENCY_UNCHECKED    go.mod, Cargo.toml, ... changed, or the list does not govern that ecosystem. Warns.
      COMMIT_NO_TECH_STACK           no list, and a dependency file changed. Event only, no message.
 
+4. Story coverage (optional, warns only). A commit that stages a file under the stories folder (default
+   `_bmad-output/planning-artifacts/stories/`, or the slicer's `stories_dir`) runs the slicer's coverage script
+   (`story_coverage.py`) on the STAGED stories and FRDs of the features it touches. A commit with no story file runs
+   nothing. A project without the experion-story-slicer skill gets no check and no message.
+     COMMIT_STORY_COVERAGE   the script found a problem (STORY_FR_UNCOVERED, STORY_FR_TWICE, STORY_FRD_TEXT, ...), or
+                             could not run. Warns; the message and the event name the codes and the story or feature
+                             ids, never document text. The slicer's own run and the ready-for-dev gate are what block.
+   A commit that only deletes a story file is not seen (the hook checks added and changed files).
+
 Other ids: COMMIT_ERROR (the hook failed: blocks), COMMIT_ALLOWED and COMMIT_NOTHING_TO_CHECK (events only).
 
 Events go to the local queue only (guard_hook_lib.emit). They hold the rule id, the check, the staged file count and a
@@ -59,6 +68,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -94,6 +104,10 @@ LOCK_FILES = {
 SCAN_CODES = {"secrets": "COMMIT_SECRET", "phi": "COMMIT_PHI"}
 SCAN_NAMES = {"secrets": "secrets", "phi": "personal or health identifiers"}
 LISTED = 8  # file names shown in one message line
+SLICER = "experion-story-slicer"
+STORIES_REL = "_bmad-output/planning-artifacts/stories"  # defaults, as in the slicer's customize.toml
+FRDS_REL = "_bmad-output/planning-artifacts/frds"
+FEATURE_RE = re.compile(r"F-\d{1,4}")
 
 
 @dataclass
@@ -375,6 +389,76 @@ def check_documents(root: Path, paths: list[str], head: bool, approvals: Approva
     return reasons
 
 
+# --- 4. story coverage -------------------------------------------------------------------------------------------
+
+
+def slicer_folder(settings: str, key: str, default: str) -> str:
+    """A folder of the slicer's own customize.toml (`key = "{project-root}/<folder>"`), relative to the project. The
+    default when the line is missing or the folder is not inside the project."""
+    found = re.search(rf'(?m)^{key}\s*=\s*"\{{project-root\}}/([^"\n]*)"', settings)
+    folder = found.group(1).strip("/") if found else ""
+    return folder if folder and ".." not in folder.split("/") else default
+
+
+def export_staged(root: Path, folders: list[str], target: Path) -> None:
+    """Write the staged files under `folders` to `target` with the same relative paths, so the script reads what
+    the commit will hold and not the work tree."""
+    for folder in folders:
+        target.joinpath(folder).mkdir(parents=True, exist_ok=True)
+        for name in lib.git(root, "ls-files", "-z", "--cached", "--", folder + "/").split(b"\0"):
+            rel = os.fsdecode(name)
+            data = lib.index_blob(root, rel) if rel else None
+            if data is not None:
+                (target / rel).parent.mkdir(parents=True, exist_ok=True)
+                (target / rel).write_bytes(data)
+
+
+def check_story_coverage(root: Path, paths: list[str]) -> list[Reason]:
+    """COMMIT_STORY_COVERAGE (warn) for staged stories. Never blocks, even when the script cannot run."""
+    try:
+        script = lib.find_script(root, SLICER, "story_coverage.py")
+    except lib.HookError:
+        return []  # a project without the slicer has no stories to check
+    try:
+        settings = (script.parents[1] / "customize.toml").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        settings = ""
+    stories = slicer_folder(settings, "stories_dir", STORIES_REL)
+    frds = slicer_folder(settings, "frds_dir", FRDS_REL)
+    staged = [p[len(stories) + 1 :] for p in paths if p.startswith(stories + "/")]
+    if not staged:
+        return []  # no story file in this commit: nothing runs
+    try:
+        sc = lib.load_skill_script(root, SLICER, "story_coverage.py")
+        folders = [p.split("/")[0] if "/" in p else "" for p in staged]
+        features = sorted({f for f in folders if FEATURE_RE.fullmatch(f)})
+        runs = [None] if any(not FEATURE_RE.fullmatch(f) for f in folders) else features  # the order file: all
+        problems: dict[str, set[str]] = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            export_staged(root, [stories, frds], Path(tmp))
+            for feature in runs:
+                for found in sc.evaluate(Path(tmp, stories), Path(tmp, frds), feature)["reasons"]:
+                    label = found.get("story") or found.get("feature") or "all stories"
+                    problems.setdefault(found["code"], set()).add(label)
+    except Exception as err:  # a warning check must not stop a commit, so even a bug in it only warns
+        cause = getattr(err, "code", type(err).__name__)
+        text = f"the story coverage check could not run ({cause}), so it was skipped. The commit goes ahead."
+        return [Reason("COMMIT_STORY_COVERAGE", text, WARN, "story-coverage", cause)]
+    if not problems:
+        return []
+    shown = "; ".join(f"{code} ({listing(sorted(labels))})" for code, labels in sorted(problems.items()))
+    return [
+        Reason(
+            "COMMIT_STORY_COVERAGE",
+            f"the staged stories do not match the FRDs: {shown}. Run story_coverage.py (experion-story-slicer) for the "
+            "details, or ask Sloane to fix them. The slicer's own run and the ready-for-dev gate are what block.",
+            WARN,
+            "story-coverage",
+            ",".join(sorted(problems)),
+        )
+    ]
+
+
 # --- 3. tech stack -----------------------------------------------------------------------------------------------
 
 
@@ -497,6 +581,7 @@ def run_checks(root: Path, paths: list[str], list_gone: bool) -> list[Reason]:
     reasons = scan(root, paths, added_text(root, paths))
     reasons += check_documents(root, paths, head, approvals)
     reasons += check_tech_stack(root, paths, head, approvals, list_gone)
+    reasons += check_story_coverage(root, paths)
     if approvals.loaded and approvals.entries is None:
         reasons.append(
             Reason(
