@@ -16,7 +16,7 @@ confidence_rationale: <1-2 sentences>
 
 ## How to use this template
 
-This template sets out a standard 13-section structure for any Functional Requirements Document. Create **one FRD per PRD feature** (`F-xxx`) — generated at workflow Step 14 by the FRD agent (Fenn) from the **PO-approved PRD**. Replace every `<placeholder>`, and delete the guidance notes in *italics* before review.
+This template sets out a standard 13-section structure for any Functional Requirements Document. Create **one FRD per PRD feature** (`F-xxx`) — generated at workflow Step 14 by the FRD agent (Fenn) from the **PO-approved PRD**. Stories are not written here: they come later (Step 18) from Sloane (`experion-story-slicer`), as thin pointers to the FR ids of this FRD. Replace every `<placeholder>`, and delete the guidance notes in *italics* before review.
 
 - Write in plain business language: what the user does, what the system does, what the user sees.
 - Every requirement in Section 4 follows the same three-part pattern: **Screen reference → Acceptance Criteria → Key Transactions**.
@@ -24,7 +24,7 @@ This template sets out a standard 13-section structure for any Functional Requir
 - Anything unknown is written as "To be confirmed" **and** recorded where the ready-for-dev gate can count it: a question `Q-<n>` in Section 12, or an inline `[ASSUMPTION A-<n>: <what we assume>]` where the value is used. Never left blank.
 - Figma links and ADO IDs are optional. When there is none, write "Not linked". "Not linked" is not a question and does not block anything.
 - Keep cross-references consistent: each Section 4 requirement should map to a Section 5 screen.
-- **Stable IDs:** every requirement gets a permanent ID in the form `FR-<Feature ID>-<nn>` (e.g. `FR-F001-03`). IDs are never reused or renumbered across versions — a removed requirement is marked *Withdrawn*, and a new one takes the next free number even if it is inserted mid-section. Section numbers (4.1, 4.2 …) are for reading order only; all cross-references (stories, ADO, other FRDs) use the FR ID.
+- **Stable IDs:** every requirement gets a permanent ID in the form `FR-<Feature ID>-<nn>` (e.g. `FR-F001-03`). IDs are never reused or renumbered across versions — a removed requirement is marked *Withdrawn* (the word in asterisks, at the end of its heading or on the first non-blank line under it), and a new one takes the next free number even if it is inserted mid-section. Section numbers (4.1, 4.2 …) are for reading order only; all cross-references (stories, ADO, other FRDs) use the FR ID.
 - **Traceability:** the PRD ID/version and PRD Feature ID in the header are mandatory. The FRD must not introduce scope that is not in its PRD feature — raise it as an Open Question instead.
 
 *Guarded BMAD rules for this document (keep this note out of the final FRD):*
