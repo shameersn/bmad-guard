@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.guard_harness import ROOT, GuardTestCase, queue
+from tests.test_ready_for_dev import settled_clinic_frd
 
 wg = importlib.import_module("write_gate")
 gc = importlib.import_module("guard_config")
@@ -392,6 +393,118 @@ class StoryCheckTests(GateCase):
     def test_an_unreadable_story_blocks(self):
         (self.project / STORY).write_bytes(b"\xff\xfe\x00bad")
         self.assertEqual(self.source(), ["GATE_READY_UNREADABLE_STORY"])
+
+
+PLANNING = "_bmad-output/planning-artifacts"
+FRD_REL = f"{PLANNING}/frds/F-001/frd.md"
+ARCH_REL = f"{PLANNING}/architecture/arch-fake/ARCHITECTURE-SPINE.md"
+FEATURE_STORY_REL = f"{PLANNING}/stories/F-001/F001-02-list-free-slots-through-the-api.md"
+SUMMARY_REL = f"{PLANNING}/stories/F-001/technical-summary.md"
+TECHNICAL_REL = f"{PLANNING}/stories/technical/T-01-set-up-the-project.md"
+FEATURE_STORY = """\
+---
+story: F001-02
+feature: F-001
+requirements: [FR-F001-02]
+depends_on: none
+epic_summary: _bmad-output/planning-artifacts/stories/F-001/technical-summary.md
+confidence: 90
+---
+# F001-02 List free slots through the API
+
+Delivers FR-F001-02 of FRD-CLINIC-F001. Acceptance criteria: the FRD, Section 4.2.
+
+## Open questions
+
+- None.
+"""
+TECHNICAL_STORY = """\
+---
+story: T-01
+feature: none
+gate: technical
+confidence: 90
+---
+# T-01 Set up the project
+
+## Open questions
+
+- None.
+"""
+ARCHITECTURE_TEXT = "---\napproval_status: approved\n---\n\n# Fake architecture\n"
+
+
+class ThinStoryTests(GateCase):
+    """Thin stories (ADR 0010): the story id is `F001-02` or `T-01`; its requirements and architecture are checked."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(FRD_REL, settled_clinic_frd())
+        self.write(SUMMARY_REL, "# Technical\n\n## Technical\nOne fake service.\n")
+        self.write(FEATURE_STORY_REL, FEATURE_STORY)
+        self.write(TECHNICAL_REL, TECHNICAL_STORY)
+        self.write(ARCH_REL, ARCHITECTURE_TEXT)
+        self.plan_for("F001-02")
+
+    def plan_for(self, story_id: str) -> None:
+        plan = PLAN_TEXT.replace("story: 2-3", f"story: {story_id}")
+        self.write(PLAN, plan)
+        self.approve(text=plan)
+
+    def approve_architecture(self, doc_type: str = "architecture") -> None:
+        state = json.loads((self.project / STATE).read_text())
+        state[doc_type] = {
+            "doc_path": ARCH_REL,
+            "approved_hash": core.content_hash(ARCHITECTURE_TEXT, "full"),
+            "hash_mode": "full",
+            "approved_by": "Priya BA",
+            "approved_at": "2026-11-26T10:00:00Z",
+            "superseded": False,
+        }
+        self.write(STATE, json.dumps(state))
+
+    def test_a_feature_story_id_finds_the_story_and_it_passes(self):
+        self.assertEqual(self.source(), [])
+        self.assertEqual(list(self.builds()), ["F001-02"])
+
+    def test_a_requirement_that_is_not_in_the_frd_blocks(self):
+        self.sub(FEATURE_STORY_REL, "[FR-F001-02]", "[FR-F001-09]")
+        self.assertEqual(self.source(), ["GATE_READY_STORY_FR_UNKNOWN"])
+
+    def test_a_requirement_of_another_feature_blocks(self):
+        self.sub(FEATURE_STORY_REL, "[FR-F001-02]", "[FR-F002-01]")
+        self.assertEqual(self.source(), ["GATE_READY_STORY_FR_OTHER_FEATURE"])
+
+    def test_the_message_names_the_id_and_the_next_step(self):
+        self.sub(FEATURE_STORY_REL, "[FR-F001-02]", "[FR-F001-09]")
+        reasons = self.call("Write", {"file_path": str(self.project / "src/app.py"), "content": "x\n"})[1]
+        self.assertIn("FR-F001-09", reasons[0].reason)
+        self.assertIn("F001-02", reasons[0].reason)
+
+    def test_a_technical_story_id_finds_the_story_and_needs_the_architecture(self):
+        self.plan_for("T-01")
+        self.assertEqual(self.source(), ["GATE_READY_ARCH_UNAPPROVED"])
+        self.approve_architecture()
+        self.assertEqual(self.source(), [])
+        self.assertEqual(list(self.builds()), ["T-01"])
+
+    def test_an_architecture_edited_after_approval_blocks_a_technical_story(self):
+        self.plan_for("T-01")
+        self.approve_architecture()
+        self.sub(ARCH_REL, "Fake architecture", "Fake architecture, changed")
+        self.assertEqual(self.source(), ["GATE_READY_ARCH_UNAPPROVED"])
+
+    def test_a_feature_story_relabelled_technical_blocks(self):
+        self.approve_architecture()
+        self.sub(FEATURE_STORY_REL, "depends_on: none", "depends_on: none\ngate: technical")
+        self.assertEqual(self.source(), ["GATE_READY_TECHNICAL_STORY_INVALID"])
+
+    def test_the_architecture_key_comes_from_the_skill_file_not_from_a_project_override(self):
+        self.plan_for("T-01")
+        self.approve_architecture()
+        self.write("_bmad/custom/ready-for-dev-gate.toml", "[agent]\narchitecture_doc_type = 'other'\n")
+        self.assertEqual(self.source(), [])
+        self.assertEqual(wg.ready_config(self.project)[4], "architecture")
 
 
 class OneMessageTests(GateCase):
