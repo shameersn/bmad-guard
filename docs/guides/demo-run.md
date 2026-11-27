@@ -43,6 +43,20 @@ guard  + Voss (brief Iris +   tech stack   ready-for  gate    commit   record
 
 `<bmad-guard>` is your clone of this repo, on the branch or tag that holds `demo/`.
 
+### A0. Starting again
+
+`prepare.sh` refuses a folder that is not empty, and a project made with an older module version must not be reused
+(it has the old guards). Delete the old run first:
+
+```bash
+rm -rf ~/Projects/Exp/clinic-demo ~/Projects/Exp/clinic-demo-remote.git \
+       ~/Projects/Exp/clinic-demo-live ~/Projects/Exp/clinic-demo-live-remote.git
+```
+
+The stack, `secrets.local.ini`, the developer keys and your credentials file still work: skip `keys.py init` and A3's
+`--credentials` step. For an empty dashboard, run `docker compose down -v && docker compose up -d`; the password file
+and the key hashes are kept.
+
 ### A1. Collector stack and keys (off-screen)
 
 ```bash
@@ -57,7 +71,14 @@ docker compose restart otelcol
 Grafana: `http://127.0.0.1:3000`, user `admin`, password `GRAFANA_ADMIN_PASSWORD` in `secrets.local.ini`. The first
 start downloads the pinned plugins (about a minute, needs a network).
 
-Never run `keys.py add` while sharing your screen. Never `export BMAD_GUARD_KEY` in a shell profile.
+**Password trap.** ClickHouse and Grafana take their passwords only when their volumes are created. `keys.py init` with
+old volumes still there gives a file with new passwords and a stack with the old ones: Grafana says `invalid password`
+and the collector logs `otel_writer: Authentication failed`, so no events land. Fix: `docker compose down -v`, then
+`docker compose up -d` (this deletes the stack's data; back up first with `backup.sh` if you need it).
+
+Never run `keys.py add` while sharing your screen. Run `keys.py` and `setup_guard.py --credentials` in a real terminal,
+not as a command typed into a Claude chat: a chat command sends its output into the conversation. Never
+`export BMAD_GUARD_KEY` in a shell profile.
 
 ### A2. The demo project
 
@@ -75,6 +96,18 @@ Warden's script, makes a local bare remote and tags `demo/0-setup`. It also writ
 python3 <bmad-guard>/scripts/setup_guard.py --credentials --endpoint http://127.0.0.1:4318 --user rehearsal
 alias gclaude='claude --settings ~/.config/bmad-guard-demo/telemetry.json'
 ```
+
+If setup says `key is empty or has control characters`, the paste brought other characters (some terminals add
+invisible paste markers, and the clipboard may hold more than the key). Copy only the key, copy nothing after it, and
+pass it for this one command:
+
+```bash
+BMAD_GUARD_KEY="$(pbpaste)" python3 <bmad-guard>/scripts/setup_guard.py --credentials --endpoint http://127.0.0.1:4318 --user rehearsal
+pbcopy < /dev/null     # clear the clipboard
+```
+
+To check the clipboard first without showing it: `pbpaste | python3 -c 'import sys;s=sys.stdin.read();print(len(s), sum(ord(c)<32 for c in s))'`
+prints `43 0` for a key alone.
 
 The pilot puts the telemetry settings in managed settings (IT, root). For a laptop demo the same values go through
 `--settings`. The T4 live check passed only the headers helper that way and set the variables in the environment, so
