@@ -6,7 +6,7 @@ Guides for the people who use Guarded BMAD in the pilot (GUARD-3, T0). Start wit
 |---|---|---|
 | [install.md](install.md) | Everyone | Prerequisites, setup script, what it changes, HIPAA setting, how to read a block message, rollback by hand, FAQ. |
 | [developer.md](developer.md) | Developers | Plan, approval, write gate, build record, pre-commit, sensitive paths, destructive commands. |
-| [ba-pm.md](ba-pm.md) | BAs, PMs, architects | Warden approvals, the Sentry check, approval fields, open questions, the ready-for-dev format. |
+| [ba-pm.md](ba-pm.md) | BAs, PMs, POs, architects | The BA workflow step by step (who and which agent), FRDs per PRD feature, Warden approvals, the Sentry check, open questions, the ready-for-dev format. |
 | [reviewer.md](reviewer.md) | Reviewers | Review in a fresh session, the review record, pre-push rules. |
 | [windows-check.md](windows-check.md) | One BA on Windows, with a helper | The manual check for Windows (GUARD-3 T9): 11 steps, a results table. Not run yet. |
 | [trial-run.md](trial-run.md) | Shameer | The clinic-booking trial: set-up, about 20 try-this / expect-that steps, a results table. |

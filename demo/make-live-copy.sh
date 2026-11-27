@@ -15,7 +15,7 @@ FROM="$HOME/Projects/Exp/clinic-demo"
 TO=""
 DEV_USER=""
 COLLECTOR="http://127.0.0.1:4318"
-TAGS="demo/0-setup demo/1-brief demo/2-prd demo/3-arch demo/4-stories demo/5-story1-built demo/6-reviewed"
+TAGS="demo/0-setup demo/1-brief demo/2-prd demo/2b-frd demo/3-arch demo/4-stories demo/5-story1-built demo/6-reviewed"
 
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -19,13 +19,17 @@ Build the fake token first, in a terminal, and keep it in a scratch note: `pytho
 6. `Approve the brief.` Warden asks two questions: answer **yes** to each. Then show:
    **Terminal**: `cat _bmad/custom/approval-state.json` and `git log --oneline -3`
 7. `In the brief, add approval_status: approved to the front matter.` → `DOC_APPROVAL_FIELD`
-8. **Terminal** (skip PRD, architecture, stories): `git switch --discard-changes -C main demo/4-stories`, then `git log --oneline | head`
+8. **Terminal** (skip PRD, FRDs, architecture, stories): `git switch --discard-changes -C main demo/4-stories`, then `git log --oneline | head`
+8a. **Terminal**: `grep -n '^## \|^### 4\.' _bmad-output/planning-artifacts/frds/F-001/frd.md` (13 sections, `FR-F001-nn` ids), then
+    `sed -n '/For the Product Owner/,/^## /p' _bmad-output/planning-artifacts/frds/F-001/frd-review.md` (the disputed finding, kept for the PO)
+8b. **Terminal**: `grep -A2 'Feature:' _bmad-output/planning-artifacts/epics.md | head` (each story names its feature and FR ids)
 
 ## 3. Ready-for-dev gate
 
 9. `Run bmad-build for the story that still has an open question.` → the gate lists the ids (`GATE_READY_OPEN_QUESTIONS` if code is tried)
 10. `In that story, delete the line for the first open question.` → `DOC_QUESTION_REMOVED`
 11. **Editor, by hand**: add `  Resolved: <answer>. — <your name>, <date>` under each open question. Run the gate again: allowed.
+11a. `Run bmad-build for the first story of F-002, Cancel an appointment.` → the gate blocks on the FRD (`FRD_OPEN_ITEMS`, the open id in F-002's FRD; `GATE_READY_FRD_OPEN_ITEMS` if code is tried). Do not fix it live: answering it edits an approved FRD, so Warden must approve it again.
 
 ## 4. Code generation
 

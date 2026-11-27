@@ -322,13 +322,13 @@ class EpicSummaryTests(Base):
 
 
 FRD = """---
-title: FRD - EP-2 - Monthly report
-epic: 2
+title: FRD - F-001 - Monthly report
+feature: F-001
 version: 1
 approval_status: approved
 ---
 
-# FRD - EP-2 - Monthly report
+# FRD - F-001 - Monthly report
 
 ## 4. Requirement Details
 
@@ -339,20 +339,26 @@ Export runs nightly [ASSUMPTION-RESOLVED A-1: a 24-hour delay is fine — Test O
 - Q-1: Which roles can export? (raised by Test Analyst)
   Resolved: Managers and admins. — Test Analyst, 2026-11-20
 
-## 13. List of Identified User Stories
+## 13. Appendix
 
 - Not a question, outside the section.
 """
 
 
 class FrdTests(Base):
-    """An frd.md beside the epic summary is the functional part and must be approved and settled."""
+    """A story with `feature: F-<nnn>` needs that feature's FRD: approved and settled; it is the functional part."""
 
     def setUp(self):
         super().setUp()
-        self.frd = self.project / "epics/epic-2/frd.md"
+        self.frds = self.project / "frds"
+        self.frd = self.frds / "F-001/frd.md"
+        self.frd.parent.mkdir(parents=True)
         self.summary = self.project / "epics/epic-2/epic-summary.md"
         self.frd.write_text(FRD)
+        self.edit("confidence: 84\n", "confidence: 84\nfeature: F-001\n")
+
+    def gate(self, *extra: str) -> dict:
+        return super().gate("--frds-dir", str(self.frds), *extra)
 
     def edit_frd(self, old: str, new: str) -> None:
         text = self.frd.read_text()
@@ -364,11 +370,33 @@ class FrdTests(Base):
         self.assertEqual(result["result"], "allow", result)
         self.assertEqual(result["counts"]["frd_open_items"], 0)
 
-    def test_no_frd_keeps_the_old_rule(self):
-        self.frd.unlink()
+    def test_story_without_a_feature_keeps_the_old_rule(self):
+        self.edit("feature: F-001\n", "")
+        self.edit_frd("approval_status: approved", "approval_status: draft")
         result = self.gate()
         self.assertEqual(result["result"], "allow", result)
         self.assertIsNone(result["counts"]["frd_open_items"])
+
+    def test_missing_frd_blocks(self):
+        self.frd.unlink()
+        result = self.blocked_with("FRD_UNAPPROVED")
+        self.assertIn("no frd.md", result["reasons"][0]["detail"])
+
+    def test_feature_not_in_the_id_format_blocks(self):
+        for bad in ("../F-001", "F-1a", "f-001", "F-001/../../x"):
+            with self.subTest(feature=bad):
+                self.write(self.story.read_text().replace("feature: F-001", f"feature: {bad}"))
+                self.assertIn("F-<nnn>", self.blocked_with("FRD_UNAPPROVED")["reasons"][0]["detail"])
+                self.write(self.story.read_text().replace(f"feature: {bad}", "feature: F-001"))
+
+    def test_no_frds_dir_blocks_a_story_with_a_feature(self):
+        result = Base.gate(self)
+        self.assertEqual(codes(result), ["FRD_UNAPPROVED"])
+        self.assertIn("no FRD folder", result["reasons"][0]["detail"])
+
+    def test_quoted_feature_is_read(self):
+        self.edit("feature: F-001", 'feature: "F-001"')
+        self.assertEqual(self.gate()["result"], "allow")
 
     def test_frd_replaces_the_functional_part_only(self):
         self.summary.write_text("## Technical\nA nightly export job.\n")
@@ -416,10 +444,10 @@ class FrdTests(Base):
         self.edit_frd("## 13.", "Again [ASSUMPTION-RESOLVED A-1: same id — Test Owner, 2026-11-22].\n\n## 13.")
         self.assertIn("used more than once", self.blocked_with("FRD_OPEN_ITEMS")["reasons"][0]["detail"])
 
-    def test_frd_found_with_the_epic_number_too(self):
-        self.edit("epic_summary: epics/epic-2/epic-summary.md", "epic: 2")
-        self.edit_frd("approval_status: approved", "approval_status: draft")
-        self.blocked_with("FRD_UNAPPROVED", "--epics-dir", str(self.project / "epics"))
+    def test_an_frd_in_the_epic_folder_is_not_used(self):
+        self.frd.unlink()
+        (self.project / "epics/epic-2/frd.md").write_text(FRD)
+        self.blocked_with("FRD_UNAPPROVED")
 
     def test_numbered_open_questions_heading_counts_in_a_story(self):
         self.edit("## Open questions", "## 7. Open Questions\n\n- Q-3: Is CSV enough?\n\n## 7.1. Open questions")
@@ -483,6 +511,7 @@ class SkillTests(unittest.TestCase):
         agent = tomllib.loads((SKILL / "customize.toml").read_text(encoding="utf-8"))["agent"]
         self.assertEqual((agent["code"], agent["mode"], agent["min_confidence"]), ("ready-for-dev-gate", "enforce", 80))
         self.assertTrue(agent["epics_dir"])
+        self.assertTrue(agent["frds_dir"])
 
     def test_markup_doc_example_blocks_for_the_documented_reasons(self):
         doc = (ROOT / "docs/ready-for-dev-markup.md").read_text(encoding="utf-8")

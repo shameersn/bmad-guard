@@ -35,6 +35,10 @@ min_confidence = 80
 # and no `epic_summary:` link.
 epics_dir = "{project-root}/_bmad-output/planning-artifacts/epics"
 
+# Folder with one F-<nnn>/frd.md per PRD feature. A story with frontmatter `feature: F-<nnn>` is blocked
+# until that FRD exists, is approved and has no open item. Keep in sync with experion-frd's frds_dir.
+frds_dir = "{project-root}/_bmad-output/planning-artifacts/frds"
+
 # Git ref to compare question and assumption ids against; ids present there but gone now count as
 # deleted. Empty = only id gaps are checked (and the story need not be in git).
 baseline = "HEAD"

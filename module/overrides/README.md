@@ -6,7 +6,7 @@ BMAD offers (`customize.toml` keys); never stock files, never copied templates.
 | File | What |
 |---|---|
 | `<skill>.toml` | Team-layer override for one skill: BMAD 6.12.4 skills, or our guard skills |
-| `experion-frd.toml` | Fenn (FRD per epic): Sentry checks the PRD first; Warden approves each FRD as `frd-epic-<n>` with Fenn's Validate flow as the review |
+| `experion-frd.toml` | Fenn (FRD per PRD feature): Sentry checks the PRD first; Iris (`experion-frd-review`) reviews; Warden approves each FRD as `frd-F-<nnn>` |
 | `guard/references/confidence-scoring.md` | Shared confidence rubric, loaded by the planning overrides |
 
 BMAD resolves three layers per skill: the skill's own `customize.toml`, the team file

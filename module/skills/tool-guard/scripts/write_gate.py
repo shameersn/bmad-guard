@@ -136,19 +136,21 @@ def _load(skill: str, script: str):
     return module
 
 
-def ready_config(root: Path) -> tuple[int, str, str]:
-    """(min_confidence, epics_dir, baseline) from the ready-for-dev skill's own customize.toml. A project override
-    file is not read: it is not protected, and a lower minimum would weaken the gate."""
+def ready_config(root: Path) -> tuple[int, str, str, str]:
+    """(min_confidence, epics_dir, baseline, frds_dir) from the ready-for-dev skill's own customize.toml. A project
+    override file is not read: it is not protected, and a lower minimum would weaken the gate."""
     path = HERE.parents[1] / READY_SKILL / "customize.toml"
     try:
         agent = gc.parse_toml(path.read_text(encoding="utf-8")).get("agent", {})
         minimum = agent.get("min_confidence", 80)
         epics, baseline = agent.get("epics_dir", ""), agent.get("baseline", "")
+        frds = agent.get("frds_dir", "")
     except (OSError, ValueError) as err:
         raise GateError(f"the ready-for-dev settings cannot be read ({type(err).__name__})") from None
-    if not (isinstance(minimum, int) and 0 <= minimum <= 100 and isinstance(epics, str) and isinstance(baseline, str)):
+    texts = (epics, baseline, frds)
+    if not (isinstance(minimum, int) and 0 <= minimum <= 100 and all(isinstance(v, str) for v in texts)):
         raise GateError("the ready-for-dev settings are not in the expected format")
-    return minimum, epics.replace("{project-root}", str(root)), baseline
+    return minimum, epics.replace("{project-root}", str(root)), baseline, frds.replace("{project-root}", str(root))
 
 
 # --- the plan ------------------------------------------------------------------------------------------
@@ -290,14 +292,14 @@ def find_story(root: Path, plan: Plan) -> tuple[Path | None, hc.Verdict | None]:
 
 def story_reasons(root: Path, story: Path) -> list[hc.Verdict]:
     rfd = dt.ready_for_dev()
-    minimum, epics_dir, baseline = ready_config(root)
+    minimum, epics_dir, baseline, frds_dir = ready_config(root)
     rel = story.relative_to(root).as_posix()
     try:
         text = story.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
         return [verdict("GATE_READY_UNREADABLE_STORY", f"The story {rel} cannot be read ({type(err).__name__}).")]
     try:
-        result = rfd.evaluate(text, story, minimum, None, epics_dir or None, baseline or None)
+        result = rfd.evaluate(text, story, minimum, None, epics_dir or None, baseline or None, frds_dir or None)
     except rfd.GateError as err:
         return [verdict(f"GATE_READY_{err.code}", f"The story {rel} cannot be checked: {err.detail}.")]
     return [

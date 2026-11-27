@@ -5,13 +5,14 @@
 
 Blocks unless the story has zero open questions, zero open assumptions, confidence at or above the
 minimum, a who-and-when record on every resolution, no deleted question or assumption ids, and an
-epic summary with a functional and a technical part. When the epic folder holds an FRD (`frd.md`, written
-by experion-frd), the FRD is the functional part: it must be approved and have no open question or
-assumption, or every story of that epic is blocked. Markup: docs/ready-for-dev-markup.md.
+epic summary with a functional and a technical part. When the story names its PRD feature (frontmatter
+`feature: F-<nnn>`), the feature's FRD (`<frds-dir>/F-<nnn>/frd.md`, written by experion-frd) is the
+functional part: it must exist, be approved and have no open question or assumption, or every story of
+that feature is blocked. Markup: docs/ready-for-dev-markup.md.
 
 Usage:
-  python3 ready_for_dev.py <story> [--epic-summary FILE] [--epics-dir DIR] [--min-confidence 80]
-                           [--baseline GIT_REF] [--no-event]
+  python3 ready_for_dev.py <story> [--epic-summary FILE] [--epics-dir DIR] [--frds-dir DIR]
+                           [--min-confidence 80] [--baseline GIT_REF] [--no-event]
 
 Prints one JSON object:
   {"result": "allow" | "block", "reasons": [{"code": ..., "detail": ...}], "counts": {...}}
@@ -51,7 +52,8 @@ ASSUMPTION_RE = re.compile(r"\[ASSUMPTION(?P<resolved>-RESOLVED)?(?:\s+(?P<id>A-
 ANY_ASSUMPTION_RE = re.compile(r"\[ASSUMPTION")
 WHO_WHEN_RE = re.compile(r"(?:—|--)\s*(?P<who>[^,—]+?)\s*,\s*(?P<when>\d{4}-\d{2}-\d{2})\s*$")
 EPIC_PARTS = ("functional", "technical")
-FRD_NAME = "frd.md"  # the epic's FRD, beside epic-summary.md
+FRD_NAME = "frd.md"  # the feature's FRD, in <frds-dir>/F-<nnn>/
+FEATURE_RE = re.compile(r"^F-\d{1,4}$")  # also keeps the path inside frds-dir
 APPROVED = "approved"
 
 
@@ -265,9 +267,9 @@ def check_epic_summary(path: Path | None, has_frd: bool = False) -> list[dict]:
 
 
 def check_frd(path: Path) -> tuple[list[dict], int | None]:
-    """Reasons from the epic's FRD, and its open item count (None when there is no FRD)."""
+    """Reasons from the feature's FRD, and its open item count. A missing FRD blocks."""
     if not path.is_file():
-        return [], None
+        return [{"code": "FRD_UNAPPROVED", "detail": f"no {path.name} for this feature at {path}"}], 0
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
@@ -310,6 +312,18 @@ def check_frd(path: Path) -> tuple[list[dict], int | None]:
     return reasons, total
 
 
+def check_feature_frd(fields: dict, frds_dir: str | None) -> tuple[list[dict], int | None]:
+    """The FRD of the story's `feature` (None as count when the story names no feature)."""
+    feature = fields.get("feature", "").strip().strip("'\"")
+    if not feature:
+        return [], None
+    if not FEATURE_RE.match(feature):
+        return [{"code": "FRD_UNAPPROVED", "detail": f"feature '{feature}' is not in the F-<nnn> format"}], 0
+    if not frds_dir:
+        return [{"code": "FRD_UNAPPROVED", "detail": f"no FRD folder configured to find the FRD of {feature}"}], 0
+    return check_frd(Path(frds_dir) / feature / FRD_NAME)
+
+
 # --- the gate --------------------------------------------------------------------------------------
 
 
@@ -320,6 +334,7 @@ def evaluate(
     epic_summary: str | None = None,
     epics_dir: str | None = None,
     baseline: str | None = None,
+    frds_dir: str | None = None,
 ) -> dict:
     """Return the result dict for one story text."""
     reasons: list[dict] = []
@@ -389,7 +404,7 @@ def evaluate(
                 )
 
     summary_path = epic_summary_path(story, fields, epic_summary, epics_dir)
-    frd_reasons, frd_open = check_frd(summary_path.parent / FRD_NAME) if summary_path else ([], None)
+    frd_reasons, frd_open = check_feature_frd(fields, frds_dir) if not fm_error else ([], None)
     reasons.extend(check_epic_summary(summary_path, has_frd=frd_open is not None))
     reasons.extend(frd_reasons)
 
@@ -479,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("story", help="story or plan markdown file")
     parser.add_argument("--epic-summary", help="the epic's epic-summary.md (default: linked from the story)")
     parser.add_argument("--epics-dir", help="folder with epic-<n>/epic-summary.md, used with frontmatter 'epic'")
+    parser.add_argument("--frds-dir", help="folder with F-<nnn>/frd.md, used with frontmatter 'feature'")
     parser.add_argument("--min-confidence", type=confidence_arg, default=80, help="(default: %(default)s)")
     parser.add_argument("--baseline", help="git ref; ids present there but gone now count as deleted")
     parser.add_argument("--no-event", action="store_true", help="do not record a guard event")
@@ -493,7 +509,9 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, UnicodeDecodeError) as err:
             raise GateError("UNREADABLE_STORY", f"cannot read the story ({type(err).__name__})") from None
         sha256 = hashlib.sha256(raw).hexdigest()
-        result = evaluate(text, story, args.min_confidence, args.epic_summary, args.epics_dir, args.baseline)
+        result = evaluate(
+            text, story, args.min_confidence, args.epic_summary, args.epics_dir, args.baseline, args.frds_dir
+        )
     except GateError as err:
         result = {"result": "block", "reasons": [{"code": err.code, "detail": err.detail}], "counts": {}}
         exit_code = 2

@@ -242,10 +242,11 @@ On a machine with IT's **managed settings**, the Claude Code hooks may run from 
 
 | Where | What | Why |
 |---|---|---|
-| `.claude/skills/` and `.agents/skills/` (each one that exists) | 9 guard skills: `agent-approval-gate-check` (Sentry), `agent-approval-grant` (Warden), `agent-project-logger` (Ledger), `confidence-scorer`, `experion-brief-review` (Voss), `experion-frd` (Fenn), `prompt-guard` (Marshal), `ready-for-dev-gate`, `tool-guard` | The guard code, and the skills BMAD workflows call. |
-| `_bmad/custom/` | Overrides: `bmad-product-brief.toml`, `bmad-prd.toml`, `bmad-architecture.toml`, `bmad-create-epics-and-stories.toml`, `bmad-ux.toml`, `bmad-build.toml`, `bmad-code-review.toml`, `agent-approval-grant.toml`, `agent-approval-gate-check.toml` | They add the guard steps to BMAD workflows through BMAD's own override points. |
+| `.claude/skills/` and `.agents/skills/` (each one that exists) | 10 guard skills: `agent-approval-gate-check` (Sentry), `agent-approval-grant` (Warden), `agent-project-logger` (Ledger), `confidence-scorer`, `experion-brief-review` (Voss), `experion-frd` (Fenn), `experion-frd-review` (Iris), `prompt-guard` (Marshal), `ready-for-dev-gate`, `tool-guard` | The guard code, and the skills BMAD workflows call. |
+| `_bmad/custom/` | Overrides: `bmad-product-brief.toml`, `bmad-prd.toml`, `bmad-architecture.toml`, `bmad-create-epics-and-stories.toml`, `bmad-ux.toml`, `bmad-build.toml`, `bmad-code-review.toml`, `agent-approval-grant.toml`, `agent-approval-gate-check.toml`, `experion-frd.toml` | They add the guard steps to BMAD workflows through BMAD's own override points. |
 | `_bmad/custom/guard/hooks/` | The git hooks `pre-commit` and `pre-push` and their helper files | Layer L2. |
 | `_bmad/custom/guard/references/` | The shared confidence rubric | Loaded by the planning overrides. |
+| `_bmad/custom/templates/` | Nothing. Setup never writes here. | A team may put its own `frd-template.md` here; Fenn then uses it instead of the built-in one. |
 | `_bmad/custom/guard/manifest.json` | Module version and a hash of every installed file | So a re-run can tell your edits from ours. |
 | git config (local) | `core.hooksPath = _bmad/custom/guard/hooks` | Makes git run the hooks. |
 | `.claude/settings.json` | Three hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`) and 21 deny rules (`Read(...)` for `.env`, keys, dumps, `~/.aws`, `~/.ssh`, `~/.config/bmad-guard`). Your own entries are kept. | Layer L1. Skipped when the project has no `.claude/skills` folder. |
@@ -370,7 +371,7 @@ The by-hand steps below are the same thing, if you cannot run the script.
 
    ```bash
    for s in agent-approval-gate-check agent-approval-grant agent-project-logger confidence-scorer \
-            experion-brief-review experion-frd prompt-guard ready-for-dev-gate tool-guard; do
+            experion-brief-review experion-frd experion-frd-review prompt-guard ready-for-dev-gate tool-guard; do
      git rm -r -q ".claude/skills/$s" ".agents/skills/$s"
    done
    git rm -q _bmad/custom/{agent-approval-gate-check,agent-approval-grant,bmad-architecture,bmad-build,bmad-code-review,bmad-create-epics-and-stories,bmad-prd,bmad-product-brief,bmad-ux,experion-frd}.toml

@@ -379,6 +379,16 @@ class StoryCheckTests(GateCase):
         self.write(STORY, STORY_TEXT.replace("confidence: 90", "confidence: 50"))
         self.assertEqual(self.source(), ["GATE_READY_LOW_CONFIDENCE"])
 
+    def test_a_story_with_a_feature_needs_its_approved_frd(self):
+        frd = "_bmad-output/planning-artifacts/frds/F-001/frd.md"
+        self.write(STORY, STORY_TEXT.replace("confidence: 90\n", "confidence: 90\nfeature: F-001\n"))
+        self.assertEqual(self.story_codes(), ["GATE_READY_FRD_UNAPPROVED"])
+        settled = "---\nfeature: F-001\napproval_status: {}\n---\n\n## 12. Open Questions\n\n- None.\n"
+        self.write(frd, settled.format("draft"))
+        self.assertEqual(self.story_codes(), ["GATE_READY_FRD_UNAPPROVED"])
+        self.write(frd, settled.format("approved"))
+        self.assertEqual(self.story_codes(), [])
+
     def test_an_unreadable_story_blocks(self):
         (self.project / STORY).write_bytes(b"\xff\xfe\x00bad")
         self.assertEqual(self.source(), ["GATE_READY_UNREADABLE_STORY"])
