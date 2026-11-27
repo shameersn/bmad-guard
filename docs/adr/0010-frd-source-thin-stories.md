@@ -135,3 +135,4 @@ the stock skill. The coverage and no-copy check is a script, not an instruction 
   epic summary, generic marker).
 - Docs: `docs/guides/ba-pm.md` (steps 14–19), `docs/plans/phase-2.md` (no Warden on `epics.md`), the
   team doc "Guarded BMAD: Can we skip Epics & Stories after the FRD?".
+- Plan: `docs/plans/adr-0010-thin-stories.md` (GUARD-3, Phase 1 and Phase 3 of this ADR).

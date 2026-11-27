@@ -835,17 +835,28 @@ class SkillTests(unittest.TestCase):
         self.assertTrue(agent["frds_dir"])
         self.assertEqual(agent["architecture_doc_type"], "architecture")
 
-    def test_markup_doc_example_blocks_for_the_documented_reasons(self):
+    def test_markup_doc_examples_give_the_documented_results(self):
         doc = (ROOT / "docs/ready-for-dev-markup.md").read_text(encoding="utf-8")
-        example = doc.split("## Worked example")[1].split("```markdown\n")[1].split("\n```")[0]
+        section = doc.split("## Worked example")[1].split("## All block reasons")[0]
+        passing, failing = re.findall(r"```markdown\n(.*?)\n```", section, re.DOTALL)
         with tempfile.TemporaryDirectory() as tmp:
-            story = Path(tmp) / "story.md"
-            story.write_text(example + "\n")
-            summary = Path(tmp) / "summary.md"
-            summary.write_text(EPIC_SUMMARY)
-            code, result, err = run(Path(tmp), str(story), "--epic-summary", str(summary), "--no-event")
-        self.assertEqual(code, 0, err)
-        self.assertEqual(codes(result), ["OPEN_QUESTIONS", "OPEN_ASSUMPTIONS", "DELETED_ITEMS"])
+            project = make_project(Path(tmp))
+            (project / "frds/F-001").mkdir(parents=True)
+            (project / "frds/F-001/frd.md").write_text(settled_clinic_frd(), encoding="utf-8")
+            summary = project / "_bmad-output/planning-artifacts/stories/F-001/technical-summary.md"
+            summary.parent.mkdir(parents=True)
+            summary.write_text("# F-001: technical summary\n\n## Technical\n\n- A small service.\n", encoding="utf-8")
+            results = []
+            for name, example in (("F001-02.md", passing), ("F001-03.md", failing)):
+                (project / name).write_text(example + "\n", encoding="utf-8")
+                code, result, err = run(project, name, "--frds-dir", str(project / "frds"), "--no-event")
+                self.assertEqual(code, 0, err)
+                results.append(result)
+        self.assertEqual((results[0]["result"], codes(results[0])), ("allow", []))
+        self.assertEqual(
+            codes(results[1]),
+            ["OPEN_QUESTIONS", "OPEN_ASSUMPTIONS", "DELETED_ITEMS", "STORY_FR_UNKNOWN", "STORY_FR_OTHER_FEATURE"],
+        )
 
 
 if __name__ == "__main__":
