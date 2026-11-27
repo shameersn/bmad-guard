@@ -443,5 +443,21 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run()[0], 2)
 
 
+class GateSharesTheParserTests(unittest.TestCase):
+    def test_the_gate_reads_front_matter_with_the_same_code(self):
+        gate = load("ready_for_dev_for_frd_parse_tests", GATE)
+        self.assertEqual(gate.parse_frontmatter(TEXT), fp.parse_frontmatter(TEXT))
+        self.assertEqual(gate.frd_parse.__file__, str(SCRIPT))
+        self.assertIs(gate.parse_frontmatter, gate.frd_parse.parse_frontmatter)
+
+    def test_the_gate_names_the_missing_parser(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lone = Path(tmp) / "ready_for_dev.py"
+            lone.write_text(GATE.read_text(encoding="utf-8"), encoding="utf-8")
+            with self.assertRaises(ImportError) as caught:
+                load("ready_for_dev_without_parser", lone)
+        self.assertIn("frd_parse.py is missing", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,14 +35,26 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+def _load_frd_parse():
+    """The shared FRD parser, from the same folder. Loaded by path, so it works when this file is loaded by path too."""
+    path = Path(__file__).resolve().parent / "frd_parse.py"
+    if not path.is_file():
+        raise ImportError("frd_parse.py is missing next to ready_for_dev.py (ready-for-dev-gate skill)")
+    spec = importlib.util.spec_from_file_location("frd_parse", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+frd_parse = _load_frd_parse()
+parse_frontmatter = frd_parse.parse_frontmatter  # one front matter reader for stories and FRDs
+HEADING_RE = frd_parse.HEADING_RE
+
 GUARD = "ready-for-dev"
 STAGE = "ready-for-dev"
 AGENT = "ready-for-dev-gate/READY"
 
-FRONTMATTER_OPEN_RE = re.compile(r"\A---\r?\n")
-FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n?---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
-KEY_RE = re.compile(r"^([A-Za-z_][\w-]*)\s*:(.*)$")
-HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 OPEN_QUESTIONS_RE = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?open questions$", re.IGNORECASE)  # "12. Open Questions" too
 ITEM_RE = re.compile(r"^ ?[-*+]\s+(.*)$")  # top-level only; indented items belong to the item above
 QUESTION_ID_RE = re.compile(r"^(?:\*\*)?(Q-(\d+))\b")
@@ -67,27 +79,6 @@ class GateError(Exception):
 
 
 # --- parsing ---------------------------------------------------------------------------------------
-
-
-def parse_frontmatter(text: str) -> tuple[dict[str, str], str, str | None]:
-    """Return (fields, body, error). Only top-level `key: value` lines are read; nested lines are skipped."""
-    if not FRONTMATTER_OPEN_RE.match(text):
-        return {}, text, None
-    match = FRONTMATTER_RE.match(text)
-    if not match:
-        return {}, text, "frontmatter starts with '---' but has no closing '---' line"
-    fields: dict[str, str] = {}
-    for number, line in enumerate(match.group(1).splitlines(), start=2):
-        if not line.strip() or line.lstrip().startswith("#") or line[:1] in (" ", "\t", "-"):
-            continue  # blank, comment, or part of a nested value
-        key_match = KEY_RE.match(line)
-        if not key_match:
-            return {}, text[match.end() :], f"frontmatter line {number} is not 'key: value'"
-        key = key_match.group(1).lower()
-        if key in fields:
-            return {}, text[match.end() :], f"frontmatter key '{key}' appears twice"
-        fields[key] = key_match.group(2).strip().strip("'\"")
-    return fields, text[match.end() :], None
 
 
 def has_who_and_when(text: str) -> bool:
@@ -274,7 +265,8 @@ def check_frd(path: Path) -> tuple[list[dict], int | None]:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
         return [{"code": "FRD_UNAPPROVED", "detail": f"cannot read {path.name} ({type(err).__name__})"}], 0
-    fields, body, fm_error = parse_frontmatter(text)
+    frd = frd_parse.parse_frd(text)
+    fields, body, fm_error = frd["fields"], frd["body"], frd["frontmatter_error"]
     reasons = []
     status = fields.get("approval_status", "")
     if fm_error:
