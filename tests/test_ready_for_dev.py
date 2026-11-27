@@ -8,6 +8,8 @@ The script runs as a real command-line program against throwaway git projects. A
 
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -588,6 +590,199 @@ class RequirementsTests(Base):
         self.assertNotIn("FR-F001-09", raw)
 
 
+ARCHITECTURE = (
+    "---\ntitle: Fake architecture\napproval_status: approved\n---\n\n# Fake architecture\n\nOne fake service.\n"
+)
+ARCH_REL = "arch/ARCHITECTURE-SPINE.md"
+TECHNICAL_STORY = """---
+story: T-01
+feature: none
+gate: technical
+confidence: 90
+---
+# T-01 Set up the fake project
+
+Builds what the architecture asks for.
+
+## Open questions
+
+- None.
+"""
+
+
+class TechnicalStoryTests(Base):
+    """`gate: technical` is not a skip: the story's own checks run, no epic summary is needed, and the approved,
+    unchanged architecture must be on record (Sentry's rules)."""
+
+    def setUp(self):
+        super().setUp()
+        self.arch = self.project / ARCH_REL
+        self.state = self.project / "_bmad/custom/approval-state.json"
+        self.arch.parent.mkdir()
+        self.approve_architecture()
+        self.write(TECHNICAL_STORY)
+
+    def approve_architecture(self, text: str = ARCHITECTURE, doc_type: str = "architecture", **entry) -> None:
+        self.arch.write_text(text, encoding="utf-8")
+        record = {
+            "doc_path": ARCH_REL,
+            "approved_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "hash_mode": "full",
+            "approved_by": "Test Owner",
+            "approved_at": "2026-11-26T10:00:00Z",
+            "superseded": False,
+            **entry,
+        }
+        state = json.loads(self.state.read_text()) if self.state.is_file() else {}
+        state[doc_type] = record
+        self.state.write_text(json.dumps(state), encoding="utf-8")
+
+    def arch_reason(self, why: str, *extra: str) -> None:
+        result = self.blocked_with("ARCH_UNAPPROVED", *extra)
+        self.assertEqual(codes(result), ["ARCH_UNAPPROVED"], result)
+        self.assertTrue(result["reasons"][0]["detail"].endswith(f": {why}"), result["reasons"][0]["detail"])
+
+    def test_approved_architecture_and_no_epic_summary_is_allowed(self):
+        result = self.gate()
+        self.assertEqual(result["result"], "allow", result)
+        self.assertEqual(result["gate"], "technical")
+        self.assertIsNone(result["counts"]["frd_open_items"])
+        [event] = events(self.project)
+        self.assertEqual((event["verdict"], event["gate"]), ("allow", "technical"))
+
+    def test_no_epic_summary_reason_even_when_the_story_links_none(self):
+        (self.project / "epics/epic-2/epic-summary.md").unlink()
+        self.assertEqual(self.gate()["result"], "allow")
+
+    def test_a_missing_architecture_file_blocks(self):
+        self.arch.unlink()
+        self.arch_reason("missing")
+
+    def test_nothing_on_record_blocks_as_unapproved(self):
+        self.state.unlink()
+        self.arch_reason("unapproved")
+        self.state.write_text("{}", encoding="utf-8")
+        self.arch_reason("unapproved")
+
+    def test_an_architecture_whose_status_is_not_approved_blocks(self):
+        self.arch.write_text(ARCHITECTURE.replace("approval_status: approved", "approval_status: draft"))
+        self.arch_reason("unapproved")
+
+    def test_a_reopened_approval_blocks_as_superseded(self):
+        self.approve_architecture(superseded=True)
+        self.arch_reason("superseded")
+
+    def test_an_architecture_edited_after_approval_blocks_as_stale_and_is_left_alone(self):
+        edited = ARCHITECTURE + "\nA new fake rule.\n"
+        self.arch.write_text(edited, encoding="utf-8")
+        self.arch_reason("stale")
+        self.assertEqual(self.arch.read_text(encoding="utf-8"), edited, "the gate only asks; Sentry's own run resets")
+
+    def test_an_unreadable_approval_state_blocks(self):
+        self.state.write_text("{not json", encoding="utf-8")
+        self.arch_reason("state_unreadable")
+
+    def test_an_approval_that_names_a_file_that_is_gone_blocks(self):
+        self.approve_architecture(doc_path="arch/OTHER.md")
+        self.arch_reason("missing")
+
+    def test_the_document_type_is_a_setting(self):
+        self.state.unlink()
+        self.approve_architecture(doc_type="architecture-v2")
+        self.arch_reason("unapproved")
+        self.assertEqual(self.gate("--architecture-doc-type", "architecture-v2")["result"], "allow")
+
+    def test_missing_sentry_blocks_instead_of_waving_the_story_through(self):
+        spec = importlib.util.spec_from_file_location("ready_for_dev_no_sentry", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module._sentry = lambda: None
+        result = module.evaluate(TECHNICAL_STORY, self.story, 80)
+        self.assertEqual(codes(result), ["ARCH_UNAPPROVED"])
+        self.assertIn("not installed", result["reasons"][0]["detail"])
+
+    def test_a_feature_story_cannot_be_relabelled_technical(self):
+        for feature in ("F-001", '"F-001"', "F-1a"):
+            with self.subTest(feature=feature):
+                self.write(TECHNICAL_STORY.replace("feature: none", f"feature: {feature}"))
+                result = self.blocked_with("TECHNICAL_STORY_INVALID")
+                self.assertEqual(codes(result), ["TECHNICAL_STORY_INVALID"], "no FRD or epic summary reasons")
+
+    def test_a_technical_story_with_requirements_is_invalid(self):
+        self.write(TECHNICAL_STORY.replace("feature: none", "feature: none\nrequirements: [FR-F001-01]"))
+        self.assertEqual(codes(self.blocked_with("TECHNICAL_STORY_INVALID")), ["TECHNICAL_STORY_INVALID"])
+
+    def test_no_feature_line_and_empty_requirements_are_valid(self):
+        self.write(TECHNICAL_STORY.replace("feature: none\n", ""))
+        self.assertEqual(self.gate()["result"], "allow")
+        self.write(TECHNICAL_STORY.replace("feature: none", "feature: 'none'\nrequirements: []"))
+        self.assertEqual(self.gate()["result"], "allow")
+
+    def test_an_invalid_shape_and_an_unapproved_architecture_both_show(self):
+        self.write(TECHNICAL_STORY.replace("feature: none", "feature: F-001"))
+        self.arch.unlink()
+        self.assertEqual(
+            codes(self.blocked_with("TECHNICAL_STORY_INVALID")), ["TECHNICAL_STORY_INVALID", "ARCH_UNAPPROVED"]
+        )
+
+    def test_the_story_own_open_question_still_blocks(self):
+        self.write(TECHNICAL_STORY.replace("- None.", "- Q-1: Which fake runner?"))
+        self.assertEqual(codes(self.blocked_with("OPEN_QUESTIONS")), ["OPEN_QUESTIONS"])
+
+    def test_the_story_own_open_assumption_still_blocks(self):
+        self.write(TECHNICAL_STORY.replace("Builds what", "Builds [ASSUMPTION A-1: a fake runner] what"))
+        self.assertEqual(codes(self.blocked_with("OPEN_ASSUMPTIONS")), ["OPEN_ASSUMPTIONS"])
+
+    def test_low_and_missing_confidence_still_block(self):
+        self.write(TECHNICAL_STORY.replace("confidence: 90", "confidence: 79"))
+        self.assertEqual(codes(self.blocked_with("LOW_CONFIDENCE")), ["LOW_CONFIDENCE"])
+        self.write(TECHNICAL_STORY.replace("confidence: 90\n", ""))
+        self.assertEqual(codes(self.blocked_with("MISSING_CONFIDENCE")), ["MISSING_CONFIDENCE"])
+
+    def test_deleted_items_and_duplicate_ids_still_block(self):
+        gap = TECHNICAL_STORY.replace(
+            "- None.", "- Q-2: Which fake runner?\n  Resolved: Fake. — Test Owner, 2026-11-26"
+        )
+        self.write(gap)
+        self.assertEqual(codes(self.blocked_with("DELETED_ITEMS")), ["DELETED_ITEMS"])
+        twice = TECHNICAL_STORY.replace(
+            "- None.",
+            "- Q-1: One?\n  Resolved: Yes. — Test Owner, 2026-11-26\n"
+            "- Q-1: Two?\n  Resolved: Yes. — Test Owner, 2026-11-26",
+        )
+        self.write(twice)
+        self.assertIn("DUPLICATE_IDS", codes(self.blocked_with("DUPLICATE_IDS")))
+
+    def test_a_resolution_without_who_and_when_still_blocks(self):
+        self.write(TECHNICAL_STORY.replace("- None.", "- Q-1: Which fake runner?\n  Resolved: Fake runner."))
+        self.assertEqual(codes(self.blocked_with("RESOLUTION_MISSING_WHO_OR_WHEN")), ["RESOLUTION_MISSING_WHO_OR_WHEN"])
+
+    def test_broken_front_matter_is_not_treated_as_technical(self):
+        self.write("---\nstory: T-01\ngate: technical\n# no closing line\n\n# T-01\n")
+        result = self.blocked_with("MALFORMED_FRONTMATTER")
+        self.assertNotIn("ARCH_UNAPPROVED", codes(result))
+
+    def test_another_gate_value_keeps_the_ordinary_checks(self):
+        ordinary = TECHNICAL_STORY.replace("feature: none\n", "")
+        self.write(ordinary.replace("gate: technical", "gate: strict"))
+        self.assertEqual(codes(self.blocked_with("MISSING_EPIC_SUMMARY")), ["MISSING_EPIC_SUMMARY"])
+        self.write(ordinary.replace("gate: technical", "gate: strict\nepic: 2"))
+        self.assertEqual(self.gate("--epics-dir", str(self.project / "epics"))["result"], "allow")
+
+    def test_a_generic_story_is_still_allowed_without_the_architecture(self):
+        self.arch.unlink()
+        self.write(TECHNICAL_STORY.replace("gate: technical", "gate: generic"))
+        result = self.gate()
+        self.assertEqual((result["result"], result["gate"]), ("allow", "generic"))
+
+    def test_the_event_holds_the_code_and_not_the_architecture_text(self):
+        self.arch.write_text(ARCHITECTURE.replace("One fake service.", "giraffe-mango"))
+        self.gate()
+        raw = (self.project / ".bmad-guard/events/queue.jsonl").read_text()
+        self.assertIn("ARCH_UNAPPROVED", raw)
+        self.assertNotIn("giraffe-mango", raw)
+
+
 class EventTests(Base):
     def test_event_has_counts_and_codes_but_no_document_text(self):
         self.edit("confidence: 84", "confidence: 70")
@@ -638,6 +833,7 @@ class SkillTests(unittest.TestCase):
         self.assertEqual((agent["code"], agent["mode"], agent["min_confidence"]), ("ready-for-dev-gate", "enforce", 80))
         self.assertTrue(agent["epics_dir"])
         self.assertTrue(agent["frds_dir"])
+        self.assertEqual(agent["architecture_doc_type"], "architecture")
 
     def test_markup_doc_example_blocks_for_the_documented_reasons(self):
         doc = (ROOT / "docs/ready-for-dev-markup.md").read_text(encoding="utf-8")

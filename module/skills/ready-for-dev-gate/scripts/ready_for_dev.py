@@ -11,11 +11,14 @@ functional part: it must exist, be approved and have no open question or assumpt
 that feature is blocked. The story's `requirements` (FR ids, ADR 0010) must exist in that FRD: an unknown,
 withdrawn or malformed id, a missing acceptance criterion number, or an id of another feature blocks
 (STORY_FR_UNKNOWN, STORY_FR_OTHER_FEATURE). A feature story with no `requirements` is not blocked for that: stories
-written before ADR 0010 keep working. Markup: docs/ready-for-dev-markup.md.
+written before ADR 0010 keep working. A story with `gate: technical` (setup work with `feature: none` and no
+`requirements`) has no epic summary; the approved architecture takes its place (ARCH_UNAPPROVED,
+TECHNICAL_STORY_INVALID). Markup: docs/ready-for-dev-markup.md.
 
 Usage:
   python3 ready_for_dev.py <story> [--epic-summary FILE] [--epics-dir DIR] [--frds-dir DIR]
-                           [--min-confidence 80] [--baseline GIT_REF] [--no-event]
+                           [--architecture-doc-type architecture] [--min-confidence 80] [--baseline GIT_REF]
+                           [--no-event]
 
 Prints one JSON object:
   {"result": "allow" | "block", "reasons": [{"code": ..., "detail": ...}], "counts": {...}}
@@ -70,6 +73,10 @@ EPIC_PARTS = ("functional", "technical")
 FRD_NAME = "frd.md"  # the feature's FRD, in <frds-dir>/F-<nnn>/
 FEATURE_RE = re.compile(r"^F-\d{1,4}$")  # also keeps the path inside frds-dir
 APPROVED = "approved"
+GENERIC, TECHNICAL = "generic", "technical"  # the two `gate:` markers
+STATE_REL = "_bmad/custom/approval-state.json"
+SENTRY_SKILL = "agent-approval-gate-check"
+ARCHITECTURE_DOC_TYPE = "architecture"  # the state-file key Warden records the approved architecture under
 # frd_parse selection problem -> the gate's reason. FR_SCREEN_UNKNOWN is an FRD defect, not the story's.
 REQUIREMENT_CODES = {
     "FR_UNKNOWN": "STORY_FR_UNKNOWN",
@@ -346,6 +353,58 @@ def check_feature_frd(fields: dict, frds_dir: str | None) -> tuple[list[dict], i
     return check_frd(Path(frds_dir) / feature / FRD_NAME, requirement_ids(fields))
 
 
+# --- the architecture of a technical story ---------------------------------------------------------
+
+
+def _sentry():
+    """Sentry's check script (agent-approval-gate-check), from the sibling skill folder. None when not installed."""
+    if "check_gate" in sys.modules:
+        return sys.modules["check_gate"]
+    path = Path(__file__).resolve().parents[2] / SENTRY_SKILL / "scripts" / "check_gate.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("check_gate", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["check_gate"] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop("check_gate", None)
+        raise
+    return module
+
+
+def check_architecture(story: Path, doc_type: str) -> list[dict]:
+    """ARCH_UNAPPROVED unless the approved architecture is on record and unchanged (Sentry's rules, its own code).
+    The file is the path Warden recorded under `doc_type` in the approval state; the story does not name it."""
+
+    def blocked(why: str) -> list[dict]:
+        return [
+            {
+                "code": "ARCH_UNAPPROVED",
+                "detail": f"the architecture ('{doc_type}') is not approved and unchanged: {why}",
+            }
+        ]
+
+    sentry = _sentry()
+    if sentry is None:
+        return blocked(f"{SENTRY_SKILL} is not installed, so it cannot be checked")
+    root = project_root_for(story)
+    state_file = root / STATE_REL
+    state, readable = sentry.core.load_state(state_file)
+    if not readable:
+        return blocked("state_unreadable")
+    entry = state.get(doc_type)
+    recorded = entry.get("doc_path") if isinstance(entry, dict) else None
+    if not isinstance(recorded, str) or not recorded.strip():
+        return blocked("unapproved")  # nothing is on record for this document type
+    try:
+        result, _ = sentry.check(root / recorded, doc_type, state_file, "approval_status", "draft", APPROVED, False)
+    except (OSError, UnicodeDecodeError):
+        return blocked("unreadable")
+    return [] if result["result"] == "ok" else blocked(result.get("reason", "unapproved"))
+
+
 # --- the gate --------------------------------------------------------------------------------------
 
 
@@ -357,6 +416,7 @@ def evaluate(
     epics_dir: str | None = None,
     baseline: str | None = None,
     frds_dir: str | None = None,
+    architecture_doc_type: str = ARCHITECTURE_DOC_TYPE,
 ) -> dict:
     """Return the result dict for one story text."""
     reasons: list[dict] = []
@@ -364,8 +424,9 @@ def evaluate(
     if fm_error:
         reasons.append({"code": "MALFORMED_FRONTMATTER", "detail": fm_error})
 
-    if not fm_error and fields.get("gate", "").lower() == "generic":
-        return {"result": "allow", "reasons": [], "counts": {}, "gate": "generic"}
+    gate = "" if fm_error else fields.get("gate", "").lower()
+    if gate == GENERIC:
+        return {"result": "allow", "reasons": [], "counts": {}, "gate": GENERIC}
 
     questions = parse_questions(body)
     assumptions, malformed_tags = parse_assumptions(body)
@@ -425,10 +486,20 @@ def evaluate(
                     {"code": "LOW_CONFIDENCE", "detail": f"confidence {confidence} is below {min_confidence}"}
                 )
 
-    summary_path = epic_summary_path(story, fields, epic_summary, epics_dir)
-    frd_reasons, frd_open = check_feature_frd(fields, frds_dir) if not fm_error else ([], None)
-    reasons.extend(check_epic_summary(summary_path, has_frd=frd_open is not None))
-    reasons.extend(frd_reasons)
+    frd_open = None
+    if gate == TECHNICAL:
+        # Setup work: no epic summary and no FRD. The approved architecture takes their place. A story that names a
+        # feature or requirements is not setup work, so the marker cannot be used to skip its FRD.
+        feature = fields.get("feature", "").strip().strip("'\"").lower()
+        if feature not in ("", "none") or requirement_ids(fields):
+            detail = "a technical story must have 'feature: none' and no 'requirements'"
+            reasons.append({"code": "TECHNICAL_STORY_INVALID", "detail": detail})
+        reasons.extend(check_architecture(story, architecture_doc_type))
+    else:
+        summary_path = epic_summary_path(story, fields, epic_summary, epics_dir)
+        frd_reasons, frd_open = check_feature_frd(fields, frds_dir) if not fm_error else ([], None)
+        reasons.extend(check_epic_summary(summary_path, has_frd=frd_open is not None))
+        reasons.extend(frd_reasons)
 
     counts = {
         "open_questions": len(open_q),
@@ -441,7 +512,10 @@ def evaluate(
         "min_confidence": min_confidence,
         "frd_open_items": frd_open,
     }
-    return {"result": "block" if reasons else "allow", "reasons": reasons, "counts": counts}
+    result = {"result": "block" if reasons else "allow", "reasons": reasons, "counts": counts}
+    if gate == TECHNICAL:
+        result["gate"] = TECHNICAL
+    return result
 
 
 # --- events ----------------------------------------------------------------------------------------
@@ -517,6 +591,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--epic-summary", help="the epic's epic-summary.md (default: linked from the story)")
     parser.add_argument("--epics-dir", help="folder with epic-<n>/epic-summary.md, used with frontmatter 'epic'")
     parser.add_argument("--frds-dir", help="folder with F-<nnn>/frd.md, used with frontmatter 'feature'")
+    parser.add_argument(
+        "--architecture-doc-type",
+        default=ARCHITECTURE_DOC_TYPE,
+        help="approval-state key of the architecture, for a technical story (default: %(default)s)",
+    )
     parser.add_argument("--min-confidence", type=confidence_arg, default=80, help="(default: %(default)s)")
     parser.add_argument("--baseline", help="git ref; ids present there but gone now count as deleted")
     parser.add_argument("--no-event", action="store_true", help="do not record a guard event")
@@ -532,7 +611,14 @@ def main(argv: list[str] | None = None) -> int:
             raise GateError("UNREADABLE_STORY", f"cannot read the story ({type(err).__name__})") from None
         sha256 = hashlib.sha256(raw).hexdigest()
         result = evaluate(
-            text, story, args.min_confidence, args.epic_summary, args.epics_dir, args.baseline, args.frds_dir
+            text,
+            story,
+            args.min_confidence,
+            args.epic_summary,
+            args.epics_dir,
+            args.baseline,
+            args.frds_dir,
+            args.architecture_doc_type,
         )
     except GateError as err:
         result = {"result": "block", "reasons": [{"code": err.code, "detail": err.detail}], "counts": {}}
