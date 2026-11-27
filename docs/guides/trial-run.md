@@ -351,7 +351,7 @@ python3 .claude/skills/ready-for-dev-gate/scripts/ready_for_dev.py docs/trial-fi
 
 ### Part B6. Review and push
 
-Make sure the work for story 1 is committed. The pushed commits now include source (`app/...`), so a review is needed.
+Make sure the work for story `F001-01` is committed. The pushed commits now include source (`app/...`), so a review is needed.
 
 **20. Push, review in the same session, review in a fresh session** (checked for the git side; first real run for the model side)
 

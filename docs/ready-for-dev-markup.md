@@ -30,6 +30,8 @@ The format is agreed, so the gate is **enforced**: a block is a hard stop. A pro
 
 ### 1. Frontmatter
 
+A story with an epic summary (the form before ADR 0010, still read by the gate):
+
 ```yaml
 ---
 confidence: 85

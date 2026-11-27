@@ -77,6 +77,7 @@ From earlier ADRs and plans. These are not new decisions.
 
 - Org-wide rollout (the roadmap's Phase 5, "out of scope for now", Phase 0 T5).
 - Jira / ADO MCP check and the `epic.md` source (Phase 4: Phase 2 open items 1 and 2).
+- ADR 0010 Phase 2 (sync of the thin stories to ADO or Jira): moves to Phase 4, with the MCP spike.
 - Copilot and Cursor hooks, until they offer blocking hooks (Phase 2 open item 4).
 - The semantic prompt check (D3).
 - Building the company-network hosting (D4: the plan is written, the build is later).
