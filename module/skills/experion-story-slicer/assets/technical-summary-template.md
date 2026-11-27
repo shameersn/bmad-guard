@@ -9,7 +9,9 @@ Written by Sloane from the approved architecture only. Source: <architecture fil
 - **Data:** <storage, entities and migrations the architecture names for this feature>
 - **Rules from the architecture:** <security, logging, error and test rules the stories of this feature must follow>
 
-*How to use this template (delete every italic line and this note before saving):*
+## How to use this template
+
+*Delete this whole section, with every italic line, before saving.*
 
 - *Take every line from the approved architecture. Never copy FRD text, never add a requirement, never guess: a line the architecture does not support is left out.*
 - *Write plain bullets with a bold label. Do not use sub-headings under "Technical": the ready-for-dev gate reads the text under the "## Technical" heading and stops at the next heading.*
