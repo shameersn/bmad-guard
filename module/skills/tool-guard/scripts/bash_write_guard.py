@@ -46,6 +46,7 @@ if str(HERE) not in sys.path:
 import document_guard as dg  # noqa: E402 - sibling modules, found through the line above
 import hook_common as hc  # noqa: E402
 import shell_parse as sp  # noqa: E402
+import winpaths as wp  # noqa: E402
 
 GUARD = "bash-write-guard"
 WRITE_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<>", ">&"}
@@ -91,7 +92,11 @@ def _opts(inv: sp.Invocation) -> sp.Opts:
 def _is_folder(dest: sp.Word, cwd: str) -> bool:
     """True when a copy destination is a folder: it ends with a slash, or it is a folder that exists now."""
     text = dest.text
-    return text.endswith("/") or text in (".", "..") or (not dest.dynamic and os.path.isdir(os.path.join(cwd, text)))
+    return (
+        text.endswith(tuple(wp.seps()))
+        or text in (".", "..")
+        or (not dest.dynamic and os.path.isdir(os.path.join(cwd, wp.clean(text))))
+    )
 
 
 def _copy_targets(inv: sp.Invocation, cwd: str) -> list[tuple[sp.Word, str]]:
@@ -105,13 +110,13 @@ def _copy_targets(inv: sp.Invocation, cwd: str) -> list[tuple[sp.Word, str]]:
     elif len(operands) >= 2:
         dest, sources = operands[-1], operands[:-1]
     elif inv.name.lower() == "ln" and operands:  # `ln -s target` makes ./<name of target>
-        return [(_word(os.path.basename(operands[0].text.rstrip("/")), operands[0]), "write")]
+        return [(_word(os.path.basename(operands[0].text.rstrip(wp.seps())), operands[0]), "write")]
     else:
         return []
     found = [(dest, "write")]
     if directory is not None or len(sources) > 1 or _is_folder(dest, cwd):
         for source in sources:
-            name = os.path.basename(source.text.rstrip("/"))
+            name = os.path.basename(source.text.rstrip(wp.seps()))
             if name:
                 found.append((_word(os.path.join(dest.text, name), dest), "write"))
     if inv.name.lower() == "mv":  # the sources are moved away
@@ -195,13 +200,13 @@ def target_codes(
 ) -> list[str]:
     text = word.text
     if word.dynamic or "$" in text:  # the value is not known: look for the name of a protected place
-        lowered = text.lower()
+        lowered = wp.fwd(text).lower()
         return [code for fragment, code in FRAGMENTS if fragment in lowered]
     codes: list[str] = []
     first = min((text.index(c) for c in "*?[" if c in text), default=-1)
     if first >= 0:  # a glob: its file name may match the state file; its folder must be written out
-        folder, _, pattern = text[:first].rpartition("/")
-        if "/" in text[first:]:
+        folder, pattern = wp.split_last(text[:first])
+        if any(sep in text[first:] for sep in wp.seps()):
             return []
         text, mode = folder + "/" if folder else ".", "write"  # the matches are files, not the folder
         if fnmatch.fnmatchcase(dg.STATE_FILE_NAME, (pattern + word.text[first:]).lower()) and any(
@@ -224,8 +229,7 @@ def check(payload: dict, root: Path) -> list[hc.Verdict]:
         invocations = list(sp.walk(command))
     except sp.ParseError:
         return []  # command_guard blocks a command it cannot read
-    cwd = payload.get("cwd")
-    start = Path(cwd) if isinstance(cwd, str) and cwd and Path(cwd).is_absolute() else root
+    start = wp.start_dir(payload.get("cwd"), root)
     zones = dg.Zones(root, start)
     folders = cd_folders(invocations, zones)
     codes: list[str] = []

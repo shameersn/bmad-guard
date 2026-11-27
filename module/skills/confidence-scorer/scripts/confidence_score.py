@@ -70,7 +70,9 @@ def read_version(doc_path: Path) -> int:
 def project_root_for(path: Path) -> Path:
     """Git top level of the folder holding `path`; the folder itself when it is not in git."""
     folder = path if path.is_dir() else path.parent
-    out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, text=True)
+    out = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, encoding="utf-8", errors="replace"
+    )
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else folder
 
 

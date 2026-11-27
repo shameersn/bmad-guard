@@ -20,6 +20,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest import mock
 
+from tests.windows_flavour import POSIX_ONLY
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "module/skills/agent-project-logger/scripts"
 spec = importlib.util.spec_from_file_location("guard_events", SCRIPTS / "guard_events.py")
@@ -446,6 +448,188 @@ class CredentialFileTests(unittest.TestCase):
         result = ge.emit(event(), cfg, stderr=err)
         self.assertEqual(result["queued"], 1)
         self.assertIn("chmod 600", err.getvalue())
+
+
+REPARSE = ge.stat.FILE_ATTRIBUTE_REPARSE_POINT
+
+
+class WindowsCredentialFileTests(CredentialFileTests):
+    """ADR 0009: on Windows there are no mode bits, so the sender checks the type and links instead. A simulation on
+    this OS (`IS_WINDOWS` set, a fake `st_file_attributes`); not run on Windows. Inherits the setUp and helpers."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(ge, "IS_WINDOWS", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def cfg(self, **env: str) -> ge.Config:
+        return super().cfg(USERPROFILE=str(self.home), **env)  # on Windows the home folder is USERPROFILE
+
+    def reparse(self, *paths: Path):
+        """os.lstat answers with the reparse-point flag for these paths (a link or junction on Windows)."""
+        real = os.lstat
+        flagged = {os.fspath(p) for p in paths}
+
+        def lstat(path, *args, **kwargs):
+            if os.fspath(path) in flagged:
+                return mock.Mock(st_file_attributes=REPARSE)
+            return real(path, *args, **kwargs)
+
+        return mock.patch.object(ge.os, "lstat", lstat)
+
+    def test_a_file_that_posix_would_refuse_is_used_because_windows_has_no_mode_bits(self):
+        self.put(mode=0o666, folder_mode=0o777)  # what a Windows file looks like to os.stat
+        cfg = self.cfg()
+        self.assertEqual(
+            (cfg.endpoint, cfg.user, cfg.key, cfg.credential_problem),
+            (
+                "https://file.example.invalid",
+                "file-user",
+                self.FILE_KEY,
+                "",
+            ),
+        )
+        self.assertTrue(cfg.sending_enabled)
+
+    def test_a_file_owned_by_someone_else_is_not_checked_here(self):
+        self.put()
+        with mock.patch.object(ge.os, "geteuid", return_value=os.stat(self.path).st_uid + 1, create=True):
+            self.assertEqual(self.cfg().credential_problem, "")
+
+    def test_a_link_or_junction_file_is_refused(self):
+        self.put()
+        with self.reparse(self.path):
+            cfg = self.cfg()
+        self.assertFalse(cfg.sending_enabled)
+        self.assertIn("link or junction", cfg.credential_problem)
+
+    def test_a_link_or_junction_folder_is_refused(self):
+        self.put()
+        with self.reparse(self.folder):
+            cfg = self.cfg()
+        self.assertFalse(cfg.sending_enabled)
+        self.assertIn("folder", cfg.credential_problem)
+        self.assertIn("link or junction", cfg.credential_problem)
+
+    def test_a_file_that_cannot_be_checked_is_refused_with_the_error_type_only(self):
+        self.put()
+
+        def lstat(path, *args, **kwargs):
+            raise PermissionError(f"secret detail about {path}")
+
+        with mock.patch.object(ge.os, "lstat", lstat):
+            problem = ge.read_credential_file(self.path)[1]
+        self.assertIn("PermissionError", problem)
+        self.assertNotIn("secret detail", problem)
+
+    def test_the_content_never_appears_in_a_problem(self):
+        self.put("key = SECRET-LINE-VALUE\n")
+        self.assertNotIn("SECRET-LINE-VALUE", self.cfg().credential_problem)
+
+    def test_the_home_folder_is_userprofile_not_home(self):
+        env = {"HOME": "/c/Users/other", "USERPROFILE": str(self.home)}
+        self.assertEqual(ge.credentials_path(env), self.path)
+        self.assertIsNone(ge.credentials_path({"HOME": "/c/Users/other"}))
+        with (
+            mock.patch.dict(os.environ, {"HOME": "/c/Users/other"}),
+            mock.patch.object(ge.Path, "home", return_value=self.home),
+        ):
+            self.assertEqual(ge.credentials_path(), self.path)
+
+    # The POSIX-only rules do not apply on Windows: skip their tests here.
+    test_a_file_open_to_group_or_others_is_refused_with_the_fix = None
+    test_a_folder_that_group_or_others_can_write_is_refused = None
+    test_a_file_owned_by_someone_else_is_refused = None
+    test_flush_puts_the_reason_in_the_error_field = None
+    test_an_endpoint_from_the_environment_with_a_refused_file_says_why_it_cannot_send = None
+    test_a_symbolic_link_is_refused = None  # on Windows a link is a reparse point: the tests above
+
+
+class PosixCredentialPathTests(unittest.TestCase):
+    @POSIX_ONLY
+    def test_home_wins_and_userprofile_is_ignored_off_windows(self):
+        env = {"HOME": "/h", "USERPROFILE": "/u"}
+        self.assertEqual(ge.credentials_path(env), Path("/h") / ge.CREDENTIALS_REL)
+        self.assertEqual(ge.credentials_path({"USERPROFILE": "/u"}), None)
+
+
+class NoLockQueueTests(unittest.TestCase):
+    """ADR 0009: with no `fcntl` (Windows) `emit()` only appends one line; `flush` sends. Simulated: `fcntl = None`."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        patcher = mock.patch.object(ge, "fcntl", None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def lines(self, cfg: ge.Config) -> list[dict]:
+        return [json.loads(line) for line in cfg.queue.read_text(encoding="utf-8").splitlines()]
+
+    def test_emit_with_an_event_only_appends_and_never_sends(self):
+        with FakeCollector() as fc:
+            cfg = config(self.tmp, fc.url)
+            for n in range(3):
+                result = ge.emit(event(n), cfg)
+                self.assertEqual((result["sent"], result["error"]), (0, None))
+            self.assertEqual(fc.record_count(), 0)
+        self.assertEqual([e["n"] for e in self.lines(cfg)], ["0", "1", "2"])
+
+    def test_emit_with_an_event_does_not_even_read_the_queue(self):
+        cfg = config(self.tmp, "http://127.0.0.1:1")
+        ge.emit(event(), cfg)
+        with (
+            mock.patch.object(ge, "_read_queue", side_effect=AssertionError("read")),
+            mock.patch.object(ge, "send", side_effect=AssertionError("sent")),
+        ):
+            ge.emit(event(1), cfg)
+        self.assertEqual(len(self.lines(cfg)), 2)
+
+    def test_flush_sends_the_queue_and_empties_it(self):
+        with FakeCollector() as fc:
+            cfg = config(self.tmp, fc.url)
+            ge.emit(event(0), cfg)
+            ge.emit(event(1), cfg)
+            result = ge.emit(None, cfg)
+            self.assertEqual((result["sent"], result["queued"], result["error"]), (2, 0, None))
+            self.assertEqual(fc.record_count(), 2)
+        self.assertEqual(cfg.queue.read_text(encoding="utf-8"), "")
+
+    def test_a_line_appended_while_flush_sends_stays_in_the_queue(self):
+        cfg = config(self.tmp, "http://127.0.0.1:1")
+        ge.emit(event(0), cfg)
+        late = event(9)
+
+        def send_and_meanwhile_append(events, _config):
+            with open(cfg.queue, "a", encoding="utf-8") as handle:  # another hook process, no lock
+                handle.write(json.dumps(late) + "\n")
+
+        with mock.patch.object(ge, "send", send_and_meanwhile_append):
+            result = ge.emit(None, cfg)
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual([e["n"] for e in self.lines(cfg)], ["9"])
+
+    def test_a_failed_flush_keeps_everything(self):
+        cfg = config(self.tmp, unused_port_url())
+        ge.emit(event(0), cfg)
+        err = io.StringIO()
+        result = ge.emit(None, cfg, stderr=err, force=True)
+        self.assertEqual((result["sent"], result["queued"]), (0, 1))
+        self.assertEqual(len(self.lines(cfg)), 1)
+
+    def test_the_cli_flush_sends_without_a_lock(self):
+        with FakeCollector() as fc:
+            cfg = config(self.tmp, fc.url)
+            ge.emit(event(), cfg)
+            env = {"BMAD_GUARD_ENDPOINT": fc.url, "BMAD_GUARD_USER": GOOD[0], "BMAD_GUARD_KEY": GOOD[1]}
+            out = io.StringIO()
+            project = Path(self.tmp)
+            with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out):
+                self.assertEqual(ge.main(["flush", "--project-root", str(project)]), 0)
+            self.assertEqual(json.loads(out.getvalue())["sent"], 1)
+            self.assertEqual(fc.record_count(), 1)
 
 
 if __name__ == "__main__":

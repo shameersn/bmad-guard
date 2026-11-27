@@ -23,6 +23,8 @@ Exit code: 0 all checks pass, 1 a check failed, 2 a tool is missing.
 
 A third stage, "machine" (GUARD-3 T5, ADR 0008, cases M-I1 to M-I9), needs no BMAD and no network: it installs a temp machine folder with `install_machine.py` and runs the three hooks from it. `python3 scripts/install_test.py --machine-only` runs just that stage (git only). It is also run by `tests/test_install_test.py`.
 
+A fourth stage, "Windows (static, simulated on this OS)" (GUARD-3 T9, ADR 0009, cases W-I1 to W-I6), needs no BMAD and no network. It sets `sys.platform` to `win32` in a child process and uses fake Git Bash and `icacls`: it checks the Windows template, the setup mode (no git hooks), the `.gitattributes` lines, the `--check` lines, the credential file and the matcher. It proves nothing on Windows. `python3 scripts/install_test.py --windows-only` runs just that stage (git only). It is also run by `tests/test_install_test.py`.
+
 ## Machine folder installer (GUARD-3 T5, ADR 0008)
 
 `install_machine.py` is for IT or MDM, run as root. It copies the five skills the hooks need (`tool-guard`, `prompt-guard`, `ready-for-dev-gate`, `agent-project-logger`, `agent-approval-gate-check`), `otel_headers.py`, `guard_events.py`, `VERSION` and `manifest.json` into the machine folder (`/Library/Application Support/ClaudeCode/bmad-guard/` on macOS, `/etc/claude-code/bmad-guard/` on Linux), by staging a new folder and renaming it into place. It never calls sudo and never writes into a project. Standard library only.
@@ -32,7 +34,7 @@ python3 scripts/install_machine.py --dry-run                    # the plan
 python3 scripts/install_machine.py                              # install or update (as root)
 python3 scripts/install_machine.py --check                      # exit 1 unless right and safe
 python3 scripts/install_machine.py --uninstall [--dry-run]      # remove what the manifest lists (refuses while the managed file points here)
-python3 scripts/install_machine.py --print-template macos       # the managed settings file for this folder (macos or linux)
+python3 scripts/install_machine.py --print-template macos       # the managed settings file for this folder (macos, linux or windows)
 python3 scripts/install_machine.py --target <temp folder> ...   # for tests: no root needed
 ```
 

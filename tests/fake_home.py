@@ -19,7 +19,9 @@ atexit.register(shutil.rmtree, FAKE_HOME, ignore_errors=True)
 
 
 def isolated_env() -> dict[str, str]:
-    """The process environment without collector settings or an outer project dir, with HOME set to a temp folder."""
+    """The process environment without collector settings or an outer project dir, with HOME and USERPROFILE set to a
+    temp folder."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("BMAD_GUARD_", "CLAUDE_PROJECT_DIR"))}
     env["HOME"] = FAKE_HOME
+    env["USERPROFILE"] = FAKE_HOME  # the home folder on Windows (ADR 0009); harmless elsewhere
     return env

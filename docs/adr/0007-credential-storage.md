@@ -181,7 +181,9 @@ Alternative (keep `BMAD_GUARD_COLLECTOR` and rename the plan's text) was conside
 - Docs: the pilot pack (T0, updated in T8) says "do not export the key in your shell profile".
 
 ### Windows
-Not in scope (D10). What would change later:
+**Update (GUARD-3 T9, ADR 0009):** Windows now has the same logical path, `%USERPROFILE%\.config\bmad-guard\credentials` (not `%APPDATA%`, so `PATH_GUARD_CONFIG` stays one rule), with `icacls` in setup (best effort) and a link or junction check in the sender instead of mode bits. Built and tested by simulation; not run on a real machine. The list below is the original sketch.
+
+Not in scope when this ADR was written (D10). What would change later:
 - The folder is `%APPDATA%\bmad-guard`, not `~/.config`. `PATH_GUARD_CONFIG` needs the Windows path too.
 - There are no POSIX mode bits. Protection is the folder's ACL (user only). The standard library cannot read an ACL without `ctypes` or a call to `icacls`, so the "too open" check needs a different method.
 - The Windows Credential Manager (Option B) fits better there than a file.

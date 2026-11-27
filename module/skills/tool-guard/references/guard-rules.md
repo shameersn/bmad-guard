@@ -5,7 +5,7 @@ description: The command, path, document, write gate, review record and content 
 
 # Guard rules
 
-`pre_tool_use.py` runs seven guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer. A guard may also **warn**: the call goes ahead, and the developer and the model get one message (only the content scan does this today; see "Content scan").
+`pre_tool_use.py` runs eight guards before Claude Code runs a tool call. A block exits with code 2 and one message that lists every reason code. Do not retry the same call: change the approach, or ask the developer. A guard may also **warn**: the call goes ahead, and the developer and the model get one message (only the content scan does this today; see "Content scan").
 
 | Guard | Tools | Rules |
 |---|---|---|
@@ -16,12 +16,13 @@ description: The command, path, document, write gate, review record and content 
 | `write-gate` | Write, Edit, MultiEdit, NotebookEdit, and the write targets of Bash | source writes without an approved plan and a ready story (see "Write gate") |
 | `content-scan` | Write, Edit, MultiEdit, NotebookEdit, and text that a Bash command writes to a file | secrets and PHI in the new text (see "Content scan") |
 | `review-record` | Bash | writes the independent review's record when the call is the one plain record command (see "Review record") |
+| `powershell-guard` | PowerShell | blocks every PowerShell tool call (see "PowerShell tool") |
 
 Each rule has a stable id. The id is the reason code in the message and in the event. Events carry the rule id, the guard name, the tool name and the session id. They never carry the command text, a file path or file content.
 
 ## When the guards run at all (the unguarded-project rule, ADR 0008)
 
-Before it imports any guard, `pre_tool_use.py` (and the prompt hook and `session_start.py`) ask whether the project uses the guard. A project with no `_bmad/` folder is allowed silently: exit 0, no output, no event, no file written. A project with `_bmad/` but no `_bmad/custom/guard/manifest.json` is allowed too, and `SessionStart` prints one line (bmad-guard is not installed here, the guards are off). Only a project with the setup manifest gets the seven guards, and it fails closed as described here. The project is the one `CLAUDE_PROJECT_DIR` names, the hook input's `cwd` and the process folder, each with links resolved, and the manifest is looked for in every parent folder too: any of them with a manifest means guarded, and so does any error or a `cwd` of the wrong type. The manifest and its folder are protected from the agent (`DOC_GUARD_SCRIPTS`: Write, Edit, `rm`, `mv` and the other shell targets), but `python -c`, a script file or `rsync --delete` are not seen: removing the marker turns the Claude Code guards off for that project, the same known limit as every other guard (ADR 0002). Prompts and commands in an unguarded project are not checked at all (decided for the pilot, 2026-11-26).
+Before it imports any guard, `pre_tool_use.py` (and the prompt hook and `session_start.py`) ask whether the project uses the guard. A project with no `_bmad/` folder is allowed silently: exit 0, no output, no event, no file written. A project with `_bmad/` but no `_bmad/custom/guard/manifest.json` is allowed too, and `SessionStart` prints one line (bmad-guard is not installed here, the guards are off). Only a project with the setup manifest gets the eight guards, and it fails closed as described here. The project is the one `CLAUDE_PROJECT_DIR` names, the hook input's `cwd` and the process folder, each with links resolved, and the manifest is looked for in every parent folder too: any of them with a manifest means guarded, and so does any error or a `cwd` of the wrong type. The manifest and its folder are protected from the agent (`DOC_GUARD_SCRIPTS`: Write, Edit, `rm`, `mv` and the other shell targets), but `python -c`, a script file or `rsync --delete` are not seen: removing the marker turns the Claude Code guards off for that project, the same known limit as every other guard (ADR 0002). Prompts and commands in an unguarded project are not checked at all (decided for the pilot, 2026-11-26).
 
 ## Command rules
 
@@ -76,6 +77,7 @@ Local hosts are `localhost`, `127.0.0.1`, `::1`, any `127.x.x.x`, and a path to 
 | `PATH_AWS_DIR` | `~/.aws` and everything in it | `.aws/` inside the project |
 | `PATH_SSH_DIR` | `~/.ssh` and everything in it | `~/.config`, `.ssh/` inside the project |
 | `PATH_GUARD_CONFIG` | `~/.config/bmad-guard` and everything in it | `~/.config/other-tool` |
+| `PATH_DEVICE` | a Windows device path (`\\.\...`). It cannot be checked, so it blocks. Windows only | a normal file path |
 
 Names match at any depth, ignoring case. A path is also checked after `~`, `$HOME` and `${HOME}` are expanded, with `..` resolved, and after a symlink is followed. A name with a wildcard (`**/.env*`, `*.pem`) is blocked when it can only mean a sensitive file; a broad pattern such as `*` or `**/*.sql` is not.
 
@@ -83,6 +85,26 @@ Names match at any depth, ignoring case. A path is also checked after `~`, `$HOM
 - **Grep:** `path` and `glob`. The search text (`pattern`) is text, not a path. Searching a whole folder is allowed (see the limits below); the deny rules apply to Grep best effort.
 - **Glob:** `pattern` and `path`.
 - **Bash:** every word and redirect target of every command, also inside `sh -c`, `$(...)`, pipes and `sudo`. The text of `echo` and `printf`, the search pattern of `grep` / `rg`, and git messages and search strings (`-m`, `-S`, `-G`, `--grep`, `git grep`) are not paths.
+
+### Windows paths (GUARD-3 T9, ADR 0009)
+
+Built and tested by simulation on a Mac, **not run on Windows** (`docs/guides/windows-check.md`). On Windows every guard that reads a path first puts it in one form (`winpaths.py`):
+
+- Git Bash paths (`/c/Users/x`, `/cygdrive/c/x`, `/mnt/c/x`) become `C:\Users\x`; `/tmp` is the temp folder.
+- Both separators (`C:/proj\app/.env` is one path); names and folders are compared ignoring case (`.ENV`, `.Claude\Settings.JSON`).
+- The `\\?\` prefix, an NTFS stream suffix (`file::$DATA`) and the dots and spaces at the end of a name are dropped (Windows ignores them: `.env.` and `.env ` are `.env`).
+- `~\`, `$HOME`, `$USERPROFILE`, `${USERPROFILE}`, `%USERPROFILE%`, `$env:USERPROFILE` and `$APPDATA` are expanded.
+- A command can be named by its Windows path (`'C:\Program Files\Git\usr\bin\rm.exe' -rf x` is `rm`).
+
+Off Windows nothing changes. Not seen on Windows either: `cmd /c ...` and `powershell -c ...` inside a Bash command (the same class as `python -c`), a Windows 8.3 short name for a file that does not exist yet, and native `rd /s`, `del /s` and `Remove-Item -Recurse` through Git Bash (Phase 4).
+
+## PowerShell tool
+
+| Rule id | Blocks | Close-but-safe |
+|---|---|---|
+| `PS_TOOL_UNSUPPORTED` | every call of the PowerShell tool in a guarded project, on every OS | the Bash tool (Git Bash on Windows) |
+
+Claude Code has a PowerShell tool (`tool_name` `PowerShell`). No guard here can read PowerShell commands: the parser is for POSIX shells, and the write guards know no PowerShell or cmd write verbs. Without this rule the tool would skip every guard, including the one for `approval-state.json`. The message tells the model to use the Bash tool. The Windows managed template also sets `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`. Real PowerShell guards are a Phase 4 todo.
 
 ## Document rules
 

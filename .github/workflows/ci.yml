@@ -35,3 +35,36 @@ jobs:
         run: ruff check .
       - name: Format
         run: ruff format --check .
+
+  # GUARD-3 T9 (ADR 0009). Runs only the tests that are written for Windows or simulate it without POSIX assumptions:
+  # the path helper, the wiring, the guards in the simulated flavour, the hook entries, the PowerShell guard, the
+  # credential file and queue branches, the setup and installer Windows branches. It has NEVER RUN on windows-latest, so
+  # the first run may need fixes. continue-on-error keeps merges free until it is green once; then remove that line.
+  # It does not replace docs/guides/windows-check.md (a real machine, a real Claude Code).
+  windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Windows-safe unit tests
+        shell: bash
+        run: |
+          python -m unittest -v \
+            tests.test_winpaths \
+            tests.test_hook_wiring \
+            tests.test_windows_guards \
+            tests.test_windows_hooks \
+            tests.test_powershell_guard \
+            tests.test_guard_events.WindowsCredentialFileTests \
+            tests.test_guard_events.NoLockQueueTests \
+            tests.test_setup_guard_windows.WindowsPlanTests \
+            tests.test_setup_guard_windows.WindowsReportTests \
+            tests.test_setup_guard_windows.FindGitBashTests \
+            tests.test_setup_guard_windows.GitattributesTests \
+            tests.test_setup_guard_windows.Utf8FilesTests \
+            tests.test_install_machine_windows.AclTests \
+            tests.test_install_machine_windows.WindowsManagedFileTests \
+            tests.test_install_machine_windows.WindowsMainTests

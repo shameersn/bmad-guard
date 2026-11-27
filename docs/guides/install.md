@@ -20,7 +20,7 @@ This guide puts the guards into one project. It takes about 10 minutes.
 
 | You need | Check with | Notes |
 |---|---|---|
-| macOS or Linux | | **Windows is not supported yet** (decision D10 in the Phase 3 plan). `setup_guard.py --check` prints a warning on Windows. |
+| macOS, Linux, or Windows 10 or 11 | | **Windows** is built for the Claude Code (L1) guards only and **has not been run on a real machine yet** (ADR 0009). It needs Git for Windows (Git Bash) and a `python3` that works in Git Bash: see "Windows" in step 4. |
 | Python 3.10 or later, as `python3` | `python3 --version` | The macOS system Python is 3.9 and is **too old**: the pre-commit hook blocks every commit and says so. Put a newer `python3` first in your `PATH`. |
 | git | `git --version` | |
 | BMAD 6.12.4 (exactly) | | Installed in step 3. The guards are tested only with this version. |
@@ -146,7 +146,7 @@ These are exactly what `setup_guard.py --help` prints:
 | `--project PROJECT` | Project root (a git repo with `_bmad/`). Required. |
 | `--module MODULE` | bmad-guard checkout. Default: the repo that holds the script. |
 | `--dry-run` | Print the plan, change nothing. |
-| `--check` | Exit 1 unless the project is up to date. |
+| `--check` | Exit 1 unless the project is up to date. On Windows also exit 1 when Git Bash or `python3` is not usable. |
 | `--force` | Overwrite conflicts and replace `core.hooksPath`. With `--uninstall`: also remove changed files and hook entries that only look like ours. |
 | `--uninstall` | Take out what setup added, using the manifest (see section 8). Run it with `--dry-run` first. |
 | `--machine-dir DIR` | With `--check`: where the machine folder is (default: the OS path). For IT and tests. |
@@ -155,7 +155,7 @@ These are exactly what `setup_guard.py --help` prints:
 
 `--dry-run` and `--check` cannot be used together. `--uninstall` goes with `--dry-run` and `--force`, not with `--check`.
 
-With `--check`, the script may print extra lines about your per-user file: `note` (no file; sending is optional), `problem` (the file is not safe to use, with the fix) or `warning` (Windows). It also compares your project with the machine folder that IT may have installed (see "Machine install" below): `warning  machine scripts: <v1>; this project's module: <v2>. They differ` or `note     machine scripts: none (fine unless managed settings point to them)`. None of these lines changes the exit code: you cannot fix a machine folder; tell IT.
+With `--check`, the script may print extra lines about your per-user file: `note` (no file; sending is optional), `problem` (the file is not safe to use, with the fix). On Windows it also prints the Git Bash and `python3` lines (`ok` or `problem`, with the fix; a `problem` makes the exit code 1), and a `warning` when `core.autocrlf` is true and the `.gitattributes` lines are missing. It also compares your project with the machine folder that IT may have installed (see "Machine install" below): `warning  machine scripts: <v1>; this project's module: <v2>. They differ` or `note     machine scripts: none (fine unless managed settings point to them)`. None of these lines changes the exit code: you cannot fix a machine folder; tell IT.
 
 ### When setup reports a conflict
 
@@ -176,6 +176,24 @@ Same for a `core.hooksPath` that points somewhere else (for example a Husky fold
 - `core.hooksPath` is local git config, so **every person runs the setup script once after cloning**. The `SessionStart` check warns you if you forget (`SETUP_INCOMPLETE`).
 - When the bmad-guard module is updated: `git pull` in `<bmad-guard>`, run setup again, run `--check`, commit the changes.
 - Setup can be run again at any time. A second run changes nothing.
+
+### Windows (BAs and PMs)
+
+**Status:** built and tested by simulation on a Mac only (ADR 0009). It is **not run on a real Windows machine yet**. One named BA runs the manual check in [windows-check.md](windows-check.md) first. Until that passes, do not say that it works.
+
+What is the same: the Claude Code guards (L1). The setup script, `--check`, the planning guards (Warden, Sentry), the path, command and document guards.
+
+What is different:
+
+- **Git for Windows is required.** Claude Code runs the hooks and the Bash tool in Git Bash. Run every command in this guide in **Git Bash**, not in PowerShell or CMD. `--check` fails with a clear line when `bash.exe` is not found.
+- **`python3` must work in Git Bash.** The hook command is `python3 "..."`. The python.org installer gives `python.exe`, not `python3.exe`. Fix: copy `python.exe` to `python3.exe` in the same folder, switch off the Microsoft Store aliases for python (Settings, Apps, Advanced app settings, App execution aliases), and open a new Git Bash. `--check` runs `bash -c 'python3 -c "import sys; print(sys.version_info[:2])"'` and says if `python3` is missing, the Store stub, or older than 3.10, each with this fix.
+- **No git hooks (L2).** Setup copies none, sets no `core.hooksPath`, and says so (`note     L2 git hooks are not installed on Windows`). A commit and a push on Windows are not checked by hooks. Developers on a Mac or Linux still have them. The pilot (project form, no admin) uses setup only.
+- **The PowerShell tool is blocked** in a guarded project on every OS: the call returns `PS_TOOL_UNSUPPORTED` and the model is told to use the Bash tool. No guard can read PowerShell commands yet (Phase 4). Without this rule the tool would skip every guard.
+- **`.gitattributes`.** On every OS, setup adds lines (`text eol=lf`) for the files it installs, so a clone with `core.autocrlf=true` does not turn them into CRLF and change their hashes. `--check` warns when `core.autocrlf` is true and the lines are missing. `--uninstall` removes them.
+- **The per-user file** is `%USERPROFILE%\.config\bmad-guard\credentials` (the same logical path). Windows has no mode bits, so `--credentials` runs `icacls` on the folder and the file to give access to your user only. This is best effort: the result is shown and the exit code stays 0. Run it again to repair. The sender does not read the ACL; it only refuses a link or junction. See the next section for the command.
+- **No queue lock.** On Windows each hook only appends one line to the queue. The `SessionStart` hook and `guard_events.py flush` send it. Two sessions at the same time can send a line twice; no line is lost.
+- **Known limits:** `cmd /c ...` and `powershell -c ...` inside a Bash command are not parsed (like `python3 -c`). A Windows 8.3 short name for a file that does not exist yet is not resolved. A junction is not seen by the setup link check. Native `rd /s`, `del /s` and `Remove-Item -Recurse` through Git Bash are not seen by the recursive-delete rule (Phase 4).
+- **Managed settings and the machine install** have a Windows form (`C:/Program Files/ClaudeCode/bmad-guard`, `managed-settings.windows.json`). They are built and unit-tested and **not run on a real machine**. The pilot does not use them (no admin rights).
 
 ### Quick check, no model needed
 
@@ -209,7 +227,7 @@ python3 <bmad-guard>/scripts/setup_guard.py --credentials \
 - **Do not `export BMAD_GUARD_KEY` in your shell profile.** A key in the environment is visible to every command the agent runs (`printenv`). The file is the normal way. The environment variables `BMAD_GUARD_ENDPOINT`, `BMAD_GUARD_USER` and `BMAD_GUARD_KEY` still override the file, for CI or a one-off test only.
 - If the file is open to group or others, a link, or not yours, the guards **do not use it**: events keep queueing, and `setup_guard.py --project . --check` and the `SessionStart` warning say how to fix it (`chmod 600 ~/.config/bmad-guard/credentials`). Nothing is lost.
 - If the collector answers HTTP 401, the warning says whether the key came from the environment or from the file. A stale `BMAD_GUARD_KEY` in your environment hides a new key in the file.
-- Not supported on Windows yet.
+- On Windows the file is `%USERPROFILE%\.config\bmad-guard\credentials`, and setup also runs `icacls` on the folder and the file (best effort). The sender refuses the file only when it or its folder is a link or junction. Not run on a real machine yet.
 
 ### Machine install (for IT, not for you)
 

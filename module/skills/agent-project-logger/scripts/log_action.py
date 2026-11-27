@@ -41,7 +41,9 @@ def one_line(text: str, limit: int) -> str:
 
 
 def project_root_from(cwd: Path) -> Path:
-    out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, text=True)
+    out = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, encoding="utf-8", errors="replace"
+    )
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else cwd
 
 
@@ -49,7 +51,7 @@ def git_context(project_root: Path) -> dict[str, str]:
     """repo (folder name only, never the remote URL), branch and commit. Empty when not a git repo."""
 
     def run(*args: str) -> str:
-        out = subprocess.run(["git", *args], cwd=project_root, capture_output=True, text=True)
+        out = subprocess.run(["git", *args], cwd=project_root, capture_output=True, encoding="utf-8", errors="replace")
         return out.stdout.strip() if out.returncode == 0 else ""
 
     top = run("rev-parse", "--show-toplevel")

@@ -51,7 +51,7 @@ Phase 2 made the guards block on a laptop. Phase 3 makes them **usable by a pilo
 
 ### Platforms and pilot group
 
-- **D10. macOS and Linux only** in Phase 3. `setup_guard.py --check` warns on Windows that it is not supported. Windows todo below: BAs and PMs use Windows.
+- **D10. macOS and Linux only** in Phase 3, except T9 (D11): the Claude Code (L1) guards on Windows, built and tested by simulation, not run on a real machine (ADR 0009). Git hooks (L2) on Windows stay out. Windows todo below: BAs and PMs use Windows.
 - **D11. BAs and PMs in the pilot:** on a Mac or Linux machine if one exists. Manesh G checks by the end of week 1. If none is found, add **T9 "Windows L1 hooks"** (Claude Code hooks only, no git hooks: the `python` / `python3` command and paths) before T6, and T6 is the first task to move out.
 - **D12. Pilot group:** Shameer names the people and the project. Start with 2–3 developers and 1 BA on one non-HIPAA project (`phi = "warn"`). Add one HIPAA project in week 2 if false blocks stay under 5%.
 
@@ -136,12 +136,12 @@ Move the spike config (`spikes/collector/`) into `deploy/collector/` with pinned
 - Ledger's sender reads the endpoint, user and key from `BMAD_GUARD_ENDPOINT` / `BMAD_GUARD_USER` / `BMAD_GUARD_KEY`, then the credential file (ADR 0007, D5). No endpoint: queue only.
 - Done early (T1 review, 2026-11-26): the `BMAD_GUARD_ENDPOINT` rename with the `BMAD_GUARD_COLLECTOR` alias, a send backoff so an unreachable collector does not stall every hook, and red-team cases for the credential folder through Bash and Grep.
 - The setup script writes the credential file once (mode 600), never into the project, and `--check` reports a missing or too open file. Setup stays idempotent.
-- `--check` warns on Windows that it is not supported (D10).
+- `--check` warned on Windows that it is not supported (D10). T9 removes that line (Windows mode of `--check`).
 - Sending stays best effort: a failure queues the event and never blocks a commit or a tool call.
 
 **Built (T3):**
 - `guard_events.py`: `read_credential_file()` (opens with `O_NOFOLLOW`, judges the open handle with `fstat`: regular file, yours, no group or other bits, folder not writable by others; `configparser` with `interpolation=None`; a parse error gives only the error type) and `Config.for_project(root, env=None, credentials_file=None)`. Each value: environment first, then the file, read only when a value is missing. With an explicit `env` and no `HOME`, the file is skipped. `Config` has `key_source` and `credential_problem`; the 401 hint says where the key came from; `flush` shows the reason in `error`.
-- `setup_guard.py --credentials --endpoint URL --user ID`: key from a hidden prompt or `BMAD_GUARD_KEY`, never argv; folder 700 and file 600 created with the mode (temp file, then `os.replace`); same values change nothing; different values need `--force`; the result is re-read with the sender's own check. Refused on Windows (exit 2). `--check` adds a note (no file), a problem line (too open, with the fix) and a Windows warning; none changes the exit code.
+- `setup_guard.py --credentials --endpoint URL --user ID`: key from a hidden prompt or `BMAD_GUARD_KEY`, never argv; folder 700 and file 600 created with the mode (temp file, then `os.replace`); same values change nothing; different values need `--force`; the result is re-read with the sender's own check. Refused on Windows (exit 2) until T9, which writes the file there and runs `icacls`. `--check` adds a note (no file) and a problem line (too open, with the fix); none changes the exit code.
 - `session_start.py`: a `credential` item in `problems()` and `FIXES`, using Ledger's check. A missing file is no warning.
 - Tests no longer read the real home: `tests/fake_home.py` gives a temp `HOME` to the subprocess tests, and `scripts/install_test.py` runs its sandbox with a temp `HOME` (npm and uv caches kept at their real places).
 - Docs: `docs/guides/install.md` (optional section), `docs/architecture.md`, the Ledger `SKILL.md`.
@@ -199,7 +199,7 @@ The Phase 2 todo lists "Before the managed file goes on any pilot machine" and "
 - **Tests:** `tests/test_install_machine.py` (61), `tests/test_unguarded.py` (36), uninstall and `--check` additions in `tests/test_setup_guard.py`, `unmerge` and template tests in `tests/test_hook_wiring.py`, additions in `tests/test_review_record.py` and `tests/test_tool_guard.py`. Fake test projects that drive a hook entry now carry the setup manifest (`tests/guarded.py`). **Install test, stage "machine" (M-I1 to M-I9, 33 checks, no BMAD and no network; `--machine-only`)** and **red-team family "Machine scripts" (MACH-1 to MACH-3, MACH-C1, MACH-C2; the suite is 73 cases)** all pass. Root ownership, the OS paths and a real managed file cannot run here: `--check`'s owner test is simulated with `--expect-owner`, and the install test says so.
 - **Measured (break 8):** a `PreToolUse` call from a read-only machine folder takes about 0.09 to 0.11 s on a Mac (Python 3.13 and 3.10) with no bytecode cache. No pre-compile step was added. Not measured on a pilot Mac under managed settings.
 - **Deviations from ADR 0008** (all small): the installer also has `--print-template`, `--managed-dir`, `--expect-owner` and `--force`; the swap is two renames (target to `.old`, `.new` to target), so there is a tiny moment with no folder (a stopped run is recovered by the next run); `--check` tests "not writable by the current user" as owner root plus modes plus `os.access`, so it works from any user; the rule also looks in the input's `cwd` and the process folder and in parent folders (stricter than "decide from `CLAUDE_PROJECT_DIR`"); the event fields are `machine_version` and `project_version` (the name `project` is taken by the event builder); the old template is kept, as the ADR says.
-- **Not done / needs a real machine:** install as root (owner, mode, `chown`), the OS paths, a real managed file and `/status`, rollout test steps 1 to 12, the rollback test, the `PreToolUse` open checks 1, 2, 3, 4, 5 and 8 in a real session, "a project without the module is not blocked" in Claude Code itself, a hook from a path with a space on macOS under `allowManagedHooksOnly`, the telemetry helper from the machine folder, and the pilot machine list. Windows is not covered. The managed `Edit` deny rule is deferred.
+- **Not done / needs a real machine:** install as root (owner, mode, `chown`), the OS paths, a real managed file and `/status`, rollout test steps 1 to 12, the rollback test, the `PreToolUse` open checks 1, 2, 3, 4, 5 and 8 in a real session, "a project without the module is not blocked" in Claude Code itself, a hook from a path with a space on macOS under `allowManagedHooksOnly`, the telemetry helper from the machine folder, and the pilot machine list. Windows is covered by T9 (simulated; not run on a real machine). The managed `Edit` deny rule is deferred.
 
 ### T6. CI layer (L3), small (week 4; first to cut)
 
@@ -280,6 +280,24 @@ Claude Code hooks on Windows for BAs and PMs: the hook command (`python` / `pyth
 
 **Done when:** a BA on Windows runs the planning flow (brief → PRD with Warden approval) with the L1 guards on, and the install test has a Windows case or a written manual check.
 
+**Decisions (Shameer, 2026-11-26).** (1) BAs have Python 3.10+ and Git for Windows. The hook command stays `python3`; `python3` must resolve in Git Bash (copy `python.exe` to `python3.exe`); `--check` tests it and fails with the fix. PowerShell-only machines are out of scope. (2) No admin on pilot machines: the pilot uses the project form. The managed Windows template and the installer branch are built and unit-tested, "not run on a real machine". (3) The PowerShell tool is blocked in guarded projects on all OSes (`PS_TOOL_UNSUPPORTED`); real PowerShell guards are Phase 4. (4) The credential file is `%USERPROFILE%\.config\bmad-guard\credentials`, `icacls` best effort; Windows BAs send events. (5) One named BA runs the manual check (`docs/guides/windows-check.md`); a `windows-latest` CI job runs the Windows-safe tests (its own commit).
+
+**Built (T9)** (all simulated on macOS: `os.path` as ntpath, a patched platform, fake `icacls` and Git Bash. **Nothing has run on a real Windows machine.** ADR 0009 stays Proposed until the manual check passes):
+- **A real gap closed on every OS:** `PowerShell` was not in the `PreToolUse` matcher, so the tool skipped every L1 guard (including `approval-state.json`). It is now in the matcher and `powershell_guard.py` returns `PS_TOOL_UNSUPPORTED`. Tested in the real dispatcher on macOS (`tests/test_powershell_guard.py`) and by red-team case PS-1.
+- **`winpaths.py`:** Git Bash paths (`/c/x`, `/cygdrive/c/x`, `/mnt/c/x`), both separators, case folding, `\\?\`, `::$DATA`, trailing dots and spaces, `$USERPROFILE` and friends, a `\\.\` device path blocks (`PATH_DEVICE`). Used by `path_guard`, `document_guard`, `bash_write_guard`, `command_guard` (scratch folders), `write_gate`, `shell_parse.base_name` (a command by its Windows path) and `content_scan` (`> nul`). Each security fix has a test in `tests/test_windows_guards.py` that fails without it (checked against the previous code). Off Windows nothing changes: all earlier tests pass; the few that changed on purpose are named in the commit bodies.
+- **Credential file and queue** (`guard_events.py`): on Windows the home is `Path.home()` (not `HOME`); no mode checks, a link or junction is refused; no queue lock, `emit()` only appends one line and `flush` sends and keeps lines appended during the send.
+- **Hook entries:** UTF-8 output so a cp1252 console cannot turn a block reason into `GUARD_ERROR`; `CLAUDE_PROJECT_DIR` in Git Bash form is made native in both `project_root` copies; `SessionStart` does not warn about `core.hooksPath` on Windows and accepts the Windows managed file.
+- **`setup_guard.py` on Windows:** no git hooks, no `core.hooksPath`, a project set up on another OS keeps its hooks; `--check` tests Git Bash and `python3` there and exits 1 with the fix; `--credentials` writes the file and runs `icacls`; UTF-8 file I/O; `.gitattributes` lines on all OSes.
+- **`.gitattributes` finding:** the design listed three broad lines (`.claude/skills/**` and so on). The full install test showed the cost: BMAD's own CRLF files (for example `brain-methods.csv`) then show as modified, so the check "stock files unchanged" failed. The lines are now one per installed guard skill folder, the guard folder, and each override file. A real-git test covers both the clone with `core.autocrlf=true` and the stock file.
+- **Managed (built, unit-tested, not run on a machine):** `machine_base("win32")` is `C:/Program Files/ClaudeCode/bmad-guard`; `module/managed-settings/managed-settings.windows.json` (forward slashes, `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`); `install_machine.py` Windows branch (elevated terminal, no chmod or chown, `icacls` write-right check with "check by hand" for a list it cannot read, renames retried, `python3` tested in Git Bash).
+- **Tests and checks:** `tests/test_winpaths.py`, `tests/test_windows_guards.py`, `tests/test_windows_hooks.py`, `tests/test_powershell_guard.py`, `tests/test_setup_guard_windows.py`, `tests/test_install_machine_windows.py`, Windows cases in `tests/test_guard_events.py` and `tests/test_hook_wiring.py`. **Install test stage "Windows (static, simulated)" (W-I1 to W-I6)** and **red-team family "Windows paths" (WIN-1 to WIN-8, WIN-C1 to WIN-C3) plus PS-1 and PS-C1** pass; the report line says "simulated Windows flavour on macOS; not run on Windows".
+- **Manual check:** `docs/guides/windows-check.md` (11 steps, a results table). A `windows-latest` CI job runs only the Windows-safe tests (its own commit).
+- **Accepted and documented:** `cmd /c` and `powershell -c` from Bash (like `python -c`); 8.3 short names for files that do not exist yet; a junction in the setup link check; `python3` found by `PATH`; native `rd /s`, `del /s`, `Remove-Item -Recurse` through Git Bash; Defender start time (measured in the checklist).
+
+- [ ] **T9 manual check on a real Windows machine** (`docs/guides/windows-check.md`). Owner: one named BA, with Shameer. Not run.
+- [ ] **Questions for Manesh G (do not block):** which Python and which Git do the BAs have? Are there PowerShell-only machines (no Git for Windows)? Is `python3` the Microsoft Store stub on any machine?
+- [ ] **Phase 4 (Windows):** real PowerShell guards; an `msvcrt` queue lock; Windows Credential Manager for the key; guards for native Windows delete commands (`rd /s`, `del /s`, `Remove-Item -Recurse`); a PostToolUse scan; git hooks (L2) for Windows.
+
 ## Gate 3
 
 Phase 4 starts only when all of these are true:
@@ -292,7 +310,7 @@ Phase 4 starts only when all of these are true:
 - [ ] The managed-settings file is on at least one pilot machine, the rollout doc test passes, rollback is tested.
 - [ ] The Phase 2 "Managed settings rollout todos" each have an owner and a date, and the ones for this phase are closed.
 - [ ] The CI check fails a pull request that skipped the local hooks on one project in `enforce` mode; the default stays `off` (if T6 stays in the phase).
-- [ ] A BA on Windows runs the planning flow with the L1 guards (only if T9 exists).
+- [ ] A BA on Windows runs the planning flow with the L1 guards (T9 is built and simulated; the real-machine check `docs/guides/windows-check.md` is open).
 - [ ] `scripts/install_test.py` and `scripts/red_team.py` pass; the Phase 3 red-team report is committed.
 - [ ] A draft Phase 4 plan exists.
 
@@ -304,7 +322,7 @@ Phase 4 starts only when all of these are true:
 - [ ] **Pilot people and project** (D12). Owner: Shameer. Date: end of week 1 at the latest.
 - [ ] **Mac or Linux machine for a BA** (D11). Owner: Manesh G. Date: end of week 1. Decides whether T9 exists.
 - [ ] **PostToolUse scan** that warns after a write when a secret was built by a shell command at run time (pilot 1, finding B; the pre-commit hook catches it today). Owner: Shameer. Phase 4.
-- [ ] **Windows support** for BAs and PMs beyond L1 (git hooks, queue lock without `fcntl`, a Windows CI runner for the install test). BAs and PMs use Windows. Owner: Shameer. Phase 4 at the latest.
+- [ ] **Windows support** for BAs and PMs beyond L1 (git hooks, an `msvcrt` queue lock, real PowerShell guards, Credential Manager, native delete commands, the install test on a Windows runner). L1 itself is T9 (simulated; the manual check is open). Owner: Shameer. Phase 4 at the latest.
 - [ ] **Retention approved** by the compliance owner (D6). Owner: Shameer. Date: before Gate 3.
 - [ ] **IT contact** for hosting the stack (D6). Owner: Shameer. Date: before the hosting plan is final (T2).
 - [ ] **Trial run** of the clinic booking project (D15). Owner: Shameer. Date: before the pilot starts.
@@ -319,7 +337,7 @@ Phase 4 starts only when all of these are true:
 | A key on a laptop is read by the agent | File outside the repo, mode 600, `PATH_GUARD_CONFIG` block, red-team case; keychain later (ADR 0007) |
 | Managed settings block every project without the module (Phase 2 todo) | Pilot machines only until the machine-level location exists (T5) |
 | Pilot docs drift from the code | Docs in the repo, reviewed in PRs; T8 updates them; Gate 3 item |
-| BAs and PMs on Windows cannot join the pilot, so planning guards get no numbers | Mac or Linux for one BA (D11); else T9 |
+| BAs and PMs on Windows cannot join the pilot, so planning guards get no numbers | Mac or Linux for one BA (D11); else T9, which is built but **not run on a real Windows machine** (manual check open) |
 | Local Docker stack sees only one machine's events | Accepted for the pilot; the hosting plan is written in T2 (D4) |
 | CI differs per platform (ADR 0002) | GitHub first; reuse the hook code; off by default (D8, D9) |
 | Scope is large (4 weeks) | Cut T6 first, then the T7 rule todos (D2) |

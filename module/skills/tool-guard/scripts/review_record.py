@@ -127,7 +127,13 @@ def record_path(root: Path, key: str) -> Path:
 def head_sha(root: Path) -> str | None:
     """The commit the review points at: HEAD of the project, or None when there is none."""
     try:
-        out = subprocess.run(["git", "rev-parse", "--verify", "-q", "HEAD"], cwd=root, capture_output=True, text=True)
+        out = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+        )
     except OSError:
         return None
     sha = out.stdout.strip()

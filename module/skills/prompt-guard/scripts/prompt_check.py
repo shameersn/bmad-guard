@@ -228,13 +228,35 @@ def _guard_events():
     return module
 
 
+IS_WINDOWS = os.name == "nt"  # tests set it (ADR 0009)
+
+
+def _native(text: str) -> str:
+    """Windows only: a Git Bash path `/c/x` (also `/cygdrive/c/x`, `/mnt/c/x`) becomes `C:\\x`. A copy of
+    tool-guard/scripts/hook_common.py: this hook does not import it. A test keeps the two equal."""
+    match = re.match(r"^/(?:cygdrive/|mnt/)?([A-Za-z])(?:/(.*))?$", text, re.S) if IS_WINDOWS else None
+    return f"{match.group(1).upper()}:\\" + (match.group(2) or "").replace("/", "\\") if match else text
+
+
+def utf8_output() -> None:
+    """Write stdout and stderr as UTF-8 whatever the console code page is (cp1252 on Windows). A copy of
+    tool-guard/scripts/hook_common.py; a test keeps the two equal."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass  # a stream that cannot be reconfigured (a test, a closed pipe) is left as it is
+
+
 def project_root(cwd: Path | None = None) -> Path:
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
-        return Path(env)
+        return Path(_native(env))
     folder = cwd or Path.cwd()
     try:
-        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, text=True)
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=folder, capture_output=True, encoding="utf-8", errors="replace"
+        )
     except OSError:
         return folder
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else folder

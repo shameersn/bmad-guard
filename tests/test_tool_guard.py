@@ -102,8 +102,9 @@ class RunTests(unittest.TestCase):
                 "write_gate",
                 "content_scan",
                 "review_record",
+                "powershell_guard",
             ),
-        )  # T2 to T5 and T7 register their guards here
+        )  # T2 to T5, T7 and GUARD-3 T9 register their guards here
         self.assertEqual(self.run_call(CALL, [])[1], [])
         self.assertEqual(self.run_call(CALL, pt.load_guards())[1], [])
         self.assertEqual(
@@ -116,6 +117,7 @@ class RunTests(unittest.TestCase):
                 "write-gate",
                 "content-scan",
                 "review-record",
+                "powershell-guard",
             ],
         )
 

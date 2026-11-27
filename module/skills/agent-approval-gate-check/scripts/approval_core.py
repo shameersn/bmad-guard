@@ -121,7 +121,7 @@ def content_hash(text: str, mode: str) -> str:
 
 
 def git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, encoding="utf-8", errors="replace")
 
 
 def project_root_for(path: Path) -> Path:

@@ -15,8 +15,15 @@ Anything it cannot read (unclosed quote, nesting too deep) raises `ParseError`; 
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field, replace
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+import winpaths as wp  # noqa: E402 - sibling module, found through the line above
 
 MAX_DEPTH = 6  # nesting of $(...), sh -c, eval
 ASSIGN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
@@ -515,8 +522,9 @@ FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
 
 
 def base_name(text: str) -> str:
-    """`/bin/rm` -> `rm`, `rm.exe` -> `rm`."""
-    name = text.rstrip("/").rsplit("/", 1)[-1]
+    """`/bin/rm` -> `rm`, `rm.exe` -> `rm`. On Windows also `C:\\tools\\rm.exe` and `rm.` (the dots and spaces Windows
+    drops)."""
+    name = wp.name_of(text)
     return name[:-4] if name.lower().endswith(".exe") else name
 
 

@@ -617,5 +617,48 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rt.tool_version(["no-such-program-xyz", "--version"]), "missing")
 
 
+class WindowsFamilyTests(unittest.TestCase):
+    """The "Windows paths" family (GUARD-3 T9) runs the real PreToolUse scripts of the module in a child process with a
+    simulated Windows flavour. No BMAD and no network, so it runs here too. A simulation; not run on Windows."""
+
+    SCRIPTS = ROOT / "module/skills/tool-guard/scripts"
+
+    def observe(self, tool: str, tool_input: dict) -> tuple[str, list[str]]:
+        raw = json.dumps(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": tool,
+                "tool_input": tool_input,
+                "session_id": "s-test",
+                "cwd": rt.WIN_PROJECT,
+            }
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", rt.WIN_HOOK_DRIVER, str(self.SCRIPTS)], input=raw, capture_output=True, text=True
+        )
+        self.assertIn(proc.returncode, (0, 2), proc.stderr)
+        return ("block" if proc.returncode == 2 else "allow"), rt.rule_ids(proc.stderr)
+
+    def test_the_calls_cover_every_row_of_the_family(self):
+        family = {s.id for s in rt.SPECS if s.family.startswith("Windows paths")}
+        self.assertEqual(set(rt.windows_calls()), family)
+        self.assertEqual(len(family), 11)
+
+    def test_every_case_gets_its_expected_answer_and_rule_from_the_real_scripts(self):
+        for cid, calls in rt.windows_calls().items():
+            spec = rt.BY_ID[cid]
+            for tool, tool_input in calls:
+                with self.subTest(case=cid, tool=tool, path=tool_input.get("file_path") or tool_input.get("command")):
+                    actual, seen = self.observe(tool, tool_input)
+                    self.assertEqual(actual, spec.expected)
+                    self.assertEqual(rt.evaluate(spec, actual, seen)[0], rt.PASS)
+
+    def test_the_family_says_it_is_a_simulation(self):
+        family = next(s.family for s in rt.SPECS if s.id == "WIN-1")
+        self.assertIn("simulated", family)
+        self.assertIn("not run on Windows", family)
+        self.assertTrue(any("Simulated Windows flavour" in item for item in rt.NOT_COVERED))
+
+
 if __name__ == "__main__":
     unittest.main()

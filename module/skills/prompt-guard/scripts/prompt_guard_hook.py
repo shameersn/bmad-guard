@@ -132,6 +132,7 @@ def fail(err: Exception) -> None:
 
 
 def entry() -> int:
+    pc.utf8_output()
     try:
         return main()
     except Exception as err:  # a bug in the guard itself: the fail mode depends on the project (see top)

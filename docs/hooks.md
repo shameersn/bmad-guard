@@ -79,7 +79,7 @@ Verified (docs):
 - Only letters, digits, `_`, `-`, space, `,`, `|`: an exact name or a list, e.g. `Edit|Write`.
 - Anything else: an unanchored JavaScript regular expression, e.g. `^Notebook`, `mcp__memory__.*`.
 - On tool events the matcher filters `tool_name`. MCP tools are `mcp__<server>__<tool>`; a bare `mcp__memory` matches nothing.
-- Our `PreToolUse` matcher: `Bash|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit` (exact names). `MultiEdit` was added in T3 (section 11). A guard for another tool needs this string changed and the setup script re-run (`--check` reports the old one as out of date).
+- Our `PreToolUse` matcher: `Bash|PowerShell|Read|Grep|Glob|Write|Edit|MultiEdit|NotebookEdit` (exact names). `MultiEdit` was added in T3 (section 11) and `PowerShell` in GUARD-3 T9 (section 15). A guard for another tool needs this string changed and the setup script re-run (`--check` reports the old one as out of date).
 
 ## 5. Hook entry, timeouts
 
@@ -244,6 +244,16 @@ Rules, design choices and limits: `module/skills/tool-guard/references/guard-rul
 
 - **Verdict mapping.** BMAD's step 4 sets the story to `done` when all `decision-needed` and `patch` findings are resolved and no unresolved `high` or `medium` finding remains, and to `in-progress` otherwise. The override records `pass` for the first case and `fail` for the second. The workflow itself writes no verdict file (it writes findings into the story and updates `sprint-status.yaml`), so there is nothing else to read.
 - **Pre-push** reads git's pre-push input, and the review and build records from the pushed tree. It is plain Python in `module/hooks/` and does not use Claude Code.
+
+## 15. What GUARD-3 T9 builds (Windows, L1 only)
+
+Built and tested by simulation on a Mac (`os.path` as ntpath, a patched platform). **Nothing here has run on Windows.** The checklist is `docs/guides/windows-check.md`. Decisions and limits: ADR 0009.
+
+- **The PowerShell tool.** Claude Code has a `PowerShell` tool (`tool_name` `PowerShell`, `tool_input.command`). It is on by default for claude.ai accounts on Windows and opt-in on macOS and Linux (Claude Code docs; not verified here). It was not in our matcher, so it skipped every L1 guard. Now `PowerShell` is in the matcher and `powershell_guard.py` blocks every call with `PS_TOOL_UNSUPPORTED` (a guarded project only, every OS). The Windows managed template also sets `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`. Real PowerShell guards: Phase 4.
+- **Shell.** On Windows the Bash tool and the hook commands run in Git Bash. The hook command stays `python3 "..."`, so `python3` must resolve there (`python3.exe` next to `python.exe`).
+- **Paths.** `winpaths.py` makes one comparable form: Git Bash paths (`/c/x`, `/cygdrive/c/x`, `/mnt/c/x`) become `C:\x`, both separators, case folded, the `\\?\` prefix, `file::$DATA` and trailing dots or spaces removed, `$USERPROFILE`, `%USERPROFILE%`, `$env:USERPROFILE`, `$APPDATA`. A `\\.\` device path blocks (`PATH_DEVICE`). It does nothing when the platform is not Windows.
+- **Console.** Each hook entry sets stdout and stderr to UTF-8 first, so a block reason with a non-ASCII name cannot raise inside the fail-closed handler. git output is read as UTF-8.
+- **Not verified without a machine (VERIFY in windows-check.md):** the form of `cwd`, `file_path` and `CLAUDE_PROJECT_DIR` in the hook input; the value of `HOME` in Git Bash; whether a `PowerShell` call reaches `PreToolUse` with that `tool_name`; the start time of a hook under Defender.
 
 ## Open checks (to close in T2 or the pilot)
 

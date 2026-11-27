@@ -17,3 +17,5 @@ ignore = [
 "deploy/collector/run_live_tests.py" = ["S104", "S310", "S608"]
 # Live check for T4: fixed local URLs, a fake token shape from random, SQL on its own fake ids, long SQL strings.
 "deploy/collector/run_telemetry_live.py" = ["E501", "S310", "S311", "S608"]
+# Tests of the Windows path helper: "/tmp" is the Git Bash name it must translate, not a file the test uses.
+"tests/test_winpaths.py" = ["S108"]

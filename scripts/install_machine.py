@@ -9,6 +9,7 @@ not block every tool call. Default folder (a sibling of the managed settings fil
 
     macOS            /Library/Application Support/ClaudeCode/bmad-guard/
     Linux and WSL    /etc/claude-code/bmad-guard/
+    Windows          C:/Program Files/ClaudeCode/bmad-guard/   (built and unit-tested; not run on a real machine)
 
 What goes in (the same `skills/<skill>/scripts` layout as a project, because the hooks load sibling skills by a path
 relative to their own file):
@@ -30,7 +31,7 @@ Usage:
     python3 scripts/install_machine.py [--target DIR] [--version V] [--dry-run]       install or update
     python3 scripts/install_machine.py [--target DIR] --check                         is the folder right and safe?
     python3 scripts/install_machine.py [--target DIR] [--dry-run] --uninstall [--force]
-    python3 scripts/install_machine.py [--target DIR] --print-template [macos|linux]   the managed settings file
+    python3 scripts/install_machine.py [--target DIR] --print-template [macos|linux|windows]   the managed settings file
 
 `--target` is for tests (a temp folder: no root needed; the folder is then yours, which --check reports as unsafe unless
 `--expect-owner` says so) and for a site that keeps the folder elsewhere (then also `--managed-dir`). The version is
@@ -40,6 +41,12 @@ Usage:
 are owned by root (or `--expect-owner`) and not writable by anyone else; the folder matches this module; `python3` is
 3.10 or later; and, when a managed file is found, its hook commands (and `otelHeadersHelper`) point into this folder.
 Exit codes: 0 fine, 1 a problem, 2 the script could not run (bad arguments, no rights, a folder that is not ours).
+
+Windows (GUARD-3 T9, ADR 0009; simulated in tests, not run on a real machine): run from an elevated (Administrator)
+terminal. There are no owners or mode bits to set: no chmod, no chown. `--check` runs `icacls <folder>` and reports any
+write right (F, M, W, WD, AD) for Users, Everyone or Authenticated Users (English names); an access list it cannot read
+is a note, "check by hand". `python3` is tested in Git Bash, as for the hooks. The renames are retried a few times
+(a virus scanner can hold the new files for a moment). The hook commands use forward slashes (`C:/Program Files/...`).
 """
 
 from __future__ import annotations
@@ -49,10 +56,13 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -66,14 +76,54 @@ SKILLS = ("tool-guard", "prompt-guard", "ready-for-dev-gate", "agent-project-log
 TOP_FILES = ("otel_headers.py", "guard_events.py")
 TOP_FILES_SKILL = "agent-project-logger"
 VERSION_NAME, MANIFEST_NAME = "VERSION", "manifest.json"
-PLATFORM_NAMES = {"macos": "darwin", "linux": "linux"}
+PLATFORM_NAMES = {"macos": "darwin", "linux": "linux", "windows": "win32"}
 FILE_MODE, DIR_MODE = 0o644, 0o755
 MIN_PYTHON = (3, 10)
+WRITE_RIGHTS = {"F", "M", "W", "WD", "AD"}  # icacls: full, modify, write, write data, append data
+OPEN_PRINCIPALS = {"users", "everyone", "authenticated users"}  # who must not have them (English names)
+ACE_RE = re.compile(r"(?P<who>[^:\s][^:]*?):(?P<rights>(?:\([^()\n]*\))+)\s*$")
 SHOW = 6  # problems of one kind listed before "(+N more)"
 
 
 class InstallError(Exception):
     """The script cannot go on (bad arguments, no rights, a folder that is not ours). Exit 2."""
+
+
+def on_windows() -> bool:
+    return sg.on_windows()  # sys.platform == "win32"; tests patch it
+
+
+def is_admin() -> bool:
+    """Windows: the shell is elevated (Administrator). False when it cannot be told."""
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, ImportError, OSError):
+        return False
+
+
+def privileged() -> bool:
+    """Root on POSIX, an elevated shell on Windows: the user who may own the machine folder."""
+    return is_admin() if on_windows() else os.geteuid() == 0
+
+
+def euid() -> int:
+    """The user id to compare owners with. Windows has no uid and no owner check here (ACLs): 0."""
+    return 0 if on_windows() else os.geteuid()
+
+
+def rename_retry(src: Path, dst: Path, tries: int = 5, delay: float = 0.3) -> None:
+    """os.rename. On Windows a virus scanner or indexer can hold the new files for a moment: try a few times."""
+    attempts = tries if on_windows() else 1
+    for attempt in range(attempts):
+        try:
+            os.rename(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
 
 
 @dataclass
@@ -187,6 +237,14 @@ def nearest_existing(path: Path) -> Path:
 
 def need_rights(target: Path) -> InstallError | None:
     folder = nearest_existing(target.parent)
+    if on_windows():  # os.access cannot tell on Windows: try to make a file there
+        try:
+            with tempfile.TemporaryFile(dir=folder):
+                return None
+        except OSError:
+            return InstallError(
+                f"no rights to write under {folder}. Run this from an elevated terminal (Run as administrator)."
+            )
     if os.access(folder, os.W_OK | os.X_OK):
         return None
     return InstallError(
@@ -258,8 +316,43 @@ def content_problems(target: Path, manifest: dict) -> list[str]:
     return problems
 
 
+def acl_write_problems(text: str, folder: str) -> list[str] | None:
+    """What `icacls <folder>` prints, read for write rights (F, M, W, WD, AD) of Users, Everyone or Authenticated Users.
+    A deny entry does not count. Returns the offending entries, or None when no entry could be read."""
+    seen, found = 0, []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.lower().startswith(folder.lower()):
+            line = line[len(folder) :].strip()  # the first line starts with the folder name we passed
+        match = ACE_RE.search(line)
+        if match is None:
+            continue
+        seen += 1
+        who, rights = match.group("who").strip(), match.group("rights")
+        tokens = {t.strip().upper() for group in re.findall(r"\(([^()]*)\)", rights) for t in group.split(",")}
+        if who.split("\\")[-1].lower() in OPEN_PRINCIPALS and "DENY" not in tokens and tokens & WRITE_RIGHTS:
+            found.append(f"{who} {rights}")
+    return found if seen else None
+
+
+def windows_safety_problems(target: Path) -> tuple[list[str], list[str]]:
+    """(problems, notes) for a Windows folder: write rights for Users and friends, from `icacls`."""
+    try:
+        out = subprocess.run(["icacls", str(target)], capture_output=True, errors="replace", text=True, timeout=30)
+        found = acl_write_problems(out.stdout, str(target)) if out.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        found = None
+    if found is None:
+        note = f"note     could not read the access list of {target} (icacls): check it by hand; Users must not write"
+        return [], [note]
+    return ([f"write access for {_more(found)} on {target}"] if found else []), []
+
+
 def safety_problems(target: Path, expect_uid: int) -> list[str]:
-    """Owner and modes. The folder is safe only when `expect_uid` (root) owns every entry and nobody else can write."""
+    """Owner and modes. The folder is safe only when `expect_uid` (root) owns every entry and nobody else can write.
+    On Windows: no write rights for Users, Everyone or Authenticated Users on the folder (files inherit from it)."""
+    if on_windows():
+        return windows_safety_problems(target)[0]
     wrong_owner, open_mode, links = [], [], []
     entries = [target]
     for dirpath, dirnames, filenames in os.walk(target, followlinks=False):
@@ -290,7 +383,15 @@ def safety_problems(target: Path, expect_uid: int) -> list[str]:
 
 def python_problem() -> str | None:
     """`python3` as the user who runs the check sees it: the hooks start `python3`. Under 3.10 the fail-closed entries
-    would block every project."""
+    would block every project. On Windows the hooks run in Git Bash, so it is tested there (setup_guard)."""
+    if on_windows():
+        lines, ok = sg.windows_report()
+        if ok:
+            return None
+        problem = next(
+            (line for line in lines if line.startswith("problem")), "problem  Git Bash or python3 is not usable"
+        )
+        return problem.removeprefix("problem").strip()
     try:
         out = subprocess.run(
             ["python3", "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
@@ -338,7 +439,7 @@ def managed_problems(managed: Path | None, target: Path, wiring) -> tuple[list[s
         return [f"managed settings in {managed}: {err}"], False
     if not found:
         return [], False
-    base = str(target)
+    base = target.as_posix()  # the hook command has forward slashes, also on Windows
     ours = [c for c in commands if any(m in c for m in wiring.MARKERS)]
     wanted = {wiring.command(skill, script, base) for _e, _m, skill, script, _x in wiring.HOOKS}
     points_here = any(c in wanted for c in ours) or any(f'"{base}/' in c for c in [*ours, *helpers])
@@ -359,7 +460,7 @@ def managed_problems(managed: Path | None, target: Path, wiring) -> tuple[list[s
 
 
 def _chown_root(path: Path) -> None:
-    if os.geteuid() == 0:
+    if not on_windows() and os.geteuid() == 0:
         os.lchown(path, 0, 0)
 
 
@@ -372,15 +473,16 @@ def stage_folder(plan: Plan, staging: Path) -> None:
         shutil.copyfile(src, dest)
     (staging / VERSION_NAME).write_bytes(plan.version_bytes())
     (staging / MANIFEST_NAME).write_text(manifest_text(plan), encoding="utf-8")
-    for dirpath, dirnames, filenames in os.walk(staging):
-        for name in dirnames:
-            (Path(dirpath) / name).chmod(DIR_MODE)
-            _chown_root(Path(dirpath) / name)
-        for name in filenames:
-            (Path(dirpath) / name).chmod(FILE_MODE)
-            _chown_root(Path(dirpath) / name)
-    staging.chmod(DIR_MODE)
-    _chown_root(staging)
+    if not on_windows():  # no modes and no owner to set on Windows: the folder's ACL decides
+        for dirpath, dirnames, filenames in os.walk(staging):
+            for name in dirnames:
+                (Path(dirpath) / name).chmod(DIR_MODE)
+                _chown_root(Path(dirpath) / name)
+            for name in filenames:
+                (Path(dirpath) / name).chmod(FILE_MODE)
+                _chown_root(Path(dirpath) / name)
+        staging.chmod(DIR_MODE)
+        _chown_root(staging)
     bad = [rel for rel, digest in plan.hashes.items() if _hash_of(staging / rel) != digest]
     if bad:
         raise InstallError(f"the staged copy does not match the module ({_more(bad)}); nothing was changed")
@@ -404,7 +506,7 @@ def current_state(target: Path, plan: Plan) -> str:
     if target.is_symlink() or not target.is_dir() or manifest is None:
         return "foreign"
     same = manifest["version"] == plan.version and manifest["files"] == plan.hashes
-    if same and not content_problems(target, manifest) and not safety_problems(target, os.geteuid()):
+    if same and not content_problems(target, manifest) and not safety_problems(target, euid()):
         return "same"
     return "differs"
 
@@ -425,27 +527,28 @@ def install(plan: Plan, target: Path, dry_run: bool) -> list[str]:
     lines.append(f"{verb} {target} with {len(plan.hashes) + 1} file(s) (copy to {target.name}.new, then rename)")
     if rights is not None:
         lines.append(f"warning: no rights to write under {nearest_existing(target.parent)}; a real run would stop here")
-    if os.geteuid() != 0:
+    if not privileged():
+        who = "an elevated terminal (Administrator)" if on_windows() else "root"
         lines.append(
-            "warning: not running as root, so the files will be owned by you and you can edit them. Fine for a test "
-            "folder; on a real machine run this as root."
+            f"warning: not running as {who}, so the files will be owned by you and you can edit them. Fine for a "
+            f"test folder; on a real machine run this as {who}."
         )
     if dry_run:
         return [*lines, "dry run: nothing changed"]
     staging, old = target.with_name(target.name + ".new"), target.with_name(target.name + ".old")
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists() and old.is_dir() and (old / MANIFEST_NAME).is_file():
-        os.rename(old, target)  # an earlier run stopped between its two renames: put the old folder back first
+        rename_retry(old, target)  # an earlier run stopped between its two renames: put the old folder back first
     remove_ours(staging)
     remove_ours(old)
     stage_folder(plan, staging)
     try:
         if target.exists():
-            os.rename(target, old)
-        os.rename(staging, target)
+            rename_retry(target, old)
+        rename_retry(staging, target)
     except OSError:
         if old.exists() and not target.exists():
-            os.rename(old, target)
+            rename_retry(old, target)
         raise
     remove_ours(old)
     return [*lines, "done"]
@@ -473,7 +576,12 @@ def check(plan: Plan | None, target: Path, managed: Path | None, wiring, expect_
         unsafe = safety_problems(target, expect_uid)
         for text in unsafe:
             report(False, text)
-        if not unsafe:
+        if on_windows():
+            notes = [] if unsafe else windows_safety_problems(target)[1]
+            lines.extend(notes)
+            if not unsafe and not notes:
+                report(True, "Users, Everyone and Authenticated Users have no write access (icacls)")
+        elif not unsafe:
             report(True, f"owned by uid {expect_uid}, not writable by anyone else")
         if plan is not None:
             if manifest["version"] != plan.version:
@@ -570,7 +678,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         nargs="?",
         const="current",
         choices=["current", *PLATFORM_NAMES],
-        metavar="macos|linux",
+        metavar="macos|linux|windows",
         help="print the managed settings file for this folder and exit",
     )
     args = parser.parse_args(argv)
@@ -585,13 +693,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     module_dir = args.module.resolve()
     try:
-        if sys.platform == "win32" and args.print_template is None:
-            raise InstallError("Windows is not supported yet (Phase 3 decision D10)")
         wiring = load_hook_wiring(module_dir)
         if args.print_template is not None:
             platform = sys.platform if args.print_template == "current" else PLATFORM_NAMES[args.print_template]
-            base = os.path.abspath(args.target) if args.target is not None else str(default_target(wiring, platform))
-            print(wiring.render(wiring.managed_settings(base)), end="")
+            base = (
+                Path(os.path.abspath(args.target)).as_posix()
+                if args.target is not None
+                else default_target(wiring, platform).as_posix()
+            )
+            print(wiring.render(wiring.managed_settings(base, windows=platform == "win32")), end="")
             return 0
         target, managed = resolve_places(args, wiring)
         refuse_project_places(target, module_dir)

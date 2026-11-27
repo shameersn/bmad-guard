@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Ticket | GUARD-3, T0 (pilot pack) |
-| For | BAs, PMs, POs and architects who write and approve the brief, PRD, FRDs, architecture and stories |
-| Before you read | [Install guide](install.md). Windows is not supported yet: use a Mac or Linux machine for the pilot. |
+| For | BAs, PMs and architects who write the brief, PRD, architecture and stories |
+| Before you read | [Install guide](install.md). On Windows you need Git for Windows and a working `python3`. Windows support is built but **not run on a real machine yet** ([windows-check.md](windows-check.md)); a Mac or Linux machine is still the safe choice for the pilot. |
 | Formats | [ready-for-dev-markup.md](../ready-for-dev-markup.md) (questions, assumptions, answers) |
 | All rules | [guard-rules.md](../../module/skills/tool-guard/references/guard-rules.md) |
 

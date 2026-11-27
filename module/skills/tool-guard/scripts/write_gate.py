@@ -63,6 +63,7 @@ import document_text as dt  # noqa: E402
 import guard_config as gc  # noqa: E402
 import hook_common as hc  # noqa: E402
 import shell_parse as sp  # noqa: E402
+import winpaths as wp  # noqa: E402
 
 GUARD = "write-gate"
 TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit", "Bash")
@@ -454,8 +455,7 @@ class Paths:
 
     def __init__(self, payload: dict, root: Path):
         self.root = Path(os.path.realpath(root))
-        cwd = payload.get("cwd")
-        self.cwd = Path(os.path.realpath(cwd if isinstance(cwd, str) and cwd and Path(cwd).is_absolute() else root))
+        self.cwd = Path(os.path.realpath(wp.start_dir(payload.get("cwd"), root)))
         self.home = os.path.realpath(Path.home())
         try:
             rules = gc.load(root)
@@ -472,12 +472,13 @@ class Paths:
     def gated(self, path: str, cwd: str | None = None, folder: bool = False) -> bool:
         """True when a write to this path (absolute, or relative to `cwd`) needs the gate. `folder`: the path is the
         folder part of a wildcard, so a file inside it is written (the project root itself is then gated)."""
-        real = os.path.realpath(os.path.join(cwd or self.cwd, path))
-        if real == str(self.root):
+        real = os.path.normcase(os.path.realpath(os.path.join(cwd or self.cwd, wp.clean(path))))
+        root = os.path.normcase(str(self.root))
+        if real == root:
             return folder
-        if not real.startswith(str(self.root) + os.sep):
+        if not real.startswith(root + os.path.sep):
             return False  # outside the project (path-guard and the document guard still look at it)
-        parts = tuple(p for p in real[len(str(self.root)) :].split(os.sep) if p)
+        parts = tuple(p for p in real[len(root) :].split(os.path.sep) if p)
         if self._allowed(parts):
             return False
         return not self.ctx.in_scratch(sp.Word(real))
@@ -490,12 +491,14 @@ class Paths:
             text = self.home + text[text.index("/") :]
         elif text == "~" or text.startswith("~/"):
             text = self.home + text[1:]
+        if wp.IS_WINDOWS:  # `~\`, `$USERPROFILE`, `%USERPROFILE%`, `$env:USERPROFILE`, `$APPDATA`
+            text = wp.expand_home(text, self.home)
         if not text or text.startswith(("~", "$", "`")):
             return False
         cut = min((text.index(c) for c in "$`*?[" if c in text), default=-1)
         if cut >= 0:
-            text = text[:cut].rpartition("/")[0] or ("/" if text.startswith("/") else ".")
-        if text == "/dev" or text.startswith("/dev/"):
+            text = wp.split_last(text[:cut])[0] or ("/" if text.startswith(tuple(wp.seps())) else ".")
+        if text == "/dev" or text.startswith("/dev/") or wp.is_null_device(text):
             return False
         return self.gated(text, cwd, folder=cut >= 0)
 
@@ -508,7 +511,9 @@ def _cd_target(inv: sp.Invocation, cwd: str | None, paths: Paths) -> str | None:
     if word.dynamic or "$" in word.text or word.text == "-" or cwd is None:
         return None
     text = paths.home + word.text[1:] if word.text == "~" or word.text.startswith("~/") else word.text
-    return os.path.realpath(os.path.join(cwd, text))
+    if wp.IS_WINDOWS:
+        text = wp.expand_home(text, paths.home)  # `~\`
+    return os.path.realpath(os.path.join(cwd, wp.clean(text)))
 
 
 def write_targets(inv: sp.Invocation, cwd: str) -> list[tuple[sp.Word, str]]:
@@ -539,7 +544,7 @@ def bash_gated(command: str, paths: Paths) -> bool:
         if name == "find" or (name == "git" and sp.git_split(inv.args)[1] in ("checkout", "restore")):
             continue  # not writes by name: `git checkout main`, `find . -exec ...`
         for word, _ in write_targets(inv, cwd or str(paths.cwd)):
-            if cwd is None and not word.text.startswith(("/", "~", "$HOME", "${HOME}")):
+            if cwd is None and not (word.text.startswith(("/", "~", "$HOME", "${HOME}")) or wp.anchored(word.text)):
                 continue
             if paths.target_gated(word, cwd or str(paths.cwd)):
                 return True
@@ -558,6 +563,8 @@ def gated(payload: dict, root: Path) -> bool:
     text = target.strip()
     if text == "~" or text.startswith("~/"):
         text = paths.home + text[1:]
+    if wp.IS_WINDOWS:
+        text = wp.expand_home(text, paths.home)
     return paths.gated(text)
 
 
