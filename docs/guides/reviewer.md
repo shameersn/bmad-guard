@@ -30,6 +30,7 @@ Ask Claude to run `bmad-code-review`. The Guarded BMAD override adds these rules
 - Review in a fresh session. If this session also wrote the code, the skill says so and recommends a restart.
 - Use the severity levels: CRITICAL, HIGH, MEDIUM, LOW (the meaning of each is in `_bmad/custom/bmad-code-review.toml`).
 - List every changed file from `git diff` and compare it with the plan's "Impacted Modules & Files". A file outside the plan is a finding.
+- For a thin story (`requirements` in its front matter), review the code against the FRD, not against the story: the skill reads the acceptance criteria and key transactions of the story's FR ids from the FRD (`frd_parse.py`). Each finding names the FR id and the criterion number (for example FR-F001-02 criterion 3). A criterion with no code and no test is a finding. If the FRD cannot be read, the review says the FRD check was not done and lowers its confidence. A technical story has no FRD check: review it against the architecture section it names.
 - Score the review's own confidence (how complete this review was, not how good the code is).
 
 ### 3. The record

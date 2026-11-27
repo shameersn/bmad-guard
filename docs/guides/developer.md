@@ -43,11 +43,11 @@ A blocked prompt is not sent to the model. Claude Code still shows `Original pro
 
 ### 1. Start from a ready story
 
-The story must be ready for development, or the write gate blocks (`GATE_READY_*`). The BA owns this: no open question, no open assumption, a who-and-when on every answer, confidence 80 or more, an epic summary. A story built from a PRD feature has `feature: F-<nnn>` in its front matter; that feature's FRD (`_bmad-output/planning-artifacts/frds/F-<nnn>/frd.md`) must also be approved and have nothing open, or the gate blocks with `GATE_READY_FRD_UNAPPROVED` or `GATE_READY_FRD_OPEN_ITEMS` and `bmad-build` stops at Sentry. Never remove `feature` to get past it. See the [BA / PM guide](ba-pm.md). If you get `GATE_READY_OPEN_QUESTIONS`, ask the BA. Do not edit the story's questions yourself to pass the gate.
+The story must be ready for development, or the write gate blocks (`GATE_READY_*`). The BA owns this: no open question, no open assumption, a who-and-when on every answer, confidence 80 or more, an epic summary. A story built from a PRD feature has `feature: F-<nnn>` in its front matter; that feature's FRD (`_bmad-output/planning-artifacts/frds/F-<nnn>/frd.md`) must also be approved and have nothing open, or the gate blocks with `GATE_READY_FRD_UNAPPROVED` or `GATE_READY_FRD_OPEN_ITEMS` and `bmad-build` stops at Sentry. Never remove `feature` to get past it. A story from Sloane is **thin**: it has `requirements: [FR-F001-02]` (the FR ids it delivers) and no acceptance criteria. If an id is not in the FRD, the gate blocks with `GATE_READY_STORY_FR_UNKNOWN` (or `GATE_READY_STORY_FR_OTHER_FEATURE` for another feature's id): ask the BA to fix the story with Sloane or the FRD with Fenn. A setup story from the architecture has `gate: technical` and needs the architecture approved and unchanged (`GATE_READY_ARCH_UNAPPROVED`). See the [BA / PM guide](ba-pm.md). If you get `GATE_READY_OPEN_QUESTIONS`, ask the BA. Do not edit the story's questions yourself to pass the gate.
 
 ### 2. Plan, then approve
 
-1. Run `bmad-build` on the story. It writes the plan: `_bmad-output/implementation-artifacts/spec-<slug>.md`.
+1. Run `bmad-build` on the story. It writes the plan: `_bmad-output/implementation-artifacts/spec-<slug>.md`. For a thin story, the plan reads the acceptance criteria from the FRD by FR id (the same `frd_parse.py` reading the gate uses) and names the FR ids in its Scope Summary. If it cannot read them, it stops and shows why. A technical story takes its criteria from the architecture section it names.
 2. Read the **whole plan**. Warden asks two separate questions: do you approve it, and have you read the plan itself. Answer each one on its own. "Looks good" once does not count for both.
 3. After approval `bmad-build` sets the plan to `ready-for-dev`. When coding starts (BMAD step 3) the plan becomes `in-progress`, and `bmad-build` runs the write gate check before the first code change. You can run it yourself:
 
@@ -72,6 +72,10 @@ The story must be ready for development, or the write gate blocks (`GATE_READY_*
 | `GATE_MANY_ACTIVE_PLANS` | Two plans are in progress. | Finish or set aside one. |
 | `GATE_STORY_NOT_FOUND` | The plan's `story` field points at no file, or at many. | Fix the `story` field. |
 | `GATE_READY_<CODE>` | The story is not ready (open questions, low confidence, ...). | Ask the BA. |
+| `GATE_READY_STORY_FR_UNKNOWN` | An FR id in the story's `requirements` is not in its FRD (unknown, *Withdrawn*, or a criterion number the FR does not have). | Ask the BA to fix the story with Sloane, or the FRD with Fenn. |
+| `GATE_READY_STORY_FR_OTHER_FEATURE` | An FR id in `requirements` belongs to another feature. | Ask the BA to fix the story. |
+| `GATE_READY_ARCH_UNAPPROVED` | A `gate: technical` story, and the architecture is not approved or was edited after approval. | Ask the architect to approve it again with Warden. |
+| `GATE_READY_TECHNICAL_STORY_INVALID` | A `gate: technical` story names a feature or has `requirements`. | Ask the BA to fix the story. Do not remove the marker or the feature yourself. |
 | `GATE_RECORD_FAILED` | The build record could not be written. | Check the folder `_bmad-output/guard/`. |
 
 ### 4. The build record
