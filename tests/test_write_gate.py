@@ -481,6 +481,37 @@ class ThinStoryTests(GateCase):
         self.assertIn("FR-F001-09", reasons[0].reason)
         self.assertIn("F001-02", reasons[0].reason)
 
+    def reason_text(self) -> str:
+        reasons = self.call("Write", {"file_path": str(self.project / "src/app.py"), "content": "x\n"})[1]
+        return " ".join(r.reason for r in reasons if r.code.startswith("GATE_READY_"))
+
+    def test_each_thin_story_reason_gives_its_own_next_step(self):
+        old_next = "A person answers questions and resolves assumptions"
+        self.sub(FEATURE_STORY_REL, "[FR-F001-02]", "[FR-F001-09]")
+        text = self.reason_text()
+        self.assertIn("Sloane", text)
+        self.assertNotIn(old_next, text)
+        self.sub(FEATURE_STORY_REL, "[FR-F001-09]", "[FR-F002-01]")
+        self.assertIn("Sloane", self.reason_text())
+        self.sub(FEATURE_STORY_REL, "[FR-F002-01]", "[FR-F001-02]")
+        self.sub(FRD_REL, "approval_status: approved", "approval_status: draft")
+        text = self.reason_text()
+        self.assertIn("agent-approval-grant (Warden) approves the FRD", text)
+        self.assertNotIn(old_next, text)
+
+    def test_technical_story_reasons_give_their_own_next_step(self):
+        old_next = "A person answers questions and resolves assumptions"
+        self.plan_for("T-01")
+        text = self.reason_text()
+        self.assertIn("agent-approval-grant (Warden) approves the architecture", text)
+        self.assertNotIn(old_next, text)
+        self.approve_architecture()
+        self.plan_for("F001-02")
+        self.sub(FEATURE_STORY_REL, "depends_on: none", "depends_on: none\ngate: technical")
+        text = self.reason_text()
+        self.assertIn("gate: technical", text)
+        self.assertNotIn(old_next, text)
+
     def test_a_technical_story_id_finds_the_story_and_needs_the_architecture(self):
         self.plan_for("T-01")
         self.assertEqual(self.source(), ["GATE_READY_ARCH_UNAPPROVED"])

@@ -92,6 +92,27 @@ READY_NEXT = (
     "A person answers questions and resolves assumptions (a Resolved: line with name and date). "
     "Do not edit them, or the gate marker, to pass."
 )
+# Reasons a person does not fix by answering questions in the story (ADR 0010). Others get READY_NEXT.
+READY_NEXT_BY_CODE = {
+    "FRD_UNAPPROVED": "agent-approval-grant (Warden) approves the FRD. Do not edit its approval fields to pass.",
+    "FRD_OPEN_ITEMS": (
+        "A person answers the questions and resolves the assumptions in the FRD with experion-frd (Fenn), "
+        "then it is approved again with agent-approval-grant (Warden). Do not edit them to pass."
+    ),
+    "STORY_FR_UNKNOWN": (
+        "Fix the story's `requirements` with Sloane (experion-story-slicer), or the FRD with experion-frd (Fenn)."
+    ),
+    "STORY_FR_OTHER_FEATURE": (
+        "Fix the story's `requirements` with Sloane (experion-story-slicer): a story names only FRs of its own feature."
+    ),
+    "ARCH_UNAPPROVED": (
+        "agent-approval-grant (Warden) approves the architecture again. Do not edit the approval state to pass."
+    ),
+    "TECHNICAL_STORY_INVALID": (
+        "A `gate: technical` story has no feature and no requirements; "
+        "fix the story with Sloane (experion-story-slicer). Do not add the marker to a feature story to pass."
+    ),
+}
 CONSOLE = "tool-guard write gate"
 
 
@@ -313,7 +334,11 @@ def story_reasons(root: Path, story: Path) -> list[hc.Verdict]:
     except rfd.GateError as err:
         return [verdict(f"GATE_READY_{err.code}", f"The story {rel} cannot be checked: {err.detail}.")]
     return [
-        verdict(f"GATE_READY_{r['code']}", f"The story {rel} is not ready for development: {r['detail']}. {READY_NEXT}")
+        verdict(
+            f"GATE_READY_{r['code']}",
+            f"The story {rel} is not ready for development: {r['detail']}. "
+            f"{READY_NEXT_BY_CODE.get(r['code'], READY_NEXT)}",
+        )
         for r in result["reasons"]
     ]
 
