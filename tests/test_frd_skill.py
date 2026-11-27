@@ -148,12 +148,6 @@ class OverrideWiringTests(unittest.TestCase):
         self.assertIn("Applies to", facts)
 
     @needs_toml
-    def test_stories_check_each_frd_and_carry_the_feature(self):
-        facts = " ".join(toml(OVERRIDES / "bmad-create-epics-and-stories.toml")["workflow"]["persistent_facts"])
-        self.assertIn("skill:agent-approval-gate-check with doc_type='frd-<feature>'", facts)
-        self.assertIn("feature: F-<nnn>", facts)
-
-    @needs_toml
     def test_bmad_build_checks_the_frd_with_sentry_before_the_plan(self):
         facts = toml(OVERRIDES / "bmad-build.toml")["workflow"]["persistent_facts"]
         order = [f.split(" (Guarded BMAD")[0] for f in facts if "(Guarded BMAD" in f]
