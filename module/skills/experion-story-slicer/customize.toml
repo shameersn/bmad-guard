@@ -1,0 +1,18 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for experion-story-slicer.
+# Work in progress: T3 of docs/plans/adr-0010-thin-stories.md replaces this file. For now the skill only ships
+# scripts/story_coverage.py.
+
+[agent]
+
+code = "experion-story-slicer"
+name = "Sloane"
+title = "Story Slicer"
+icon = "🍰"
+description = "Work in progress. Ships the story coverage check; the slicing flow comes with T3."
+agent_type = "stateless"   # stateless | memory | autonomous
+
+activation_steps_prepend = []
+activation_steps_append = []
+persistent_facts = []
